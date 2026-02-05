@@ -1,0 +1,32 @@
+# Virtual environments (DON'T COMMIT - 10k+ files)
+venv/
+.venv/
+env/
+.env
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Output files (regenerated each run)
+output/*.csv
+output/.checkpoint.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Playwright browsers (downloaded separately)
+.playwright/

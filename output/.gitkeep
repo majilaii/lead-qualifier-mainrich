@@ -1,0 +1,6 @@
+# Output directory for Lead Qualifier results
+# Files generated here:
+# - qualified_hot_leads.csv (Score 8-10)
+# - review_manual_check.csv (Score 4-7)
+# - rejected_with_reasons.csv (Score 1-3)
+# - .checkpoint.json (resume progress)
