@@ -1,6 +1,18 @@
 """
-Deep Research Module - Enhanced analysis for high-potential leads
-Scrapes multiple pages, extracts product details, identifies specific needs
+Deep Research Module — Sales Intelligence for Hot Leads
+
+For leads scoring 8+, this module crawls multiple pages on their site
+(/products, /solutions, /technology, /about) and generates a sales brief:
+
+  - Products they manufacture
+  - Motor types they use (BLDC, stepper, servo)
+  - Magnet requirements (NdFeB, SmCo, Halbach)
+  - Company size & production volume estimates
+  - Decision-maker titles to target
+  - Suggested pitch angle & talking points
+
+Usage:
+  python deep_research.py "Maxon Group" "https://www.maxongroup.com"
 """
 
 import asyncio

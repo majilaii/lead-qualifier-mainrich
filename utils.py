@@ -1,6 +1,13 @@
 """
-Utility Functions for Lead Qualifier
-Checkpointing, cost tracking, and helpers
+Utility Functions
+
+Helpers used across the pipeline:
+  - CheckpointManager: Save/resume progress so you can stop and restart
+  - OutputWriter: Writes processed leads to the correct CSV by score tier
+  - CostTracker: Tracks LLM token usage and estimates API spend
+  - determine_tier(score): Maps score → hot/review/rejected
+  - extract_domain(url): Cleans URLs to bare domain
+  - dedupe_by_domain(leads): Removes duplicate companies
 """
 
 import json

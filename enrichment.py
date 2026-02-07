@@ -1,7 +1,17 @@
 """
-Enrichment Module - Contact Information Lookup
-Currently configured for MANUAL workflow (no API costs)
-APIs can be enabled when pipeline is proven
+Enrichment Module — Contact Information Lookup
+
+Two modes:
+  - MANUAL (default): Returns empty result — you look up contacts yourself
+  - API: Uses Apollo.io and/or Hunter.io to find emails + phone numbers
+
+Manual mode is the default to avoid API costs while the pipeline is
+being tested. Enable API mode by setting enable_api_enrichment=True
+or by passing --auto-enrich to main.py.
+
+Supported enrichment APIs:
+  - Apollo.io: Email + phone + job title (50 free credits/month)
+  - Hunter.io: Email finder (25 free searches/month)
 """
 
 from typing import Optional

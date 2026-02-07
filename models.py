@@ -1,6 +1,13 @@
 """
-Pydantic Models for Lead Qualifier
-Structured data validation and LLM output schemas
+Pydantic Data Models
+
+All structured data types used throughout the pipeline:
+  - LeadInput: Raw lead from CSV (company_name, website_url, etc.)
+  - CrawlResult: Output from web scraper (markdown, screenshot, etc.)
+  - QualificationResult: LLM scoring output (score, reasoning, signals)
+  - EnrichmentResult: Contact lookup data (email, phone, title)
+  - ProcessedLead: Final combined result written to output CSV
+  - ProcessingStats: Run statistics (counts, costs)
 """
 
 from pydantic import BaseModel, Field

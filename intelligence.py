@@ -1,6 +1,17 @@
 """
-Intelligence Module - LLM-based Lead Qualification
-Uses Kimi K2.5 for vision, with OpenAI fallback
+Intelligence Module — LLM-based Lead Qualification (Core Value)
+
+This is the brain of the pipeline. Given website content + optional screenshot,
+it uses an LLM to score the company 1-10 on how likely they need your product.
+
+Model priority:
+  1. Kimi K2.5 (vision + text) — cheapest, best value
+  2. OpenAI GPT-4o (vision fallback)
+  3. GPT-4o-mini (text-only fallback)
+  4. Keyword matching (no-API fallback)
+
+Output: QualificationResult with confidence_score, hardware_type,
+        industry_category, reasoning, key_signals, red_flags
 """
 
 import asyncio

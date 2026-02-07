@@ -1,9 +1,21 @@
 """
-Exa AI Lead Discovery Test - Mainrich International
-Discovers companies that need permanent magnets & custom motors
+Exa AI Lead Discovery — Find Companies Matching Your ICP
+
+Uses Exa's neural search API to discover companies that match your
+ideal customer profile. Exa understands meaning, not just keywords,
+so "humanoid robot company building actuators" finds relevant companies
+even if they don't use those exact words.
+
+12 pre-built queries target: robotics, drones, medical devices,
+motor manufacturers, EVs, aerospace, exoskeletons, defense, and more.
+
+Output: CSV with company URLs, titles, snippets, and relevance scores.
+Also creates a qualifier-compatible CSV ready for main.py to process.
+
+Requires: EXA_API_KEY in .env ($10 free credit on signup at dashboard.exa.ai)
 
 Usage:
-    python test_exa.py                  # Run all queries
+    python test_exa.py                  # Run all 12 queries
     python test_exa.py --query 1        # Run specific query only
     python test_exa.py --export         # Export results to CSV
 """

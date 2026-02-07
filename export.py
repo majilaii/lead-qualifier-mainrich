@@ -1,6 +1,15 @@
 """
-Export utilities for Lead Qualifier
-Supports: CSV, Excel (.xlsx), Google Sheets
+Export Utilities
+
+Convert output CSVs into shareable formats:
+  - Excel (.xlsx) with separate sheets for Hot / Review / Rejected
+  - Google Sheets (requires service account credentials)
+  - Watch mode: auto-sync when files change
+
+Usage:
+  python export.py excel    # Export to Excel
+  python export.py sheets   # Upload to Google Sheets
+  python export.py watch    # Auto-sync on changes
 """
 
 import pandas as pd

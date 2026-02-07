@@ -1,7 +1,9 @@
-# Virtual environments (DON'T COMMIT - 10k+ files)
+# Virtual environments
 venv/
 .venv/
 env/
+
+# Environment secrets (NEVER commit)
 .env
 
 # Python cache
@@ -13,8 +15,8 @@ __pycache__/
 
 # Output files (regenerated each run)
 output/*.csv
-output/.checkpoint.json
 output/*.xlsx
+output/.checkpoint.json
 
 # IDE
 .vscode/
@@ -29,5 +31,8 @@ Thumbs.db
 # Logs
 *.log
 
-# Playwright browsers (downloaded separately)
+# Playwright browsers (downloaded via `playwright install`)
 .playwright/
+
+# Jupyter
+.ipynb_checkpoints/

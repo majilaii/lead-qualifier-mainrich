@@ -1,31 +1,35 @@
-# Lead Qualifier - The Magnet Hunter
-# Dependencies for Mainrich B2B Lead Qualification Tool
+# ============================================================
+# Lead Qualifier — Python Dependencies
+# Install: pip install -r requirements.txt
+# Then:    playwright install chromium
+# ============================================================
 
-# Web Scraping
+# --- Web Scraping ---
 crawl4ai>=0.3.0
 playwright>=1.40.0
 
-# AI/LLM
-openai>=1.0.0
-tiktoken>=0.5.0
+# --- AI / LLM ---
+openai>=1.0.0          # OpenAI + Kimi (OpenAI-compatible API)
+tiktoken>=0.5.0        # Token counting for cost estimation
 
-# Data Validation & Processing
+# --- Lead Discovery (optional, for test_exa.py) ---
+exa-py>=1.0.0          # Exa AI neural search
+
+# --- Data Validation ---
 pydantic>=2.0.0
 pandas>=2.0.0
 
-# Environment & Config
+# --- Environment ---
 python-dotenv>=1.0.0
 
-# Progress & CLI
+# --- CLI / Progress ---
 tqdm>=4.65.0
 rich>=13.0.0
 
-# Image Processing (for screenshot resizing)
-Pillow>=10.0.0
+# --- Image Processing ---
+Pillow>=10.0.0         # Screenshot resizing for vision API
 
-# HTTP Requests (for future enrichment APIs)
-httpx>=0.25.0
+# --- HTTP ---
+httpx>=0.25.0          # Async HTTP (enrichment APIs)
 aiohttp>=3.9.0
-
-# Async utilities
 asyncio-throttle>=1.0.0

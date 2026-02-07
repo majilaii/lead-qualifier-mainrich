@@ -1,6 +1,18 @@
 """
 Configuration & Constants for Lead Qualifier
-Mainrich International - B2B Magnet & Motor Lead Qualification
+
+Everything configurable lives here:
+  - API keys and model selection
+  - Scoring thresholds (what counts as hot/review/rejected)
+  - Positive & negative keywords for your ICP (Ideal Customer Profile)
+  - LLM system prompts that drive qualification logic
+  - Cost tracking rates
+
+To adapt this for a different industry, edit:
+  - POSITIVE_KEYWORDS / NEGATIVE_KEYWORDS
+  - SYSTEM_PROMPT_QUALIFIER
+  - INDUSTRY_CATEGORIES
+  - LEAD_QUERIES in test_exa.py
 """
 
 from pathlib import Path

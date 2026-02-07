@@ -1,11 +1,20 @@
 """
-Main Orchestrator - The Magnet Hunter
-B2B Lead Qualification Pipeline for Mainrich International
+Main Orchestrator — The Magnet Hunter
+AI-Powered B2B Lead Qualification Pipeline
+
+This is the entry point. It loads leads from CSV, then for each lead:
+  1. Crawls the company website (scraper.py)
+  2. Qualifies via LLM analysis (intelligence.py)
+  3. Optionally runs deep research (deep_research.py)
+  4. Optionally enriches contacts (enrichment.py)
+  5. Writes results to output/ CSVs sorted by score tier
 
 Usage:
-    python main.py                    # Process input_leads.csv
-    python main.py --test             # Run test with sample companies
-    python main.py --clear-checkpoint # Start fresh, ignore previous progress
+    python main.py --test                    # Test with sample companies
+    python main.py --input leads.csv         # Process your own CSV
+    python main.py --input leads.csv --deep-research  # With deep research
+    python main.py --no-vision               # Text-only (cheaper)
+    python main.py --clear-checkpoint        # Start fresh
 """
 
 import asyncio
@@ -424,13 +433,10 @@ def main():
     args = parser.parse_args()
     
     console.print("""
-[bold cyan]
-╔═══════════════════════════════════════════════╗
-║     🧲 THE MAGNET HUNTER 🧲                   ║
-║     Mainrich International                    ║
-║     B2B Lead Qualification Tool               ║
-╚═══════════════════════════════════════════════╝
-[/bold cyan]
+[bold cyan]╔══════════════════════════════════════════════════╗
+║  🧲 THE MAGNET HUNTER                             ║
+║  AI-Powered B2B Lead Qualification Pipeline       ║
+╚══════════════════════════════════════════════════╝[/bold cyan]
     """)
     
     if args.test:

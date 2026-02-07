@@ -1,6 +1,15 @@
 """
-Web Scraper Module using crawl4ai
-Handles website crawling, markdown extraction, and screenshot capture
+Web Scraper Module — crawl4ai + Playwright
+
+Visits company websites using a headless Chromium browser and extracts:
+  - Full page content as clean Markdown (for LLM text analysis)
+  - Screenshot as base64 JPEG (for LLM vision analysis)
+
+Key functions:
+  - crawl_company(url)  → CrawlResult with markdown + screenshot
+  - batch_crawl(urls)   → Crawl multiple URLs with concurrency control
+  - truncate_to_tokens() → Trim content to stay within LLM token limits
+  - resize_screenshot()  → Compress screenshots to save vision API costs
 """
 
 import asyncio
