@@ -3,6 +3,7 @@ Intelligence Module - LLM-based Lead Qualification
 Uses Kimi K2.5 for vision, with OpenAI fallback
 """
 
+import asyncio
 import json
 import base64
 from typing import Optional
@@ -37,7 +38,8 @@ class LeadQualifier:
         # Initialize Kimi client (uses OpenAI-compatible API)
         self.kimi_client = AsyncOpenAI(
             api_key=KIMI_API_KEY,
-            base_url=KIMI_API_BASE
+            base_url=KIMI_API_BASE,
+            timeout=httpx.Timeout(120.0, connect=10.0)  # 120s read timeout, 10s connect
         ) if KIMI_API_KEY else None
         
         # Cost tracking
@@ -105,7 +107,7 @@ class LeadQualifier:
             
             return result
             
-        except Exception as e:
+        except (asyncio.CancelledError, Exception) as e:
             print(f"  ⚠️ LLM Error for {company_name}: {e}")
             # Fallback to keyword-only analysis on LLM failure
             return self._keyword_only_qualification(
@@ -176,22 +178,41 @@ class LeadQualifier:
                 }
             })
         
-        response = await self.kimi_client.chat.completions.create(
-            model="kimi-k2.5",  # Kimi's best vision model
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + " Always respond with valid JSON only."},
-                {"role": "user", "content": user_content}
-            ],
-            temperature=1,  # kimi-k2.5 requires temperature=1
-            max_tokens=1000
+        # Try up to 2 times with kimi-k2.5 (cheapest: ¥0.70/1M input, ¥4.00/1M output)
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = await self.kimi_client.chat.completions.create(
+                    model="kimi-k2.5",
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + " Always respond with valid JSON only."},
+                        {"role": "user", "content": user_content}
+                    ],
+                    temperature=1,  # kimi-k2.5 requires temperature=1
+                    max_tokens=1000
+                )
+                
+                # Track tokens
+                if response.usage:
+                    self.total_input_tokens += response.usage.prompt_tokens
+                    self.total_output_tokens += response.usage.completion_tokens
+                
+                response_text = self._extract_kimi_response(response.choices[0].message)
+                return self._parse_llm_response(response_text)
+            except (asyncio.CancelledError, Exception) as e:
+                last_error = e
+                if attempt == 0:
+                    print(f"  ⚠️ Kimi vision attempt {attempt+1} failed: {type(e).__name__}: {str(e)[:80]}, retrying...")
+                    await asyncio.sleep(2)
+        
+        # Both attempts failed - return low-confidence result
+        print(f"  ❌ Kimi vision failed after 2 attempts: {last_error}")
+        return QualificationResult(
+            is_qualified=False,
+            confidence_score=3,
+            reasoning=f"LLM analysis failed: {last_error}",
+            red_flags=["Could not complete AI analysis"]
         )
-        
-        # Track tokens
-        if response.usage:
-            self.total_input_tokens += response.usage.prompt_tokens
-            self.total_output_tokens += response.usage.completion_tokens
-        
-        return self._parse_llm_response(response.choices[0].message.content)
     
     async def _qualify_with_kimi_text(
         self,
@@ -207,22 +228,41 @@ class LeadQualifier:
             markdown_content=crawl_result.markdown_content
         )
         
-        response = await self.kimi_client.chat.completions.create(
-            model="moonshot-v1-32k",  # Use 32k model for text-only (faster, cheaper)
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + self._get_json_schema_instruction()},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=1000
+        # Try up to 2 times with kimi-k2.5 text-only
+        last_error = None
+        for attempt in range(2):
+            try:
+                response = await self.kimi_client.chat.completions.create(
+                    model="kimi-k2.5",  # Cheapest model: ¥0.70/1M input
+                    messages=[
+                        {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + self._get_json_schema_instruction()},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=1,  # kimi-k2.5 requires temperature=1
+                    max_tokens=1000
+                )
+                
+                # Track tokens
+                if response.usage:
+                    self.total_input_tokens += response.usage.prompt_tokens
+                    self.total_output_tokens += response.usage.completion_tokens
+                
+                response_text = self._extract_kimi_response(response.choices[0].message)
+                return self._parse_llm_response(response_text)
+            except (asyncio.CancelledError, Exception) as e:
+                last_error = e
+                if attempt == 0:
+                    print(f"  ⚠️ Kimi text attempt {attempt+1} failed: {type(e).__name__}: {str(e)[:80]}, retrying...")
+                    await asyncio.sleep(2)
+        
+        # Both attempts failed
+        print(f"  ❌ Kimi text failed after 2 attempts: {last_error}")
+        return QualificationResult(
+            is_qualified=False,
+            confidence_score=3,
+            reasoning=f"LLM analysis failed: {last_error}",
+            red_flags=["Could not complete AI analysis"]
         )
-        
-        # Track tokens
-        if response.usage:
-            self.total_input_tokens += response.usage.prompt_tokens
-            self.total_output_tokens += response.usage.completion_tokens
-        
-        return self._parse_llm_response(response.choices[0].message.content)
     
     async def _qualify_with_openai(
         self,
@@ -281,6 +321,31 @@ class LeadQualifier:
         
         return self._parse_llm_response(response.choices[0].message.content)
     
+    @staticmethod
+    def _extract_kimi_response(message) -> str:
+        """Extract response text from Kimi thinking model.
+        
+        Kimi K2.5 is a thinking model that puts reasoning in
+        model_extra['reasoning_content'] and the final answer in content.
+        Sometimes content is empty and the JSON is only in reasoning_content.
+        We check both and return whichever contains our JSON.
+        """
+        content = message.content or ""
+        reasoning = ""
+        if hasattr(message, 'model_extra') and isinstance(message.model_extra, dict):
+            reasoning = message.model_extra.get('reasoning_content', '') or ''
+        
+        # If content has a JSON object, prefer it (it's the final answer)
+        if content.strip() and '{' in content:
+            return content
+        
+        # Otherwise fall back to reasoning_content which may contain the JSON
+        if reasoning.strip() and '{' in reasoning:
+            return reasoning
+        
+        # Return whatever we have
+        return content or reasoning
+
     def _get_json_schema_instruction(self) -> str:
         """Return JSON schema instruction for LLM."""
         return """
@@ -299,60 +364,67 @@ Respond with a JSON object in this exact format:
     def _parse_llm_response(self, response_text: str) -> QualificationResult:
         """Parse LLM response into QualificationResult."""
         try:
-            # Clean up response - strip whitespace and find JSON
+            import re
+            # Clean up response - strip whitespace
             response_text = response_text.strip()
             
-            # Try to find JSON object in the response
-            import re
-            json_match = re.search(r'\{[\s\S]*\}', response_text)
-            if json_match:
-                response_text = json_match.group()
+            # Remove markdown code fences: ```json ... ```
+            cleaned = re.sub(r'```(?:json)?\s*', '', response_text).strip()
             
-            data = json.loads(response_text)
+            # Strategy: find the LAST complete JSON object in the text.
+            # Kimi thinking models put chain-of-thought first, then the JSON answer at the end.
+            # Search from the end backwards for the outermost { } pair.
+            last_close = cleaned.rfind('}')
+            if last_close != -1:
+                # Walk backwards to find the matching opening brace
+                depth = 0
+                for i in range(last_close, -1, -1):
+                    if cleaned[i] == '}':
+                        depth += 1
+                    elif cleaned[i] == '{':
+                        depth -= 1
+                    if depth == 0:
+                        fragment = cleaned[i:last_close + 1]
+                        try:
+                            data = json.loads(fragment)
+                            if isinstance(data, dict) and any(k in data for k in ('confidence_score', 'score', 'is_qualified', 'reasoning')):
+                                return self._build_result(data)
+                        except (json.JSONDecodeError, ValueError):
+                            pass
+                        break
             
-            # Handle various field name formats from different LLMs
-            score = data.get("confidence_score") or data.get("score") or 5
-            qualified = data.get("is_qualified")
-            if qualified is None:
-                # Infer from score if not provided
-                qualified = int(score) >= 6
+            # Fallback: try all { positions from the start
+            for m in re.finditer(r'\{', cleaned):
+                # Find matching close brace
+                start = m.start()
+                depth = 0
+                for i in range(start, len(cleaned)):
+                    if cleaned[i] == '{':
+                        depth += 1
+                    elif cleaned[i] == '}':
+                        depth -= 1
+                    if depth == 0:
+                        fragment = cleaned[start:i + 1]
+                        if len(fragment) > 30:
+                            try:
+                                data = json.loads(fragment)
+                                if isinstance(data, dict) and any(k in data for k in ('confidence_score', 'score', 'is_qualified', 'reasoning')):
+                                    return self._build_result(data)
+                            except (json.JSONDecodeError, ValueError):
+                                pass
+                        break
             
-            return QualificationResult(
-                is_qualified=bool(qualified),
-                confidence_score=min(10, max(1, int(score))),
-                hardware_type=data.get("hardware_type") or data.get("category"),
-                industry_category=data.get("industry_category") or data.get("industry"),
-                reasoning=data.get("reasoning", "No reasoning provided"),
-                key_signals=data.get("key_signals", []),
-                red_flags=data.get("red_flags", [])
-            )
-        except (json.JSONDecodeError, ValidationError, TypeError) as e:
-            # If parsing fails, try to extract fields from text using regex
-            import re
-            
-            score = 5
-            category = None
-            reasoning = None
-            
-            # Try multiple field name patterns
+            # Last resort: regex extraction of score from raw text
             score_match = re.search(r'"(?:score|lead_score|confidence_score)"\s*:\s*(\d+)', response_text)
             if score_match:
                 score = int(score_match.group(1))
-            
-            category_match = re.search(r'"(?:category|hardware_type)"\s*:\s*"([^"]+)"', response_text)
-            if category_match:
-                category = category_match.group(1)
-                
-            reasoning_match = re.search(r'"(?:reasoning|assessment)"\s*:\s*"?([^"]{20,500})', response_text)
-            if reasoning_match:
-                reasoning = reasoning_match.group(1)
-            
-            if score_match:
+                category_match = re.search(r'"(?:category|hardware_type)"\s*:\s*"([^"]+)"', response_text)
+                reasoning_match = re.search(r'"(?:reasoning|assessment)"\s*:\s*"([^"]{10,500})"', response_text)
                 return QualificationResult(
                     is_qualified=score >= 6,
                     confidence_score=min(10, max(1, score)),
-                    hardware_type=category,
-                    reasoning=reasoning or f"Score: {score}/10",
+                    hardware_type=category_match.group(1) if category_match else None,
+                    reasoning=reasoning_match.group(1) if reasoning_match else f"Score: {score}/10",
                     red_flags=["Partial parsing - some details may be missing"]
                 )
             
@@ -362,7 +434,31 @@ Respond with a JSON object in this exact format:
                 reasoning=f"Could not parse LLM response: {response_text[:200]}",
                 red_flags=["Response parsing error"]
             )
+        except Exception as e:
+            return QualificationResult(
+                is_qualified=False,
+                confidence_score=5,
+                reasoning=f"Parse error: {str(e)[:100]}",
+                red_flags=["Response parsing error"]
+            )
     
+    @staticmethod
+    def _build_result(data: dict) -> QualificationResult:
+        """Build a QualificationResult from a parsed JSON dict."""
+        score = data.get("confidence_score") or data.get("score") or 5
+        qualified = data.get("is_qualified")
+        if qualified is None:
+            qualified = int(score) >= 6
+        return QualificationResult(
+            is_qualified=bool(qualified),
+            confidence_score=min(10, max(1, int(score))),
+            hardware_type=data.get("hardware_type") or data.get("category"),
+            industry_category=data.get("industry_category") or data.get("industry"),
+            reasoning=data.get("reasoning", "No reasoning provided"),
+            key_signals=data.get("key_signals", []),
+            red_flags=data.get("red_flags", [])
+        )
+
     def _keyword_only_qualification(
         self, 
         company_name: str,

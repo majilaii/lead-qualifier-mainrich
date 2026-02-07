@@ -18,7 +18,7 @@ from tqdm import tqdm
 from rich.console import Console
 from rich.panel import Panel
 
-from models import LeadInput, ProcessedLead, ProcessingStats, QualificationTier
+from models import LeadInput, ProcessedLead, ProcessingStats, QualificationTier, QualificationResult
 from scraper import crawl_company
 from intelligence import LeadQualifier
 from enrichment import enrich_contact, get_enrichment_status
@@ -36,6 +36,9 @@ from config import (
     OUTPUT_DIR,
     CONCURRENCY_LIMIT,
     SCORE_HOT_LEAD,
+    QUALIFIED_FILE,
+    REVIEW_FILE,
+    REJECTED_FILE,
 )
 from deep_research import DeepResearcher, print_report as print_deep_report
 
@@ -49,7 +52,17 @@ def load_leads(file_path: Path) -> list[LeadInput]:
         console.print("[yellow]Create input_leads.csv with columns: company_name, website_url, contact_name, linkedin_profile_url[/yellow]")
         return []
     
+    # Domains that are NOT real company websites (social/news/aggregator sites)
+    BLOCKED_DOMAINS = {
+        "linkedin.com", "linktr.ee", "twitter.com", "facebook.com",
+        "youtube.com", "instagram.com", "tiktok.com", "reddit.com",
+        "therobotreport.com", "roboticstomorrow.com", "thundersaidenergy.com",
+        "wikipedia.org", "crunchbase.com", "bloomberg.com", "techcrunch.com",
+        "github.com", "medium.com",
+    }
+    
     leads = []
+    skipped = []
     with open(file_path, 'r', encoding='utf-8') as f:
         reader = csv.DictReader(f)
         for i, row in enumerate(reader):
@@ -63,8 +76,21 @@ def load_leads(file_path: Path) -> list[LeadInput]:
             )
             
             # Skip rows without required data
-            if lead.company_name and lead.website_url:
-                leads.append(lead)
+            if not lead.company_name or not lead.website_url:
+                continue
+            
+            # Skip non-company domains (social media, news sites, etc.)
+            domain = extract_domain(lead.website_url)
+            if any(domain == bd or domain.endswith('.' + bd) for bd in BLOCKED_DOMAINS):
+                skipped.append(f"{lead.company_name} ({domain})")
+                continue
+            
+            leads.append(lead)
+    
+    if skipped:
+        console.print(f"[yellow]Filtered out {len(skipped)} non-company URLs:[/yellow]")
+        for s in skipped:
+            console.print(f"  [dim]• {s}[/dim]")
     
     return leads
 
@@ -86,27 +112,45 @@ async def process_lead(
     crawl_result = await crawl_company(lead.website_url, take_screenshot=use_vision)
     
     if not crawl_result.success:
-        # Website failed - create rejected lead
+        # Website failed to crawl - send to REVIEW queue, not rejected.
+        # Crawl failure doesn't mean the company is irrelevant — it often means
+        # the site has bot protection (Cloudflare, etc.)
+        # Use keyword check on company name to give a rough score
+        name_lower = lead.company_name.lower()
+        from config import POSITIVE_KEYWORDS
+        has_positive = any(kw.lower() in name_lower for kw in POSITIVE_KEYWORDS)
+        score = 6 if has_positive else 5  # Default to review range (4-7)
+        
         processed = ProcessedLead(
             company_name=lead.company_name,
             website_url=lead.website_url,
             contact_name=lead.contact_name,
             linkedin_profile_url=lead.linkedin_profile_url,
-            qualification_tier=QualificationTier.REJECTED,
-            confidence_score=1,
+            qualification_tier=QualificationTier.REVIEW,
+            confidence_score=score,
             is_qualified=False,
-            reasoning=f"Could not access website: {crawl_result.error_message}",
+            reasoning=f"Website could not be crawled — manual review needed. Error: {crawl_result.error_message}",
+            red_flags=["Crawl failed - needs manual website visit"],
             crawl_success=False,
             error_message=crawl_result.error_message
         )
     else:
         # Step 2: Qualify with LLM
-        qual_result = await qualifier.qualify_lead(
-            company_name=lead.company_name,
-            website_url=lead.website_url,
-            crawl_result=crawl_result,
-            use_vision=use_vision
-        )
+        try:
+            qual_result = await qualifier.qualify_lead(
+                company_name=lead.company_name,
+                website_url=lead.website_url,
+                crawl_result=crawl_result,
+                use_vision=use_vision
+            )
+        except Exception as e:
+            print(f"  ❌ LLM qualification error for {lead.company_name}: {e}")
+            qual_result = QualificationResult(
+                is_qualified=False,
+                confidence_score=3,
+                reasoning=f"LLM analysis failed: {type(e).__name__}: {str(e)[:100]}",
+                red_flags=["AI qualification error - needs manual review"]
+            )
         
         # Determine tier
         tier = determine_tier(qual_result.confidence_score)
@@ -188,7 +232,12 @@ async def run_pipeline(
     
     if clear_checkpoint:
         checkpoint.clear()
-        console.print("[yellow]Checkpoint cleared - starting fresh[/yellow]")
+        # Also clear output files so stale data doesn't pile up
+        for f in [QUALIFIED_FILE, REVIEW_FILE, REJECTED_FILE]:
+            if f.exists():
+                f.unlink()
+        output_writer = OutputWriter()  # Re-init to recreate headers
+        console.print("[yellow]Checkpoint and output files cleared - starting fresh[/yellow]")
     
     # Dedupe by domain
     leads = dedupe_by_domain(leads)
@@ -244,26 +293,40 @@ Concurrency: {CONCURRENCY_LIMIT}
         try:
             result = await process_with_semaphore(lead)
             results.append(result)
-            
-            # Update stats
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            console.print(f"\n[yellow]⚠️ Interrupted! Saving progress ({len(results)} leads processed)...[/yellow]")
+            break
+        except Exception as e:
+            console.print(f"[red]❌ Error on {lead.company_name}: {e}[/red]")
+            # Create a fallback result so we don't lose this lead
+            result = ProcessedLead(
+                company_name=lead.company_name,
+                website_url=lead.website_url,
+                contact_name=lead.contact_name,
+                linkedin_profile_url=lead.linkedin_profile_url,
+                qualification_tier=QualificationTier.REVIEW,
+                confidence_score=3,
+                is_qualified=False,
+                reasoning=f"Processing error: {type(e).__name__}: {str(e)[:100]}",
+                crawl_success=False,
+                error_message=str(e)[:200]
+            )
+            results.append(result)
+        
+        # Update stats for every result
+        if results:
+            last = results[-1]
             stats.processed += 1
-            if result.qualification_tier == QualificationTier.HOT:
+            if last.qualification_tier == QualificationTier.HOT:
                 stats.hot_leads += 1
-            elif result.qualification_tier == QualificationTier.REVIEW:
+            elif last.qualification_tier == QualificationTier.REVIEW:
                 stats.review_leads += 1
             else:
                 stats.rejected_leads += 1
-            
-            if not result.crawl_success:
+            if not last.crawl_success:
                 stats.crawl_failures += 1
-            
-            # Print summary for hot leads
-            if result.qualification_tier == QualificationTier.HOT:
-                print_lead_summary(result)
-                
-        except Exception as e:
-            console.print(f"[red]Error processing {lead.company_name}: {e}[/red]")
-            stats.crawl_failures += 1
+            if last.qualification_tier == QualificationTier.HOT:
+                print_lead_summary(last)
         
         # Small delay between requests
         await asyncio.sleep(0.5)
