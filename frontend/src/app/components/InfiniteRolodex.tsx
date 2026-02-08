@@ -72,22 +72,41 @@ const SCRAM_CH = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-:>";
 const rn = () => NOISE_CH[Math.floor(Math.random() * NOISE_CH.length)];
 const rs = () => SCRAM_CH[Math.floor(Math.random() * SCRAM_CH.length)];
 
-/* ─── Integer hash for spatial scatter ─────────────────── */
+/* ─── Spatial hash ─────────────────────────────────────── */
 
 function hash2(a: number, b: number): number {
   let h = (a * 374761393 + b * 668265263) | 0;
   h = ((h ^ (h >> 13)) * 1274126177) | 0;
-  return ((h ^ (h >> 16)) >>> 0) / 4294967296; // [0, 1)
+  return ((h ^ (h >> 16)) >>> 0) / 4294967296;
 }
 
-/* ─── Constants ────────────────────────────────────────── */
+/* ─── Easing ───────────────────────────────────────────── */
 
-const SNAP = 0.84;
+function easeInOutCubic(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+/* ─── Phase Thresholds ─────────────────────────────────── */
+/*
+ * Scroll phases (0→1 over 550vh):
+ *
+ *   0.00–0.03   Pure noise wall (opening)
+ *   0.03–0.32   Progressive lead decode (hot → review → rejected)
+ *   ~0.34       SNAP flash — wall of contacts fully locked in
+ *   0.34–0.42   Wall holds, all contacts visible
+ *   0.42–0.66   MORPH — text cells brighten to form "FROM CHAOS / TO CLARITY",
+ *               non-text cells scramble back to dim chaos
+ *   0.66–1.00   Final state holds — ASCII art tagline readable, chaos in bg
+ */
+
+const SNAP = 0.34;
 const DECODE_DUR = 0.045;
-const SNAP_DUR = 0.03;
 const SEP = "  ";
 
-/* ─── Cell info precomputed per resize ─────────────────── */
+const MORPH_START = 0.42;
+const MORPH_END = 0.66;
+
+/* ─── Cell info ────────────────────────────────────────── */
 
 interface CellInfo {
   dataCh: string;
@@ -108,16 +127,10 @@ function buildDataGrid(rows: number, cols: number): CellInfo[][] {
 
   for (let r = 0; r < rows; r++) {
     const cells: CellInfo[] = new Array(cols);
-
-    // Per-row: pick a random start index into DATA_POOL and a horizontal shift
     const dataStartIdx = Math.floor(hash2(r, 9999) * TOTAL);
     const hShift = Math.floor(hash2(r, 7777) * 55);
-
-    // Build a stream of characters for this row: lead text + separator, repeating
-    // We need hShift + cols + extra to be safe
     const needed = hShift + cols + 80;
 
-    // Stream entry: each character knows its parent lead
     const sCh: string[] = [];
     const sTier: (Tier | null)[] = [];
     const sInstKey: number[] = [];
@@ -129,8 +142,6 @@ function buildDataGrid(rows: number, cols: number): CellInfo[][] {
 
     while (sCh.length < needed) {
       const d = DATA_POOL[dataIdx % TOTAL];
-
-      // Push each character of the lead
       for (let i = 0; i < d.text.length; i++) {
         sCh.push(d.text[i]);
         sTier.push(d.tier);
@@ -138,8 +149,6 @@ function buildDataGrid(rows: number, cols: number): CellInfo[][] {
         sLocalIdx.push(i);
         sLeadLen.push(d.text.length);
       }
-
-      // Push separator
       for (let i = 0; i < SEP.length; i++) {
         sCh.push(" ");
         sTier.push(null);
@@ -147,39 +156,33 @@ function buildDataGrid(rows: number, cols: number): CellInfo[][] {
         sLocalIdx.push(0);
         sLeadLen.push(0);
       }
-
       instCounter++;
       dataIdx = (dataIdx + 1) % TOTAL;
     }
 
-    // Extract the visible window [hShift .. hShift + cols)
     for (let c = 0; c < cols; c++) {
       const si = hShift + c;
       const tier = sTier[si];
 
-      // Reveal timing — scattered by spatial hash of (row, instanceKey)
       let revealAt: number;
       if (tier === null) {
-        revealAt = 0.88;
+        revealAt = 0.38;
       } else {
         const raw = hash2(r * 137 + 7, sInstKey[si] * 53 + 13);
         if (tier === "hot") {
-          revealAt = 0.04 + raw * 0.38;
+          revealAt = 0.02 + raw * 0.13; // 0.02–0.15
         } else if (tier === "review") {
-          revealAt = 0.18 + raw * 0.40;
+          revealAt = 0.08 + raw * 0.12; // 0.08–0.20
         } else {
-          revealAt = 0.35 + raw * 0.43;
+          revealAt = 0.14 + raw * 0.15; // 0.14–0.29
         }
       }
-
-      // leadColStart: the visible column where this lead begins
-      const leadColStart = c - sLocalIdx[si];
 
       cells[c] = {
         dataCh: sCh[si],
         tier,
         revealAt,
-        leadColStart,
+        leadColStart: c - sLocalIdx[si],
         leadLen: sLeadLen[si],
       };
     }
@@ -190,6 +193,63 @@ function buildDataGrid(rows: number, cols: number): CellInfo[][] {
   return grid;
 }
 
+/* ─── Build text bitmap from offscreen canvas ──────────── */
+/*
+ * Renders "FROM CHAOS / TO CLARITY" in large bold text on a
+ * hidden canvas, then reads the pixel data to create a boolean
+ * grid: true = this cell is part of the tagline shape.
+ */
+
+function buildTextBitmap(
+  w: number,
+  h: number,
+  cw: number,
+  lh: number,
+  cols: number,
+  rows: number
+): boolean[][] {
+  const off = document.createElement("canvas");
+  off.width = w;
+  off.height = h;
+  const oc = off.getContext("2d");
+  if (!oc) return [];
+
+  // Responsive font size — large enough for readable ASCII art
+  const fontSize = Math.floor(Math.min(w * 0.09, 150));
+  oc.font = `bold ${fontSize}px "Roboto Mono", "Fira Code", monospace`;
+  oc.textAlign = "center";
+  oc.textBaseline = "middle";
+  oc.fillStyle = "#fff";
+
+  // Two lines, vertically centered with gap
+  const halfGap = fontSize * 0.65;
+  oc.fillText("FROM CHAOS", w / 2, h / 2 - halfGap);
+  oc.fillText("TO CLARITY", w / 2, h / 2 + halfGap);
+
+  // Sample pixel data at each grid cell center
+  const imageData = oc.getImageData(0, 0, w, h);
+  const pixels = imageData.data;
+
+  const bitmap: boolean[][] = [];
+  for (let r = 0; r < rows; r++) {
+    const row: boolean[] = [];
+    for (let c = 0; c < cols; c++) {
+      const px = Math.floor(c * cw + cw / 2);
+      const py = Math.floor(r * lh + lh / 2);
+      if (px >= 0 && px < w && py >= 0 && py < h) {
+        const idx = (py * w + px) * 4;
+        // Low threshold catches anti-aliased edges → thicker strokes
+        row.push(pixels[idx + 3] > 60);
+      } else {
+        row.push(false);
+      }
+    }
+    bitmap.push(row);
+  }
+
+  return bitmap;
+}
+
 /* ─── Component ────────────────────────────────────────── */
 
 export default function InfiniteRolodex() {
@@ -198,9 +258,10 @@ export default function InfiniteRolodex() {
   const progressRef = useRef(0);
   const rafId = useRef(0);
   const dataGridRef = useRef<CellInfo[][]>([]);
+  const textBitmapRef = useRef<boolean[][]>([]);
   const [sp, setSp] = useState(0);
 
-  /* ── Canvas ───────────────────────────────────────────── */
+  /* ── Canvas effect ────────────────────────────────────── */
   useEffect(() => {
     const cvs = canvasRef.current;
     if (!cvs) return;
@@ -229,6 +290,14 @@ export default function InfiniteRolodex() {
       }
 
       dataGridRef.current = buildDataGrid(rows, cols);
+      textBitmapRef.current = buildTextBitmap(
+        cvs.width,
+        cvs.height,
+        CW,
+        LH,
+        cols,
+        rows
+      );
     };
 
     const resize = () => {
@@ -249,82 +318,168 @@ export default function InfiniteRolodex() {
 
       const scroll = progressRef.current;
       const dg = dataGridRef.current;
+      const bitmap = textBitmapRef.current;
 
       ctx.font = `${FS}px "Roboto Mono","Fira Code",monospace`;
       ctx.textBaseline = "top";
 
-      for (let r = 0; r < rows && r < dg.length; r++) {
-        const y = r * LH;
-        if (y > H + LH) break;
-        const dgRow = dg[r];
+      if (scroll < MORPH_START) {
+        /* ═══════════════════════════════════════════════════
+         *  WALL MODE — noise → decode → snap → hold
+         * ═══════════════════════════════════════════════════ */
+        for (let r = 0; r < rows && r < dg.length; r++) {
+          const y = r * LH;
+          if (y > H + LH) break;
+          const dgRow = dg[r];
 
-        for (let c = 0; c < cols && c < dgRow.length; c++) {
-          const cell = dgRow[c];
-          const ng = noiseGrid[r]?.[c];
-          if (!ng) continue;
+          for (let c = 0; c < cols && c < dgRow.length; c++) {
+            const cell = dgRow[c];
+            const ng = noiseGrid[r]?.[c];
+            if (!ng) continue;
 
-          if (f % ng.tick === 0) ng.ch = rn();
+            if (f % ng.tick === 0) ng.ch = rn();
+            const x = c * CW;
 
-          const x = c * CW;
-
-          // Progress for this cell
-          let progress = 0;
-          if (cell.tier !== null) {
-            if (scroll >= SNAP && scroll < cell.revealAt) {
-              progress = Math.min(1, (scroll - SNAP) / SNAP_DUR);
-            } else if (scroll >= cell.revealAt) {
-              progress = Math.min(1, (scroll - cell.revealAt) / DECODE_DUR);
+            // Per-cell decode progress
+            let progress = 0;
+            if (cell.tier !== null) {
+              if (scroll >= cell.revealAt) {
+                progress = Math.min(
+                  1,
+                  (scroll - cell.revealAt) / DECODE_DUR
+                );
+              }
+            } else {
+              // Separator: clean up noise after snap
+              if (scroll >= SNAP) {
+                progress = Math.min(1, (scroll - SNAP) / 0.06);
+              }
             }
-          } else {
-            // Separator: fade noise out after snap
-            if (scroll >= SNAP) {
-              progress = Math.min(1, (scroll - SNAP) / 0.06);
-            }
-          }
 
-          if (cell.tier === null) {
-            // Separator — show noise, fading after snap
-            if (progress >= 1) continue;
-            const fade = 1 - progress;
-            const base = (0.055 + Math.random() * 0.035) * fade;
-            if (base < 0.004) continue;
-            ctx.fillStyle = `rgba(160,160,160,${base})`;
-            ctx.fillText(ng.ch, x, y);
-          } else if (progress <= 0) {
-            // Pure noise
-            const base = 0.055 + Math.random() * 0.035;
-            ctx.fillStyle = `rgba(160,160,160,${base})`;
-            ctx.fillText(ng.ch, x, y);
-          } else if (progress >= 1) {
-            // Fully revealed
-            const ch = cell.dataCh;
-            if (ch === " ") continue;
-            ctx.fillStyle = `rgba(250,250,250,${tierAlpha(cell.tier)})`;
-            ctx.fillText(ch, x, y);
-          } else {
-            // Decoding — left-to-right sweep within the lead
-            const lockCount = Math.floor(progress * cell.leadLen);
-            const charIdx = c - cell.leadColStart;
-            const ch = cell.dataCh;
-            const alpha = tierAlpha(cell.tier);
-            const isSep = ch === " " || ch === "·" || ch === "/";
-
-            if (isSep) {
-              const a = progress > 0.25 ? alpha * progress * 0.6 : 0.04;
-              ctx.fillStyle = `rgba(250,250,250,${a})`;
-              ctx.fillText(ch, x, y);
-            } else if (charIdx < lockCount) {
-              ctx.fillStyle = `rgba(255,255,255,${alpha * (0.7 + progress * 0.3)})`;
+            if (cell.tier === null) {
+              // Separator — fading noise
+              if (progress >= 1) continue;
+              const fade = 1 - progress;
+              const base = (0.055 + Math.random() * 0.035) * fade;
+              if (base < 0.004) continue;
+              ctx.fillStyle = `rgba(160,160,160,${base})`;
+              ctx.fillText(ng.ch, x, y);
+            } else if (progress <= 0) {
+              // Pure noise (not yet decoding)
+              const base = 0.055 + Math.random() * 0.035;
+              ctx.fillStyle = `rgba(160,160,160,${base})`;
+              ctx.fillText(ng.ch, x, y);
+            } else if (progress >= 1) {
+              // Fully revealed lead character
+              const ch = cell.dataCh;
+              if (ch === " ") continue;
+              ctx.fillStyle = `rgba(250,250,250,${tierAlpha(cell.tier)})`;
               ctx.fillText(ch, x, y);
             } else {
-              ctx.fillStyle = `rgba(180,180,180,${0.06 + progress * 0.09})`;
-              ctx.fillText(rs(), x, y);
+              // Decoding — left-to-right sweep within the lead
+              const lockCount = Math.floor(progress * cell.leadLen);
+              const charIdx = c - cell.leadColStart;
+              const ch = cell.dataCh;
+              const alpha = tierAlpha(cell.tier);
+              const isSep = ch === " " || ch === "·" || ch === "/";
+
+              if (isSep) {
+                const a =
+                  progress > 0.25 ? alpha * progress * 0.6 : 0.04;
+                ctx.fillStyle = `rgba(250,250,250,${a})`;
+                ctx.fillText(ch, x, y);
+              } else if (charIdx < lockCount) {
+                ctx.fillStyle = `rgba(255,255,255,${alpha * (0.7 + progress * 0.3)})`;
+                ctx.fillText(ch, x, y);
+              } else {
+                ctx.fillStyle = `rgba(180,180,180,${0.06 + progress * 0.09})`;
+                ctx.fillText(rs(), x, y);
+              }
+            }
+          }
+        }
+      } else {
+        /* ═══════════════════════════════════════════════════
+         *  MORPH MODE — wall characters reshape into tagline,
+         *  remaining characters dissolve back to chaos
+         * ═══════════════════════════════════════════════════ */
+        const rawP = Math.min(
+          1,
+          (scroll - MORPH_START) / (MORPH_END - MORPH_START)
+        );
+        const mp = easeInOutCubic(rawP);
+
+        for (let r = 0; r < rows && r < dg.length; r++) {
+          const y = r * LH;
+          if (y > H + LH) break;
+          const dgRow = dg[r];
+
+          for (let c = 0; c < cols && c < dgRow.length; c++) {
+            const cell = dgRow[c];
+            const ng = noiseGrid[r]?.[c];
+            if (!ng) continue;
+
+            if (f % ng.tick === 0) ng.ch = rn();
+            const x = c * CW;
+            const isText = bitmap[r]?.[c] ?? false;
+
+            if (isText) {
+              /* ── Text cell: brighten to form the tagline shape ── */
+
+              // Alpha lerps from wall brightness to full white
+              const startA = cell.tier ? tierAlpha(cell.tier) : 0;
+              const alpha = startA + (0.94 - startA) * mp;
+
+              // Scramble: ramps up briefly then settles to real chars
+              // Creates a "hologram locking in" feel
+              const scrambleUp = Math.min(1, mp * 3.5);
+              const scrambleDown = Math.min(
+                1,
+                Math.max(0, (mp - 0.28) / 0.35)
+              );
+              const scrambleAmount = scrambleUp * (1 - scrambleDown);
+              const isScrambled =
+                hash2(r * 137 + c, f >> 2) < scrambleAmount;
+
+              // Stable character for this cell (deterministic)
+              const stableCh =
+                cell.tier !== null && cell.dataCh !== " "
+                  ? cell.dataCh
+                  : SCRAM_CH[
+                      Math.floor(
+                        hash2(r * 997 + c, 42) * SCRAM_CH.length
+                      )
+                    ];
+
+              const ch = isScrambled ? rs() : stableCh;
+              ctx.fillStyle = `rgba(250,250,250,${alpha})`;
+              ctx.fillText(ch, x, y);
+            } else {
+              /* ── Non-text cell: fade back to dim chaos ── */
+
+              const startA = cell.tier ? tierAlpha(cell.tier) : 0;
+              const endA = 0.03 + hash2(r, c) * 0.022;
+              const alpha = startA + (endA - startA) * mp;
+
+              if (alpha < 0.005) continue;
+
+              // Character morphs from wall data → noise
+              const noiseP = Math.min(1, mp * 1.8);
+              const useNoise = Math.random() < noiseP;
+              const ch = useNoise
+                ? ng.ch
+                : cell.dataCh === " "
+                  ? ng.ch
+                  : cell.dataCh;
+
+              ctx.fillStyle = `rgba(160,160,160,${alpha})`;
+              ctx.fillText(ch || ng.ch, x, y);
             }
           }
         }
       }
 
-      // Snap flash
+      /* ── Snap flash ───────────────────────────────────── */
       const snapDist = Math.abs(scroll - SNAP);
       if (snapDist < 0.015) {
         const flashA = Math.max(0, 1 - snapDist * 66) * 0.08;
@@ -360,10 +515,24 @@ export default function InfiniteRolodex() {
     return () => gCtx.revert();
   }, []);
 
-  /* ── Derived ──────────────────────────────────────────── */
-  const taglineOp = sp < 0.006 ? 0.85 : Math.max(0, 0.85 - sp * 40);
-  const hintOp = sp < 0.004 ? 0.3 : 0;
+  /* ── Derived values ──────────────────────────────────── */
+  const hintOp = sp < 0.004 ? 0.35 : Math.max(0, 0.35 - sp * 12);
   const postSnap = sp >= SNAP + 0.04;
+  const morphP = Math.min(
+    1,
+    Math.max(0, (sp - MORPH_START) / (MORPH_END - MORPH_START))
+  );
+  const hudOp = morphP > 0.2 ? Math.max(0, 1 - morphP * 1.5) : 1;
+
+  // Vignette returns during morph to darken edges around the text
+  const vignetteOp =
+    morphP > 0 ? 0.1 + morphP * 0.5 : postSnap ? 0.1 : 1;
+
+  // Subtitle fades in after morph completes
+  const subtitleOp =
+    sp < MORPH_END + 0.03
+      ? 0
+      : Math.min(1, (sp - MORPH_END - 0.03) / 0.06);
 
   return (
     <section
@@ -372,45 +541,51 @@ export default function InfiniteRolodex() {
     >
       <canvas ref={canvasRef} className="absolute inset-0 w-full h-full z-0" />
 
-      {/* Vignette */}
+      {/* Vignette — darkens edges, lifts after snap, returns for text readability */}
       <div
-        className="pointer-events-none absolute inset-0 z-10 transition-opacity duration-700"
+        className="pointer-events-none absolute inset-0 z-10"
         style={{
           background:
-            "radial-gradient(ellipse at center,transparent 30%,rgba(9,9,11,.45) 95%)",
-          opacity: postSnap ? 0.1 : 1,
+            "radial-gradient(ellipse at center,transparent 30%,rgba(9,9,11,.55) 95%)",
+          opacity: vignetteOp,
+          transition: "opacity 0.5s",
         }}
       />
 
-      {/* Tagline */}
+      {/* Subtitle — small product label after the ASCII art tagline forms */}
       <div
-        className="absolute top-[13%] left-0 right-0 z-20 text-center px-6 pointer-events-none"
-        style={{ opacity: taglineOp }}
+        className="absolute z-30 left-0 right-0 pointer-events-none"
+        style={{ bottom: "14%", opacity: subtitleOp }}
       >
-        <h1 className="font-mono text-lg sm:text-2xl md:text-3xl lg:text-4xl font-bold text-white tracking-tight mb-3">
-          From Chaos to Clarity
-        </h1>
-        <p className="font-sans text-xs md:text-sm text-zinc-500 max-w-md mx-auto leading-relaxed">
-          Scroll through the noise. Watch the leads appear.
+        <div className="w-12 h-px bg-zinc-700 mx-auto mb-4" />
+        <p className="font-sans text-xs md:text-sm text-zinc-500 text-center tracking-wide">
+          AI-Powered B2B Lead Qualification
         </p>
       </div>
 
-      {/* HUD */}
-      <div className="absolute bottom-5 left-5 z-20 font-mono text-[10px] tracking-[.2em] uppercase transition-all duration-300">
+      {/* HUD — bottom-left status */}
+      <div
+        className="absolute bottom-5 left-5 z-20 font-mono text-[10px] tracking-[.2em] uppercase transition-all duration-300"
+        style={{ opacity: hudOp }}
+      >
         {postSnap ? (
           <span className="text-zinc-400">{TOTAL} LEADS QUALIFIED</span>
-        ) : sp > 0.05 ? (
+        ) : sp > 0.03 ? (
           <span className="text-zinc-600">QUALIFYING...</span>
         ) : (
           <span className="text-zinc-700">SCANNING · 7.2B RECORDS</span>
         )}
       </div>
 
-      <div className="absolute bottom-5 right-5 z-20 font-mono text-[10px] tracking-[.2em] uppercase text-zinc-800">
+      {/* HUD — bottom-right brand */}
+      <div
+        className="absolute bottom-5 right-5 z-20 font-mono text-[10px] tracking-[.2em] uppercase text-zinc-800"
+        style={{ opacity: hudOp }}
+      >
         THE MAGNET HUNTER
       </div>
 
-      {/* Scroll hint */}
+      {/* Scroll hint (visible only at very start) */}
       <div
         className="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-2 pointer-events-none"
         style={{ opacity: hintOp }}
