@@ -9,8 +9,13 @@ Automatically discover, crawl, qualify, and research potential B2B customers usi
 ## What It Does
 
 ```
-CSV / Exa Search ──→ Web Crawler ──→ AI Qualifier ──→ Deep Research ──→ Output
-     (find)           (scrape)        (score)          (analyze)        (CSV)
+Two modes:
+
+CLI:   CSV / Exa Search ──→ Web Crawler ──→ AI Qualifier ──→ Deep Research ──→ CSV Output
+            (find)            (scrape)        (score)          (analyze)
+
+Chat:  Conversation ──→ AI Query Gen ──→ Exa Search ──→ Crawl + Qualify ──→ Live Results
+         (describe)      (dual-LLM)       (find)         (stream SSE)       (scored UI)
 ```
 
 | Step | Module | What Happens |
@@ -34,7 +39,72 @@ Leads are automatically sorted into 3 buckets:
 
 ---
 
-## Quick Start
+## Chat Interface (Web UI)
+
+The chat interface lets you describe your ideal customer in plain English. An AI assistant asks follow-up questions to sharpen the search, then runs the full pipeline — discovery, crawling, and qualification — with live progress in the browser.
+
+### How to Run
+
+You need **two terminals** — one for the Python backend, one for the Next.js frontend.
+
+**Terminal 1: Backend (FastAPI)**
+
+```bash
+cd backend
+python -m venv venv              # First time only
+source venv/bin/activate         # macOS/Linux (venv\Scripts\activate on Windows)
+pip install -r requirements.txt  # First time only
+playwright install chromium      # First time only
+
+python -m uvicorn chat_server:app --reload --port 8000
+```
+
+You should see:
+```
+🧲 Starting Lead Discovery Chat Server...
+✅ Chat engine ready
+INFO:     Uvicorn running on http://127.0.0.1:8000
+```
+
+**Terminal 2: Frontend (Next.js)**
+
+```bash
+cd frontend
+npm install    # First time only
+npm run dev
+```
+
+Then open **http://localhost:3000/chat** in your browser.
+
+### Chat Flow
+
+1. **Describe** what companies you're looking for (e.g., "robotics startups building humanoid robots")
+2. **Answer** 2-3 follow-up questions — the AI tracks readiness across: industry, company profile, technology focus, and qualifying criteria
+3. **Launch Search** — generates semantic queries via AI, searches the web via Exa
+4. **Qualify** — crawls each company's website and scores them 1-10 with the LLM
+5. **Results** — hot leads, needs-review, and rejected, with reasoning and signals for each
+
+### Architecture & Security
+
+The chat uses a **dual-LLM pattern** for prompt injection defense:
+
+| Layer | What |
+|-------|------|
+| **Conversation LLM** | Talks to the user, asks follow-ups, extracts structured search parameters |
+| **Query Generation LLM** | Takes *only* the validated structured context — never sees raw user text |
+| **Input sanitization** | Strips injection patterns, LLM special tokens, HTML, control characters |
+| **Output validation** | Generated queries are validated (count, length, category) before execution |
+| **Rate limiting** | 30 requests/min per IP on the backend |
+
+### Required API Keys
+
+Same as the CLI pipeline — at minimum `KIMI_API_KEY` or `OPENAI_API_KEY` in `backend/.env`. For search, also add `EXA_API_KEY`.
+
+---
+
+## CLI Pipeline
+
+### Quick Start
 
 ### Prerequisites
 
@@ -148,34 +218,42 @@ cd backend
 ```
 lead-qualifier/
 │
-├── backend/                 # Python qualification pipeline
-│   ├── main.py              # 🎯 Pipeline orchestrator — ties everything together
-│   ├── config.py            # ⚙️  All settings: API keys, prompts, keywords, thresholds
-│   ├── models.py            # 📦 Pydantic data models (LeadInput, QualificationResult, etc.)
+├── backend/                    # Python pipeline + chat API
+│   ├── main.py                 # 🎯 CLI pipeline orchestrator
+│   ├── chat_server.py          # 🌐 FastAPI server for the chat interface
+│   ├── chat_engine.py          # 🧠 Dual-LLM chat engine (conversation + query gen)
 │   │
-│   ├── test_exa.py          # 🔍 Step 1: Discover leads via Exa AI semantic search
-│   ├── scraper.py           # 🌐 Step 2: Crawl company websites (crawl4ai + Playwright)
-│   ├── intelligence.py      # 🧠 Step 3: LLM-based lead qualification (Kimi / OpenAI)
-│   ├── deep_research.py     # 🔬 Step 4: Deep multi-page analysis for hot leads
-│   ├── enrichment.py        # 📇 Step 5: Contact enrichment (Apollo / Hunter)
-│   ├── export.py            # 📊 Step 6: Export to Excel / Google Sheets
+│   ├── config.py               # ⚙️  Settings: API keys, prompts, keywords, thresholds
+│   ├── models.py               # 📦 Pydantic data models
 │   │
-│   ├── utils.py             # 🔧 Helpers: checkpointing, cost tracking, deduplication
-│   ├── run.sh               # 🚀 Convenience shell script for common commands
-│   ├── sample_leads.csv     # 📄 Example input file (10 companies)
-│   ├── requirements.txt     # 📦 Python dependencies
-│   ├── .env.example         # 🔑 API key template — copy to .env
-│   └── output/              # 📁 Generated results (gitignored)
-│       ├── qualified_hot_leads.csv
-│       ├── review_manual_check.csv
-│       └── rejected_with_reasons.csv
+│   ├── test_exa.py             # 🔍 Step 1: Exa AI lead discovery
+│   ├── scraper.py              # 🌐 Step 2: Web crawling (crawl4ai + Playwright)
+│   ├── intelligence.py         # 🧠 Step 3: LLM qualification (Kimi / OpenAI)
+│   ├── deep_research.py        # 🔬 Step 4: Multi-page research for hot leads
+│   ├── enrichment.py           # 📇 Step 5: Contact enrichment (Apollo / Hunter)
+│   ├── export.py               # 📊 Step 6: Export to Excel / Google Sheets
+│   │
+│   ├── utils.py                # 🔧 Helpers: checkpointing, cost tracking
+│   ├── run.sh                  # 🚀 Convenience shell script
+│   ├── sample_leads.csv        # 📄 Example input file
+│   ├── requirements.txt        # 📦 Python dependencies
+│   ├── .env.example            # 🔑 API key template — copy to .env
+│   └── output/                 # 📁 Generated results (gitignored)
 │
-├── frontend/                # Next.js landing page / dashboard (WIP)
+├── frontend/                   # Next.js web UI
 │   ├── src/app/
-│   │   ├── page.tsx         # Landing page
-│   │   ├── layout.tsx       # Root layout
-│   │   ├── globals.css      # Global styles
-│   │   └── components/      # UI components
+│   │   ├── page.tsx            # Landing page
+│   │   ├── chat/page.tsx       # Chat interface page
+│   │   ├── api/chat/           # Next.js API proxy routes
+│   │   │   ├── route.ts        # Chat message proxy (→ FastAPI)
+│   │   │   └── search/route.ts # Search proxy (→ FastAPI)
+│   │   ├── layout.tsx          # Root layout
+│   │   ├── globals.css         # Global styles + animations
+│   │   └── components/
+│   │       ├── chat/
+│   │       │   └── ChatInterface.tsx  # Full chat + pipeline UI
+│   │       ├── Navbar.tsx
+│   │       └── ...             # Landing page components
 │   ├── package.json
 │   └── tsconfig.json
 │
@@ -185,6 +263,28 @@ lead-qualifier/
 ---
 
 ## How Each Module Works
+
+### `chat_server.py` — Chat API Server
+
+FastAPI server that powers the chat interface. Endpoints:
+
+| Endpoint | What |
+|----------|------|
+| `POST /api/chat` | Sends conversation to the LLM, returns response + readiness state |
+| `POST /api/chat/search` | Generates Exa queries from structured context, executes search |
+| `POST /api/pipeline/run` | Runs crawl + qualify on found companies, streams results via SSE |
+| `GET /api/health` | Health check (reports LLM and Exa availability) |
+
+Includes per-IP rate limiting (30 req/min) and CORS for the frontend.
+
+### `chat_engine.py` — Dual-LLM Chat Engine
+
+The brain behind the chat interface. Two isolated LLM pipelines:
+
+1. **Conversation LLM** — Talks to the user with a hardened system prompt. Extracts structured search parameters (industry, tech focus, criteria) through natural conversation. Outputs constrained JSON.
+2. **Query Generation LLM** — Receives *only* the validated structured context. Generates 4-8 semantic Exa search queries. Never sees raw user input.
+
+Falls back through: Kimi K2.5 → GPT-4o-mini. Input sanitization strips prompt injection patterns, special tokens, and HTML.
 
 ### `test_exa.py` — Lead Discovery
 
@@ -357,6 +457,13 @@ python main.py --clear-checkpoint
 
 ## Troubleshooting
 
+### Chat interface not connecting to backend
+Make sure both servers are running:
+- Backend: `cd backend && source venv/bin/activate && python -m uvicorn chat_server:app --reload --port 8000`
+- Frontend: `cd frontend && npm run dev`
+
+Check `http://localhost:8000/api/health` — it should return `{"status": "ok", "llm_available": true, ...}`. If `llm_available` is false, your API keys aren't configured. The frontend falls back to mock responses when the backend is down.
+
 ### "No LLM API configured"
 → Add `OPENAI_API_KEY` or `KIMI_API_KEY` to your `backend/.env` file.
 
@@ -389,11 +496,14 @@ The Exa discovery step (`test_exa.py`) is optional. You can skip it entirely and
 
 ## Roadmap
 
+- [x] Chat interface — guided AI conversation to define ICP and launch searches
+- [x] Web-based pipeline — full crawl + qualify with live streaming results
+- [x] Dual-LLM security — prompt injection defense via isolated query generation
 - [ ] Generalize ICP config — per-campaign keywords/prompts instead of hardcoded
 - [ ] Email drafting module — auto-generate cold emails from deep research
-- [ ] Web dashboard — Next.js frontend for campaign management
-- [ ] Multi-tenant API — FastAPI wrapper for SaaS deployment
 - [ ] CRM integrations — push hot leads to HubSpot, Salesforce, etc.
+- [ ] Multi-tenant auth — user accounts and campaign history
+- [ ] Deep research in chat — trigger multi-page analysis from the web UI
 
 ---
 

@@ -82,7 +82,7 @@ _kimi_tpd_exhausted = False
 class LeadQualifier:
     """Qualifies leads using LLM analysis of website content and screenshots."""
     
-    def __init__(self):
+    def __init__(self, search_context: dict | None = None):
         # Initialize OpenAI client
         self.openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
         
@@ -96,9 +96,104 @@ class LeadQualifier:
         # Global rate limiter to stay under Kimi's 20 RPM org limit
         self.rate_limiter = _kimi_rate_limiter
         
+        # Dynamic search context (from chat interface) — overrides hardcoded prompts
+        self.search_context = search_context
+        
+        # Build prompts: dynamic if context provided, else hardcoded Mainrich defaults
+        if search_context:
+            self._system_prompt = self._build_dynamic_system_prompt(search_context)
+            self._user_prompt_template = self._build_dynamic_user_prompt(search_context)
+            self._vision_prompt = self._build_dynamic_vision_prompt(search_context)
+            self._json_schema = self._build_dynamic_json_schema(search_context)
+        else:
+            self._system_prompt = SYSTEM_PROMPT_QUALIFIER
+            self._user_prompt_template = USER_PROMPT_TEMPLATE
+            self._vision_prompt = VISION_PROMPT_TEMPLATE
+            self._json_schema = None  # use legacy _get_json_schema_instruction
+        
         # Cost tracking
         self.total_input_tokens = 0
         self.total_output_tokens = 0
+    
+    # ── Dynamic Prompt Builders ────────────────
+
+    @staticmethod
+    def _build_dynamic_system_prompt(ctx: dict) -> str:
+        """Build a qualification system prompt from the user's search context."""
+        industry = ctx.get("industry") or "the specified industry"
+        profile = ctx.get("company_profile") or ""
+        tech = ctx.get("technology_focus") or ""
+        criteria = ctx.get("qualifying_criteria") or ""
+        disqualifiers = ctx.get("disqualifiers") or ""
+
+        parts = [
+            f"You are a B2B lead qualification assistant. Your job is to evaluate whether a company is a good match for a client searching for: {industry}.",
+            "",
+        ]
+
+        if profile:
+            parts.append(f"TARGET COMPANY PROFILE: {profile}")
+        if tech:
+            parts.append(f"TECHNOLOGY/PRODUCT FOCUS: {tech}")
+
+        parts.append("")
+        parts.append("SCORING GUIDELINES:")
+        parts.append("HIGH SCORE (8-10): Company clearly matches the search criteria. Strong signals on their website.")
+        parts.append("MEDIUM SCORE (4-7): Company might match but evidence is unclear or partial.")
+        parts.append("LOW SCORE (1-3): Company clearly does not match the criteria.")
+
+        if criteria:
+            parts.append(f"\nQUALIFYING SIGNALS (score higher): {criteria}")
+        if disqualifiers:
+            parts.append(f"\nDISQUALIFYING SIGNALS (score lower): {disqualifiers}")
+
+        parts.append("")
+        parts.append("IMPORTANT: Be objective. Score based ONLY on what the website content shows, not assumptions.")
+        parts.append("If the website is in a foreign language, still analyze the content — look for relevant products, services, and signals.")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def _build_dynamic_user_prompt(ctx: dict) -> str:
+        """Build user prompt template with dynamic context."""
+        industry = ctx.get("industry") or "the target industry"
+        return (
+            f"Analyze this company website to determine if they match this search: {industry}\n\n"
+            "COMPANY: {company_name}\n"
+            "WEBSITE: {website_url}\n\n"
+            "WEBSITE CONTENT (Markdown):\n{markdown_content}\n\n"
+            "Based on this information, provide your qualification assessment."
+        )
+
+    @staticmethod
+    def _build_dynamic_vision_prompt(ctx: dict) -> str:
+        """Build vision prompt with dynamic context."""
+        industry = ctx.get("industry") or "the target industry"
+        return (
+            "Look at this screenshot of the company's website.\n\n"
+            "VISUAL ANALYSIS:\n"
+            f"1. Does the page show products/services relevant to: {industry}?\n"
+            "2. Is this clearly a business in the target industry or something unrelated?\n"
+            "3. What visual evidence supports or contradicts a match?\n\n"
+            "Consider this visual evidence alongside the text analysis."
+        )
+
+    @staticmethod
+    def _build_dynamic_json_schema(ctx: dict) -> str:
+        """Build JSON schema instruction with dynamic fields."""
+        industry = ctx.get("industry") or "the target industry"
+        return f"""
+
+Respond with a JSON object in this exact format:
+{{
+    "is_qualified": boolean,
+    "confidence_score": integer from 1-10,
+    "company_type": string or null (what kind of company is this, e.g. "Dental Clinic", "Robotics Startup", "Motor Manufacturer"),
+    "industry_category": string or null (their industry sector),
+    "reasoning": string (2-3 sentences explaining how well they match the search for: {industry}),
+    "key_signals": array of strings (positive signals found that match the search),
+    "red_flags": array of strings (signals that suggest they don't match)
+}}"""
     
     async def qualify_lead(
         self,
@@ -194,7 +289,15 @@ class LeadQualifier:
         """
         Quick pre-check for obvious negative signals.
         Returns a rejection result if clear negative signals found, None otherwise.
+        
+        NOTE: When using dynamic search context (chat interface), we SKIP this check
+        entirely and let the LLM decide. The hardcoded keywords are Mainrich-specific
+        and would misfire for other industries.
         """
+        # Skip keyword shortcut when using dynamic context — let LLM decide
+        if self.search_context:
+            return None
+        
         content_lower = content.lower()
         
         # Count strong negative signals
@@ -227,19 +330,21 @@ class LeadQualifier:
     ) -> QualificationResult:
         """Qualify using Kimi K2.5 with vision capabilities."""
         
+        json_schema = self._json_schema or self._get_json_schema_instruction()
+        
         # Build the user prompt with both text and image
         user_content = [
             {
                 "type": "text",
-                "text": USER_PROMPT_TEMPLATE.format(
+                "text": self._user_prompt_template.format(
                     company_name=company_name,
                     website_url=website_url,
                     markdown_content=crawl_result.markdown_content
-                ) + self._get_json_schema_instruction() + "\n\nIMPORTANT: Return ONLY valid JSON. No explanations before or after."
+                ) + json_schema + "\n\nIMPORTANT: Return ONLY valid JSON. No explanations before or after."
             },
             {
                 "type": "text", 
-                "text": VISION_PROMPT_TEMPLATE
+                "text": self._vision_prompt
             }
         ]
         
@@ -260,7 +365,7 @@ class LeadQualifier:
                 response = await self.kimi_client.chat.completions.create(
                     model="kimi-k2.5",
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + " Always respond with valid JSON only."},
+                        {"role": "system", "content": self._system_prompt + " Always respond with valid JSON only."},
                         {"role": "user", "content": user_content}
                     ],
                     temperature=1,  # kimi-k2.5 requires temperature=1
@@ -310,7 +415,9 @@ class LeadQualifier:
     ) -> QualificationResult:
         """Qualify using Kimi with text only (no vision)."""
         
-        prompt = USER_PROMPT_TEMPLATE.format(
+        json_schema = self._json_schema or self._get_json_schema_instruction()
+        
+        prompt = self._user_prompt_template.format(
             company_name=company_name,
             website_url=website_url,
             markdown_content=crawl_result.markdown_content
@@ -324,7 +431,7 @@ class LeadQualifier:
                 response = await self.kimi_client.chat.completions.create(
                     model="kimi-k2.5",  # Cheapest model: ¥0.70/1M input
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + self._get_json_schema_instruction()},
+                        {"role": "system", "content": self._system_prompt + json_schema},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=1,  # kimi-k2.5 requires temperature=1
@@ -375,13 +482,15 @@ class LeadQualifier:
     ) -> QualificationResult:
         """Qualify using OpenAI GPT-4o or GPT-4o-mini."""
         
+        json_schema = self._json_schema or self._get_json_schema_instruction()
+        
         # Build messages
         user_content = []
         
         # Add text content
         user_content.append({
             "type": "text",
-            "text": USER_PROMPT_TEMPLATE.format(
+            "text": self._user_prompt_template.format(
                 company_name=company_name,
                 website_url=website_url,
                 markdown_content=crawl_result.markdown_content
@@ -392,7 +501,7 @@ class LeadQualifier:
         if use_vision and crawl_result.screenshot_base64:
             user_content.append({
                 "type": "text",
-                "text": VISION_PROMPT_TEMPLATE
+                "text": self._vision_prompt
             })
             user_content.append({
                 "type": "image_url",
@@ -408,7 +517,7 @@ class LeadQualifier:
         response = await self.openai_client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_QUALIFIER + self._get_json_schema_instruction()},
+                {"role": "system", "content": self._system_prompt + json_schema},
                 {"role": "user", "content": user_content}
             ],
             response_format={"type": "json_object"},
@@ -551,10 +660,12 @@ Respond with a JSON object in this exact format:
         qualified = data.get("is_qualified")
         if qualified is None:
             qualified = int(score) >= 6
+        # Accept both legacy "hardware_type" and dynamic "company_type" field names
+        hw_type = data.get("hardware_type") or data.get("company_type") or data.get("category")
         return QualificationResult(
             is_qualified=bool(qualified),
             confidence_score=min(10, max(1, int(score))),
-            hardware_type=data.get("hardware_type") or data.get("category"),
+            hardware_type=hw_type,
             industry_category=data.get("industry_category") or data.get("industry"),
             reasoning=data.get("reasoning", "No reasoning provided"),
             key_signals=data.get("key_signals", []),
@@ -570,7 +681,21 @@ Respond with a JSON object in this exact format:
         """Fallback qualification using only keyword matching."""
         content_lower = content.lower()
         
-        # Count positive and negative keywords
+        if self.search_context:
+            # Dynamic: extract keywords from the user's search context
+            ctx_text = " ".join(v for v in self.search_context.values() if v).lower()
+            ctx_words = [w.strip() for w in ctx_text.replace(",", " ").split() if len(w.strip()) > 3]
+            matched = [w for w in ctx_words if w in content_lower]
+            score = min(10, max(1, len(matched) * 2 + 3))
+            return QualificationResult(
+                is_qualified=score >= 6,
+                confidence_score=score,
+                reasoning=f"Keyword analysis (LLM unavailable: {error_msg[:50]}). Found {len(matched)} relevant terms from search context.",
+                key_signals=matched[:10],
+                red_flags=["LLM unavailable — keyword-only analysis"]
+            )
+        
+        # Legacy: hardcoded Mainrich keywords
         positive_count = sum(1 for kw in POSITIVE_KEYWORDS if kw.lower() in content_lower)
         negative_count = sum(1 for kw in NEGATIVE_KEYWORDS if kw.lower() in content_lower)
         
