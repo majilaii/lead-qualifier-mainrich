@@ -48,6 +48,7 @@ git clone <your-repo-url>
 cd lead-qualifier
 
 # Create virtual environment
+cd backend
 python -m venv venv
 source venv/bin/activate  # macOS/Linux
 # venv\Scripts\activate   # Windows
@@ -62,10 +63,10 @@ playwright install chromium
 ### 2. Configure API Keys
 
 ```bash
-cp .env.example .env
+cp backend/.env.example backend/.env
 ```
 
-Edit `.env` and add your keys. **You need at minimum ONE of these:**
+Edit `backend/.env` and add your keys. **You need at minimum ONE of these:**
 
 | Key | What For | Where to Get It | Cost |
 |-----|----------|-----------------|------|
@@ -85,13 +86,14 @@ Optional enrichment keys (skip these initially):
 **Option A: Use Exa to discover leads automatically** (requires `EXA_API_KEY`)
 
 ```bash
+cd backend
 python test_exa.py --export
 # Creates output/exa_leads_YYYYMMDD_HHMM_for_qualifier.csv
 ```
 
 **Option B: Import from LinkedIn Sales Navigator / your own CSV**
 
-Create `input_leads.csv`:
+Create `backend/input_leads.csv`:
 
 ```csv
 company_name,website_url,contact_name,linkedin_profile_url
@@ -102,12 +104,14 @@ Figure AI,https://www.figure.ai,Brett Adcock,
 **Option C: Use the included sample file**
 
 ```bash
-cp sample_leads.csv input_leads.csv
+cp backend/sample_leads.csv backend/input_leads.csv
 ```
 
 ### 4. Run
 
 ```bash
+cd backend
+
 # Quick test with 4 sample companies (Boston Dynamics, Figure AI, Maxon, HubSpot)
 python main.py --test
 
@@ -127,7 +131,8 @@ python main.py --input input_leads.csv --clear-checkpoint
 Or use the convenience script:
 
 ```bash
-chmod +x run.sh
+chmod +x backend/run.sh
+cd backend
 ./run.sh test              # Test with sample companies
 ./run.sh run               # Process input_leads.csv
 ./run.sh run --deep        # Process with deep research
@@ -143,27 +148,38 @@ chmod +x run.sh
 ```
 lead-qualifier/
 │
-├── main.py              # 🎯 Pipeline orchestrator — ties everything together
-├── config.py            # ⚙️  All settings: API keys, prompts, keywords, thresholds
-├── models.py            # 📦 Pydantic data models (LeadInput, QualificationResult, etc.)
+├── backend/                 # Python qualification pipeline
+│   ├── main.py              # 🎯 Pipeline orchestrator — ties everything together
+│   ├── config.py            # ⚙️  All settings: API keys, prompts, keywords, thresholds
+│   ├── models.py            # 📦 Pydantic data models (LeadInput, QualificationResult, etc.)
+│   │
+│   ├── test_exa.py          # 🔍 Step 1: Discover leads via Exa AI semantic search
+│   ├── scraper.py           # 🌐 Step 2: Crawl company websites (crawl4ai + Playwright)
+│   ├── intelligence.py      # 🧠 Step 3: LLM-based lead qualification (Kimi / OpenAI)
+│   ├── deep_research.py     # 🔬 Step 4: Deep multi-page analysis for hot leads
+│   ├── enrichment.py        # 📇 Step 5: Contact enrichment (Apollo / Hunter)
+│   ├── export.py            # 📊 Step 6: Export to Excel / Google Sheets
+│   │
+│   ├── utils.py             # 🔧 Helpers: checkpointing, cost tracking, deduplication
+│   ├── run.sh               # 🚀 Convenience shell script for common commands
+│   ├── sample_leads.csv     # 📄 Example input file (10 companies)
+│   ├── requirements.txt     # 📦 Python dependencies
+│   ├── .env.example         # 🔑 API key template — copy to .env
+│   └── output/              # 📁 Generated results (gitignored)
+│       ├── qualified_hot_leads.csv
+│       ├── review_manual_check.csv
+│       └── rejected_with_reasons.csv
 │
-├── test_exa.py          # 🔍 Step 1: Discover leads via Exa AI semantic search
-├── scraper.py           # 🌐 Step 2: Crawl company websites (crawl4ai + Playwright)
-├── intelligence.py      # 🧠 Step 3: LLM-based lead qualification (Kimi / OpenAI)
-├── deep_research.py     # 🔬 Step 4: Deep multi-page analysis for hot leads
-├── enrichment.py        # 📇 Step 5: Contact enrichment (Apollo / Hunter)
-├── export.py            # 📊 Step 6: Export to Excel / Google Sheets
+├── frontend/                # Next.js landing page / dashboard (WIP)
+│   ├── src/app/
+│   │   ├── page.tsx         # Landing page
+│   │   ├── layout.tsx       # Root layout
+│   │   ├── globals.css      # Global styles
+│   │   └── components/      # UI components
+│   ├── package.json
+│   └── tsconfig.json
 │
-├── utils.py             # 🔧 Helpers: checkpointing, cost tracking, deduplication
-├── run.sh               # 🚀 Convenience shell script for common commands
-│
-├── sample_leads.csv     # 📄 Example input file (10 companies)
-├── requirements.txt     # 📦 Python dependencies
-├── .env.example         # 🔑 API key template — copy to .env
-└── output/              # 📁 Generated results (gitignored)
-    ├── qualified_hot_leads.csv
-    ├── review_manual_check.csv
-    └── rejected_with_reasons.csv
+└── README.md
 ```
 
 ---
@@ -232,9 +248,10 @@ Start with manual mode. Enable API enrichment once the pipeline is proven and yo
 
 ## CLI Reference
 
-### `main.py` — Main Pipeline
+### `backend/main.py` — Main Pipeline
 
 ```
+cd backend
 python main.py [OPTIONS]
 
 Options:
@@ -246,9 +263,10 @@ Options:
   --clear-checkpoint    Delete previous progress and start fresh
 ```
 
-### `test_exa.py` — Lead Discovery
+### `backend/test_exa.py` — Lead Discovery
 
 ```
+cd backend
 python test_exa.py [OPTIONS]
 
 Options:
@@ -256,18 +274,20 @@ Options:
   --export     Export results to CSV (auto-creates qualifier-compatible format)
 ```
 
-### `deep_research.py` — Single Company Research
+### `backend/deep_research.py` — Single Company Research
 
 ```
+cd backend
 python deep_research.py <company_name> <website_url>
 
 Example:
   python deep_research.py "Maxon Group" "https://www.maxongroup.com"
 ```
 
-### `export.py` — Export Results
+### `backend/export.py` — Export Results
 
 ```
+cd backend
 python export.py [excel|sheets|watch]
 
   excel   → Creates .xlsx with Hot/Review/Rejected sheets
@@ -279,7 +299,7 @@ python export.py [excel|sheets|watch]
 
 ## Configuration Guide
 
-All configuration is in `config.py`. Key settings:
+All configuration is in `backend/config.py`. Key settings:
 
 | Setting | Default | What It Controls |
 |---------|---------|-----------------|
@@ -293,14 +313,14 @@ All configuration is in `config.py`. Key settings:
 
 ### Customizing the ICP (Ideal Customer Profile)
 
-To target a different industry, edit these in `config.py`:
+To target a different industry, edit these in `backend/config.py`:
 
 - **`POSITIVE_KEYWORDS`** — Terms that signal a good-fit company (e.g., "robotics", "BLDC", "actuator")
 - **`NEGATIVE_KEYWORDS`** — Terms that signal a bad fit (e.g., "SaaS", "marketing agency", "law firm")
 - **`SYSTEM_PROMPT_QUALIFIER`** — The system prompt telling the LLM exactly what makes a good customer
 - **`INDUSTRY_CATEGORIES`** — How to classify leads by industry vertical
 
-For Exa discovery queries, edit `LEAD_QUERIES` in `test_exa.py`.
+For Exa discovery queries, edit `LEAD_QUERIES` in `backend/test_exa.py`.
 
 ---
 
@@ -338,7 +358,7 @@ python main.py --clear-checkpoint
 ## Troubleshooting
 
 ### "No LLM API configured"
-→ Add `OPENAI_API_KEY` or `KIMI_API_KEY` to your `.env` file.
+→ Add `OPENAI_API_KEY` or `KIMI_API_KEY` to your `backend/.env` file.
 
 ### Playwright / Chromium errors
 ```bash
@@ -349,16 +369,16 @@ playwright install-deps chromium
 
 ### Many crawl failures / timeouts
 Some sites block headless browsers (Cloudflare, etc.). These leads go to the "review" queue.
-- Increase `REQUEST_TIMEOUT` in `config.py` (default: 30s)
+- Increase `REQUEST_TIMEOUT` in `backend/config.py` (default: 30s)
 - Lower `CONCURRENCY_LIMIT` to avoid rate limits
 - Manually visit the site for blocked leads
 
 ### Kimi API errors
-Kimi K2.5 is a thinking model that requires `temperature=1`. This is already configured. If you see timeout errors, the model may need more time — try increasing the `httpx.Timeout` in `intelligence.py`.
+Kimi K2.5 is a thinking model that requires `temperature=1`. This is already configured. If you see timeout errors, the model may need more time — try increasing the `httpx.Timeout` in `backend/intelligence.py`.
 
 ### Stale / wrong results
 ```bash
-python main.py --clear-checkpoint
+cd backend && python main.py --clear-checkpoint
 ```
 Clears the checkpoint AND output CSVs for a clean run.
 
@@ -382,7 +402,7 @@ The Exa discovery step (`test_exa.py`) is optional. You can skip it entirely and
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes
-4. Test with `python main.py --test --clear-checkpoint`
+4. Test with `cd backend && python main.py --test --clear-checkpoint`
 5. Submit a PR
 
 Please keep the modular architecture — each module should do one thing and be independently testable.

@@ -17,10 +17,12 @@ Output: QualificationResult with confidence_score, hardware_type,
 import asyncio
 import json
 import base64
+import random
+import time
 from typing import Optional
 import httpx
 
-from openai import OpenAI, AsyncOpenAI
+from openai import OpenAI, AsyncOpenAI, RateLimitError
 from pydantic import ValidationError
 
 from models import QualificationResult, CrawlResult
@@ -39,6 +41,44 @@ from config import (
 )
 
 
+class KimiRateLimiter:
+    """Sliding-window rate limiter to stay under Kimi's 20 RPM org limit.
+    
+    We target 10 RPM (6s between requests) because vision calls with
+    base64 screenshots are heavyweight and Kimi counts in-flight requests.
+    All Kimi API calls must `await limiter.acquire()` before firing.
+    Retries also go through the limiter, so they don't pile up.
+    """
+    
+    def __init__(self, max_rpm: int = 10):
+        self._min_interval = 60.0 / max_rpm  # 6s at 10 RPM
+        self._lock = asyncio.Lock()
+        self._last_call = 0.0
+    
+    async def acquire(self):
+        """Wait until we're allowed to make the next API call."""
+        async with self._lock:
+            now = time.monotonic()
+            wait = self._last_call + self._min_interval - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_call = time.monotonic()
+
+
+# Global rate limiter — shared across all concurrent qualification tasks
+_kimi_rate_limiter = KimiRateLimiter(max_rpm=10)
+
+
+class KimiDailyLimitError(Exception):
+    """Raised when Kimi's daily token budget (TPD) is exhausted.
+    Signals that we should fall back to another model for the rest of the run."""
+    pass
+
+
+# Track whether Kimi TPD is exhausted for this run (skip future Kimi calls)
+_kimi_tpd_exhausted = False
+
+
 class LeadQualifier:
     """Qualifies leads using LLM analysis of website content and screenshots."""
     
@@ -52,6 +92,9 @@ class LeadQualifier:
             base_url=KIMI_API_BASE,
             timeout=httpx.Timeout(120.0, connect=10.0)  # 120s read timeout, 10s connect
         ) if KIMI_API_KEY else None
+        
+        # Global rate limiter to stay under Kimi's 20 RPM org limit
+        self.rate_limiter = _kimi_rate_limiter
         
         # Cost tracking
         self.total_input_tokens = 0
@@ -91,32 +134,52 @@ class LeadQualifier:
             return quick_result
         
         # Choose model and client based on availability and vision needs
+        global _kimi_tpd_exhausted
+        
+        kimi_available = self.kimi_client and not _kimi_tpd_exhausted
         use_kimi_vision = (
             use_vision 
-            and self.kimi_client 
+            and kimi_available
             and crawl_result.screenshot_base64
         )
         
         try:
+            # ── Tier 1: Kimi Vision (cheapest + best) ──
             if use_kimi_vision:
-                print(f"  → Using Kimi vision for {company_name}")
-                result = await self._qualify_with_kimi_vision(
-                    company_name, website_url, crawl_result
-                )
-            elif self.kimi_client:
-                print(f"  → Using Kimi text-only for {company_name}")
-                result = await self._qualify_with_kimi_text(
-                    company_name, website_url, crawl_result
-                )
-            elif self.openai_client:
+                try:
+                    print(f"  → Using Kimi vision for {company_name}")
+                    return await self._qualify_with_kimi_vision(
+                        company_name, website_url, crawl_result
+                    )
+                except KimiDailyLimitError:
+                    print(f"  ⚠️ Kimi daily limit hit — falling back to text-only")
+                    # Fall through to text
+            
+            # ── Tier 2: Kimi Text-only (no screenshot tokens) ──
+            if kimi_available:
+                try:
+                    print(f"  → Falling back to Kimi text-only for {company_name}")
+                    return await self._qualify_with_kimi_text(
+                        company_name, website_url, crawl_result
+                    )
+                except KimiDailyLimitError:
+                    print(f"  ⚠️ Kimi daily limit fully exhausted — switching to OpenAI")
+                    # Fall through to OpenAI
+            
+            # ── Tier 3: OpenAI ──
+            if self.openai_client:
                 print(f"  → Using OpenAI for {company_name}")
-                result = await self._qualify_with_openai(
+                return await self._qualify_with_openai(
                     company_name, website_url, crawl_result, use_vision
                 )
-            else:
-                raise ValueError("No LLM API configured. Set OPENAI_API_KEY or KIMI_API_KEY.")
             
-            return result
+            # ── Tier 4: Keyword-only ──
+            print(f"  → No LLM available, using keyword analysis for {company_name}")
+            return self._keyword_only_qualification(
+                company_name,
+                crawl_result.markdown_content,
+                error_msg="All LLM APIs unavailable (Kimi TPD exhausted, no OpenAI key)"
+            )
             
         except (asyncio.CancelledError, Exception) as e:
             print(f"  ⚠️ LLM Error for {company_name}: {e}")
@@ -189,10 +252,11 @@ class LeadQualifier:
                 }
             })
         
-        # Try up to 2 times with kimi-k2.5 (cheapest: ¥0.70/1M input, ¥4.00/1M output)
+        # Try up to 4 times with rate-limiter + exponential backoff on 429
         last_error = None
-        for attempt in range(2):
+        for attempt in range(4):
             try:
+                await self.rate_limiter.acquire()  # Serialize: max 15 RPM across all tasks
                 response = await self.kimi_client.chat.completions.create(
                     model="kimi-k2.5",
                     messages=[
@@ -210,14 +274,27 @@ class LeadQualifier:
                 
                 response_text = self._extract_kimi_response(response.choices[0].message)
                 return self._parse_llm_response(response_text)
+            except RateLimitError as e:
+                last_error = e
+                error_msg = str(e).lower()
+                # Daily token limit (TPD) — no point retrying, bail immediately
+                if 'tpd' in error_msg or 'tokens per day' in error_msg:
+                    global _kimi_tpd_exhausted
+                    _kimi_tpd_exhausted = True
+                    print(f"  🛑 Kimi daily token limit (TPD) exhausted!")
+                    raise KimiDailyLimitError(str(e))
+                # RPM limit — exponential backoff: 3-4s, 6-7s, 12-13s, 24-25s
+                backoff = (3 * (2 ** attempt)) + random.uniform(0, 1)
+                print(f"  ⚠️ Kimi vision rate-limited (attempt {attempt+1}/4), backing off {backoff:.1f}s...")
+                await asyncio.sleep(backoff)
             except (asyncio.CancelledError, Exception) as e:
                 last_error = e
-                if attempt == 0:
+                if attempt < 3:
                     print(f"  ⚠️ Kimi vision attempt {attempt+1} failed: {type(e).__name__}: {str(e)[:80]}, retrying...")
                     await asyncio.sleep(2)
         
-        # Both attempts failed - return low-confidence result
-        print(f"  ❌ Kimi vision failed after 2 attempts: {last_error}")
+        # All RPM retries failed - return low-confidence result
+        print(f"  ❌ Kimi vision failed after 4 attempts: {last_error}")
         return QualificationResult(
             is_qualified=False,
             confidence_score=3,
@@ -239,10 +316,11 @@ class LeadQualifier:
             markdown_content=crawl_result.markdown_content
         )
         
-        # Try up to 2 times with kimi-k2.5 text-only
+        # Try up to 4 times with rate-limiter + exponential backoff on 429
         last_error = None
-        for attempt in range(2):
+        for attempt in range(4):
             try:
+                await self.rate_limiter.acquire()  # Serialize: max 15 RPM across all tasks
                 response = await self.kimi_client.chat.completions.create(
                     model="kimi-k2.5",  # Cheapest model: ¥0.70/1M input
                     messages=[
@@ -260,14 +338,27 @@ class LeadQualifier:
                 
                 response_text = self._extract_kimi_response(response.choices[0].message)
                 return self._parse_llm_response(response_text)
+            except RateLimitError as e:
+                last_error = e
+                error_msg = str(e).lower()
+                # Daily token limit (TPD) — no point retrying, bail immediately
+                if 'tpd' in error_msg or 'tokens per day' in error_msg:
+                    global _kimi_tpd_exhausted
+                    _kimi_tpd_exhausted = True
+                    print(f"  🛑 Kimi daily token limit (TPD) exhausted!")
+                    raise KimiDailyLimitError(str(e))
+                # RPM limit — exponential backoff: 3-4s, 6-7s, 12-13s, 24-25s
+                backoff = (3 * (2 ** attempt)) + random.uniform(0, 1)
+                print(f"  ⚠️ Kimi text rate-limited (attempt {attempt+1}/4), backing off {backoff:.1f}s...")
+                await asyncio.sleep(backoff)
             except (asyncio.CancelledError, Exception) as e:
                 last_error = e
-                if attempt == 0:
+                if attempt < 3:
                     print(f"  ⚠️ Kimi text attempt {attempt+1} failed: {type(e).__name__}: {str(e)[:80]}, retrying...")
                     await asyncio.sleep(2)
         
-        # Both attempts failed
-        print(f"  ❌ Kimi text failed after 2 attempts: {last_error}")
+        # All RPM retries failed
+        print(f"  ❌ Kimi text failed after 4 attempts: {last_error}")
         return QualificationResult(
             is_qualified=False,
             confidence_score=3,
