@@ -58,7 +58,7 @@ HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 # ===========================================
 # Processing Config
 # ===========================================
-CONCURRENCY_LIMIT = int(os.getenv("CONCURRENCY_LIMIT", "10"))
+CONCURRENCY_LIMIT = int(os.getenv("CONCURRENCY_LIMIT", "5"))
 MAX_TOKENS_INPUT = 6000  # Truncate markdown to save costs
 SCREENSHOT_WIDTH = 1280
 SCREENSHOT_HEIGHT = 720
