@@ -28,7 +28,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from models import LeadInput, ProcessedLead, ProcessingStats, QualificationTier, QualificationResult
-from scraper import crawl_company
+from scraper import crawl_company, CrawlerPool
 from intelligence import LeadQualifier
 from enrichment import enrich_contact, get_enrichment_status
 from utils import (
@@ -113,12 +113,13 @@ async def process_lead(
     use_vision: bool = True,
     auto_enrich: bool = False,
     deep_research: bool = False,
-    deep_researcher: DeepResearcher = None
+    deep_researcher: DeepResearcher = None,
+    crawler_pool: CrawlerPool = None
 ) -> ProcessedLead:
     """Process a single lead through the pipeline."""
     
-    # Step 1: Crawl website
-    crawl_result = await crawl_company(lead.website_url, take_screenshot=use_vision)
+    # Step 1: Crawl website (uses shared browser if pool provided)
+    crawl_result = await crawl_company(lead.website_url, take_screenshot=use_vision, crawler_pool=crawler_pool)
     
     if not crawl_result.success:
         # Website failed to crawl - send to REVIEW queue, not rejected.
@@ -279,66 +280,75 @@ Enrichment mode: {enrichment_status['mode']}
 Concurrency: {CONCURRENCY_LIMIT}
     """, title="Configuration"))
     
-    # Process with progress bar
+    # ── Parallel processing with shared browser ──
+    # One Chromium instance is shared across all crawls (no startup/shutdown per lead).
+    # Leads are processed in batches of CONCURRENCY_LIMIT in true parallel.
+    
+    BATCH_SIZE = CONCURRENCY_LIMIT  # Process this many leads at once
     semaphore = asyncio.Semaphore(CONCURRENCY_LIMIT)
-    
-    async def process_with_semaphore(lead: LeadInput) -> ProcessedLead:
-        async with semaphore:
-            return await process_lead(
-                lead=lead,
-                qualifier=qualifier,
-                output_writer=output_writer,
-                checkpoint=checkpoint,
-                cost_tracker=cost_tracker,
-                use_vision=use_vision,
-                auto_enrich=auto_enrich,
-                deep_research=deep_research,
-                deep_researcher=deep_researcher
-            )
-    
-    # Use tqdm for progress
     results = []
-    for lead in tqdm(leads_to_process, desc="Qualifying leads", unit="lead"):
-        try:
-            result = await process_with_semaphore(lead)
-            results.append(result)
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            console.print(f"\n[yellow]⚠️ Interrupted! Saving progress ({len(results)} leads processed)...[/yellow]")
-            break
-        except Exception as e:
-            console.print(f"[red]❌ Error on {lead.company_name}: {e}[/red]")
-            # Create a fallback result so we don't lose this lead
-            result = ProcessedLead(
-                company_name=lead.company_name,
-                website_url=lead.website_url,
-                contact_name=lead.contact_name,
-                linkedin_profile_url=lead.linkedin_profile_url,
-                qualification_tier=QualificationTier.REVIEW,
-                confidence_score=3,
-                is_qualified=False,
-                reasoning=f"Processing error: {type(e).__name__}: {str(e)[:100]}",
-                crawl_success=False,
-                error_message=str(e)[:200]
-            )
-            results.append(result)
-        
-        # Update stats for every result
-        if results:
-            last = results[-1]
-            stats.processed += 1
-            if last.qualification_tier == QualificationTier.HOT:
-                stats.hot_leads += 1
-            elif last.qualification_tier == QualificationTier.REVIEW:
-                stats.review_leads += 1
-            else:
-                stats.rejected_leads += 1
-            if not last.crawl_success:
-                stats.crawl_failures += 1
-            if last.qualification_tier == QualificationTier.HOT:
-                print_lead_summary(last)
-        
-        # Small delay between requests
-        await asyncio.sleep(0.5)
+    progress = tqdm(total=len(leads_to_process), desc="Qualifying leads", unit="lead")
+    
+    async def process_one(lead: LeadInput, pool: CrawlerPool) -> ProcessedLead:
+        """Process a single lead with semaphore-controlled concurrency."""
+        async with semaphore:
+            try:
+                return await process_lead(
+                    lead=lead,
+                    qualifier=qualifier,
+                    output_writer=output_writer,
+                    checkpoint=checkpoint,
+                    cost_tracker=cost_tracker,
+                    use_vision=use_vision,
+                    auto_enrich=auto_enrich,
+                    deep_research=deep_research,
+                    deep_researcher=deep_researcher,
+                    crawler_pool=pool
+                )
+            except Exception as e:
+                console.print(f"[red]❌ Error on {lead.company_name}: {e}[/red]")
+                return ProcessedLead(
+                    company_name=lead.company_name,
+                    website_url=lead.website_url,
+                    contact_name=lead.contact_name,
+                    linkedin_profile_url=lead.linkedin_profile_url,
+                    qualification_tier=QualificationTier.REVIEW,
+                    confidence_score=3,
+                    is_qualified=False,
+                    reasoning=f"Processing error: {type(e).__name__}: {str(e)[:100]}",
+                    crawl_success=False,
+                    error_message=str(e)[:200]
+                )
+    
+    try:
+        async with CrawlerPool() as pool:
+            # Process in batches for memory safety + progress updates
+            for batch_start in range(0, len(leads_to_process), BATCH_SIZE):
+                batch = leads_to_process[batch_start:batch_start + BATCH_SIZE]
+                
+                # Fire all leads in this batch in parallel
+                batch_tasks = [process_one(lead, pool) for lead in batch]
+                batch_results = await asyncio.gather(*batch_tasks)
+                
+                # Record results and update progress
+                for result in batch_results:
+                    results.append(result)
+                    stats.processed += 1
+                    if result.qualification_tier == QualificationTier.HOT:
+                        stats.hot_leads += 1
+                    elif result.qualification_tier == QualificationTier.REVIEW:
+                        stats.review_leads += 1
+                    else:
+                        stats.rejected_leads += 1
+                    if not result.crawl_success:
+                        stats.crawl_failures += 1
+                    if result.qualification_tier == QualificationTier.HOT:
+                        print_lead_summary(result)
+                    progress.update(1)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        console.print(f"\n[yellow]⚠️ Interrupted! Saving progress ({len(results)} leads processed)...[/yellow]")
+    finally:
+        progress.close()
     
     # Final stats
     stats.total_input_tokens = qualifier.total_input_tokens
