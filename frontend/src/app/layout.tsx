@@ -5,9 +5,6 @@ export const metadata: Metadata = {
   title: "The Magnet Hunter — AI-Powered B2B Lead Qualification",
   description:
     "From 7.2 billion data points to your perfect lead. AI-powered discovery, crawling, and qualification for hardware B2B companies.",
-  icons: {
-    icon: "/favicon.ico",
-  },
 };
 
 export default function RootLayout({
