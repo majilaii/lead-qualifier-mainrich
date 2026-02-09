@@ -76,6 +76,50 @@ npm run dev
 
 Then open **http://localhost:3000/chat** in your browser.
 
+### 🐳 Option B: Docker (Recommended)
+
+Docker bundles Python 3.12, Node 22, Playwright, Chromium, and all dependencies into containers — no local setup required.
+
+**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+
+```bash
+# 1. Set up your API keys (one-time)
+cp backend/.env.example backend/.env
+# Edit backend/.env and add your KIMI_API_KEY or OPENAI_API_KEY
+
+# 2. Build & start both services
+docker compose up --build
+
+# That's it. Open http://localhost:3000/chat
+```
+
+**Subsequent runs** (no rebuild needed):
+```bash
+docker compose up        # Foreground
+docker compose up -d     # Detached (background)
+docker compose down      # Stop everything
+```
+
+**Run the CLI pipeline via Docker:**
+```bash
+# Test with sample companies
+docker compose run --rm backend python main.py --test
+
+# Process your own leads
+docker compose run --rm backend python main.py --input sample_leads.csv
+
+# With deep research
+docker compose run --rm backend python main.py --input sample_leads.csv --deep-research
+
+# Discover leads via Exa
+docker compose run --rm backend python test_exa.py --export
+
+# Deep research on a single company
+docker compose run --rm backend python deep_research.py "Maxon Group" "https://www.maxongroup.com"
+```
+
+> **Note:** Output files are volume-mounted — results appear in `backend/output/` on your host machine.
+
 ### Chat Flow
 
 1. **Describe** what companies you're looking for (e.g., "robotics startups building humanoid robots")
@@ -108,7 +152,7 @@ Same as the CLI pipeline — at minimum `KIMI_API_KEY` or `OPENAI_API_KEY` in `b
 
 ### Prerequisites
 
-- **Python 3.11+**
+- **Python 3.11+** (or just [Docker Desktop](https://www.docker.com/products/docker-desktop/) — skips all local setup)
 - **At least one LLM API key** (see Step 2)
 
 ### 1. Clone & Set Up Environment
@@ -218,7 +262,11 @@ cd backend
 ```
 lead-qualifier/
 │
+├── docker-compose.yml          # 🐳 Orchestrates backend + frontend containers
+│
 ├── backend/                    # Python pipeline + chat API
+│   ├── Dockerfile              # 🐳 Python 3.12 + Playwright/Chromium image
+│   ├── .dockerignore           # 🐳 Files excluded from Docker build
 │   ├── main.py                 # 🎯 CLI pipeline orchestrator
 │   ├── chat_server.py          # 🌐 FastAPI server for the chat interface
 │   ├── chat_engine.py          # 🧠 Dual-LLM chat engine (conversation + query gen)
@@ -241,6 +289,9 @@ lead-qualifier/
 │   └── output/                 # 📁 Generated results (gitignored)
 │
 ├── frontend/                   # Next.js web UI
+│   ├── Dockerfile              # 🐳 Multi-stage Node 22 build (73 MB image)
+│   ├── .dockerignore           # 🐳 Files excluded from Docker build
+│   ├── next.config.ts          # Next.js config (standalone output for Docker)
 │   ├── src/app/
 │   │   ├── page.tsx            # Landing page
 │   │   ├── chat/page.tsx       # Chat interface page
@@ -464,6 +515,21 @@ Make sure both servers are running:
 
 Check `http://localhost:8000/api/health` — it should return `{"status": "ok", "llm_available": true, ...}`. If `llm_available` is false, your API keys aren't configured. The frontend falls back to mock responses when the backend is down.
 
+### Docker build fails
+```bash
+# Make sure Docker Desktop is running, then:
+docker compose build --no-cache   # Full rebuild
+```
+
+If you see Playwright/Chromium errors in the container, the Dockerfile already handles all system deps. If it persists, try: `docker compose down && docker system prune -f && docker compose up --build`.
+
+### Docker containers can't communicate
+The frontend waits for the backend health check before starting. If the backend is unhealthy:
+```bash
+docker compose logs backend    # Check for API key errors
+curl http://localhost:8000/api/health   # Should return {"status": "ok"}
+```
+
 ### "No LLM API configured"
 → Add `OPENAI_API_KEY` or `KIMI_API_KEY` to your `backend/.env` file.
 
@@ -499,6 +565,7 @@ The Exa discovery step (`test_exa.py`) is optional. You can skip it entirely and
 - [x] Chat interface — guided AI conversation to define ICP and launch searches
 - [x] Web-based pipeline — full crawl + qualify with live streaming results
 - [x] Dual-LLM security — prompt injection defense via isolated query generation
+- [x] Docker — containerized deployment with `docker compose up`
 - [ ] Generalize ICP config — per-campaign keywords/prompts instead of hardcoded
 - [ ] Email drafting module — auto-generate cold emails from deep research
 - [ ] CRM integrations — push hot leads to HubSpot, Salesforce, etc.

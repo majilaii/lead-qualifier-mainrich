@@ -340,7 +340,7 @@ Respond with a JSON object in this exact format:
                     company_name=company_name,
                     website_url=website_url,
                     markdown_content=crawl_result.markdown_content
-                ) + json_schema + "\n\nIMPORTANT: Return ONLY valid JSON. No explanations before or after."
+                ) + json_schema + "\n\nCRITICAL: Your response must be ONLY the JSON object. Do NOT include any explanation, analysis, or thinking. Start your response with { and end with }."
             },
             {
                 "type": "text", 
@@ -363,13 +363,14 @@ Respond with a JSON object in this exact format:
             try:
                 await self.rate_limiter.acquire()  # Serialize: max 15 RPM across all tasks
                 response = await self.kimi_client.chat.completions.create(
-                    model="kimi-k2.5",
+                    model="moonshot-v1-128k-vision-preview",
                     messages=[
-                        {"role": "system", "content": self._system_prompt + " Always respond with valid JSON only."},
+                        {"role": "system", "content": self._system_prompt + " You MUST respond with ONLY a valid JSON object. No explanation or thinking text. Start with { and end with }."},
                         {"role": "user", "content": user_content}
                     ],
-                    temperature=1,  # kimi-k2.5 requires temperature=1
-                    max_tokens=1000
+                    temperature=0.3,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
                 )
                 
                 # Track tokens
@@ -429,13 +430,14 @@ Respond with a JSON object in this exact format:
             try:
                 await self.rate_limiter.acquire()  # Serialize: max 15 RPM across all tasks
                 response = await self.kimi_client.chat.completions.create(
-                    model="kimi-k2.5",  # Cheapest model: ¥0.70/1M input
+                    model="kimi-k2-turbo-preview",
                     messages=[
-                        {"role": "system", "content": self._system_prompt + json_schema},
+                        {"role": "system", "content": self._system_prompt + json_schema + " Respond with ONLY the JSON object."},
                         {"role": "user", "content": prompt}
                     ],
-                    temperature=1,  # kimi-k2.5 requires temperature=1
-                    max_tokens=1000
+                    temperature=0.3,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
                 )
                 
                 # Track tokens
@@ -539,18 +541,43 @@ Respond with a JSON object in this exact format:
         Kimi K2.5 is a thinking model that puts reasoning in
         model_extra['reasoning_content'] and the final answer in content.
         Sometimes content is empty and the JSON is only in reasoning_content.
-        We check both and return whichever contains our JSON.
+        
+        Key issue: sometimes Kimi puts chain-of-thought text in 'content'
+        that starts with "The user wants me to..." — that's thinking, not the answer.
+        We need to detect this and look for actual JSON elsewhere.
         """
         content = message.content or ""
         reasoning = ""
         if hasattr(message, 'model_extra') and isinstance(message.model_extra, dict):
             reasoning = message.model_extra.get('reasoning_content', '') or ''
         
-        # If content has a JSON object, prefer it (it's the final answer)
-        if content.strip() and '{' in content:
+        # Detect if content is actually thinking/chain-of-thought (not the JSON answer)
+        content_stripped = content.strip()
+        is_thinking = (
+            content_stripped.startswith("The user wants") or
+            content_stripped.startswith("Let me") or
+            content_stripped.startswith("I need to") or
+            content_stripped.startswith("I'll ") or
+            content_stripped.startswith("Looking at") or
+            content_stripped.startswith("Based on") or
+            content_stripped.startswith("Analyzing") or
+            (len(content_stripped) > 200 and not content_stripped.startswith('{'))
+        )
+        
+        # If content looks like clean JSON, prefer it
+        if content_stripped.startswith('{') or content_stripped.startswith('```'):
             return content
         
-        # Otherwise fall back to reasoning_content which may contain the JSON
+        # If content is thinking text, check reasoning for the actual JSON
+        if is_thinking and reasoning.strip() and '{' in reasoning:
+            return reasoning
+        
+        # If content has a JSON block somewhere inside (after thinking text), return all of it
+        # The parser will extract the JSON from the end
+        if '{' in content and '}' in content:
+            return content
+        
+        # Fall back to reasoning_content
         if reasoning.strip() and '{' in reasoning:
             return reasoning
         
@@ -578,6 +605,11 @@ Respond with a JSON object in this exact format:
             import re
             # Clean up response - strip whitespace
             response_text = response_text.strip()
+            
+            # Debug: log what we're trying to parse
+            preview = response_text[:120].replace('\n', ' ')
+            if not response_text.startswith('{'):
+                print(f"  ⚠️ LLM response doesn't start with JSON: \"{preview}...\"")
             
             # Remove markdown code fences: ```json ... ```
             cleaned = re.sub(r'```(?:json)?\s*', '', response_text).strip()

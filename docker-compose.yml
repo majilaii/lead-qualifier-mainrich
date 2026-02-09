@@ -1,0 +1,54 @@
+# ============================================================
+# 🧲 Lead Qualifier — Docker Compose
+#
+# Usage:
+#   docker compose up              # Start both services
+#   docker compose up backend      # Backend only
+#   docker compose up -d           # Detached mode
+#   docker compose down            # Stop everything
+#
+#   # Run the CLI pipeline instead of the API server:
+#   docker compose run --rm backend python main.py --test
+#   docker compose run --rm backend python main.py --input input_leads.csv
+#   docker compose run --rm backend python test_exa.py --export
+# ============================================================
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: lead-qualifier-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
+    volumes:
+      # Persist output files to host
+      - ./backend/output:/app/output
+      # Mount input CSVs so you can feed new leads without rebuild
+      - ./backend/sample_leads.csv:/app/sample_leads.csv:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: lead-qualifier-web
+    ports:
+      - "3000:3000"
+    environment:
+      # Server-side API routes (run inside container) → reach backend via Docker DNS
+      - CHAT_BACKEND_URL=http://backend:8000
+      # Client-side code (runs in user's browser) → reach backend via host port mapping
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
