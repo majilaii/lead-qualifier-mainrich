@@ -1,235 +1,154 @@
 """
-Enrichment Module — Contact Information Lookup
+Enrichment Module — Contact Information Lookup via Hunter.io
 
-Two modes:
-  - MANUAL (default): Returns empty result — you look up contacts yourself
-  - API: Uses Apollo.io and/or Hunter.io to find emails + phone numbers
+Uses Hunter.io Domain Search to find email contacts at a company.
+Free plan: 25 searches/month with full API access.
 
-Manual mode is the default to avoid API costs while the pipeline is
-being tested. Enable API mode by setting enable_api_enrichment=True
-or by passing --auto-enrich to main.py.
-
-Supported enrichment APIs:
-  - Apollo.io: Email + phone + job title (50 free credits/month)
-  - Hunter.io: Email finder (25 free searches/month)
+Usage:
+  - enrich_contact(domain) → finds best contact at the company
+  - enable_api_enrichment(True) → turns on API calls
+  - get_enrichment_status() → check if Hunter is configured
 """
 
 from typing import Optional
-from dataclasses import dataclass
 import httpx
 
 from models import EnrichmentResult
-from config import APOLLO_API_KEY, HUNTER_API_KEY
+from config import HUNTER_API_KEY
 
 
-@dataclass
-class EnrichmentConfig:
-    """Configuration for enrichment behavior."""
-    enable_api_enrichment: bool = False  # Set to True when ready to pay
-    apollo_enabled: bool = False
-    hunter_enabled: bool = False
-
-
-# Global config - start with manual mode
-ENRICHMENT_CONFIG = EnrichmentConfig(
-    enable_api_enrichment=False,
-    apollo_enabled=bool(APOLLO_API_KEY),
-    hunter_enabled=bool(HUNTER_API_KEY)
-)
+# Global flag — starts disabled, enabled via /api/enrich endpoint
+_api_enabled = False
 
 
 async def enrich_contact(
     contact_name: Optional[str],
     company_domain: str,
-    linkedin_url: Optional[str] = None
+    linkedin_url: Optional[str] = None,
 ) -> EnrichmentResult:
     """
-    Attempt to enrich contact information.
-    
-    Current mode: MANUAL (returns empty result with LinkedIn for manual lookup)
-    Enable API enrichment when ready to pay for credits.
-    
+    Find contact info for a company using Hunter.io.
+
     Args:
-        contact_name: Name of the contact
-        company_domain: Company website domain
-        linkedin_url: LinkedIn profile URL (for manual lookup)
-        
+        contact_name: Optional name of the person to find
+        company_domain: Company website domain (e.g. "stripe.com")
+        linkedin_url: Unused (kept for interface compatibility)
+
     Returns:
-        EnrichmentResult with any found contact info
+        EnrichmentResult with email, job_title, and source
     """
-    
-    # MANUAL MODE: Just return what we have for manual lookup
-    if not ENRICHMENT_CONFIG.enable_api_enrichment:
-        return EnrichmentResult(
-            enrichment_source="manual_required"
-        )
-    
-    # API MODE: Try enrichment services (when enabled)
-    result = EnrichmentResult()
-    
-    # Try Apollo first (better coverage)
-    if ENRICHMENT_CONFIG.apollo_enabled:
-        apollo_result = await _enrich_with_apollo(contact_name, company_domain)
-        if apollo_result.email:
-            result.email = apollo_result.email
-            result.mobile_number = apollo_result.mobile_number
-            result.job_title = apollo_result.job_title
-            result.enrichment_source = "apollo"
-            return result
-    
-    # Fallback to Hunter
-    if ENRICHMENT_CONFIG.hunter_enabled and not result.email:
-        hunter_result = await _enrich_with_hunter(contact_name, company_domain)
-        if hunter_result.email:
-            result.email = hunter_result.email
-            result.enrichment_source = "hunter"
-            return result
-    
-    # No enrichment found
-    result.enrichment_source = "not_found"
-    return result
+    if not _api_enabled:
+        return EnrichmentResult(enrichment_source="manual_required")
 
-
-async def _enrich_with_apollo(
-    contact_name: Optional[str],
-    company_domain: str
-) -> EnrichmentResult:
-    """
-    Enrich using Apollo.io API.
-    
-    Apollo API: https://apolloio.github.io/apollo-api-docs/
-    Pricing: 50 free credits/month, then $49/mo for 2,400
-    """
-    if not APOLLO_API_KEY:
-        return EnrichmentResult()
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            # Apollo people search endpoint
-            response = await client.post(
-                "https://api.apollo.io/v1/people/match",
-                headers={
-                    "Content-Type": "application/json",
-                    "Cache-Control": "no-cache"
-                },
-                json={
-                    "api_key": APOLLO_API_KEY,
-                    "name": contact_name,
-                    "organization_name": company_domain.replace("www.", "").split(".")[0],
-                    "domain": company_domain.replace("www.", "")
-                },
-                timeout=10.0
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                person = data.get("person", {})
-                
-                return EnrichmentResult(
-                    email=person.get("email"),
-                    mobile_number=person.get("phone_numbers", [{}])[0].get("sanitized_number") if person.get("phone_numbers") else None,
-                    job_title=person.get("title"),
-                    enrichment_source="apollo"
-                )
-            else:
-                print(f"Apollo API error: {response.status_code}")
-                return EnrichmentResult()
-                
-    except Exception as e:
-        print(f"Apollo enrichment failed: {e}")
-        return EnrichmentResult()
-
-
-async def _enrich_with_hunter(
-    contact_name: Optional[str],
-    company_domain: str
-) -> EnrichmentResult:
-    """
-    Enrich using Hunter.io API.
-    
-    Hunter API: https://hunter.io/api-documentation/v2
-    Pricing: 25 free searches/month, then $49/mo for 500
-    """
     if not HUNTER_API_KEY:
-        return EnrichmentResult()
-    
+        return EnrichmentResult(enrichment_source="not_configured")
+
+    clean_domain = company_domain.replace("www.", "").replace("https://", "").replace("http://", "").split("/")[0]
+
     try:
         async with httpx.AsyncClient() as client:
-            # Hunter email finder endpoint
-            params = {
-                "domain": company_domain.replace("www.", ""),
-                "api_key": HUNTER_API_KEY
+            params: dict = {
+                "domain": clean_domain,
+                "api_key": HUNTER_API_KEY,
             }
-            
-            # If we have a name, use email finder
-            if contact_name:
-                name_parts = contact_name.split()
-                if len(name_parts) >= 2:
-                    params["first_name"] = name_parts[0]
-                    params["last_name"] = " ".join(name_parts[1:])
-                    
-                    response = await client.get(
-                        "https://api.hunter.io/v2/email-finder",
-                        params=params,
-                        timeout=10.0
-                    )
-            else:
-                # Domain search (find any email at domain)
-                response = await client.get(
-                    "https://api.hunter.io/v2/domain-search",
+
+            # If we have a full name (first + last), use Email Finder for precision
+            if contact_name and len(contact_name.strip().split()) >= 2:
+                name_parts = contact_name.strip().split()
+                params["first_name"] = name_parts[0]
+                params["last_name"] = " ".join(name_parts[1:])
+
+                resp = await client.get(
+                    "https://api.hunter.io/v2/email-finder",
                     params=params,
-                    timeout=10.0
+                    timeout=10.0,
                 )
-            
-            if response.status_code == 200:
-                data = response.json().get("data", {})
-                
-                # Handle different response formats
-                email = data.get("email") or (data.get("emails", [{}])[0].get("value") if data.get("emails") else None)
-                
-                return EnrichmentResult(
-                    email=email,
-                    enrichment_source="hunter"
-                )
+
+                if resp.status_code == 200:
+                    data = resp.json().get("data", {})
+                    email = data.get("email")
+                    if email:
+                        print(f"   Hunter ✓ {contact_name} — {email}")
+                        return EnrichmentResult(
+                            email=email,
+                            job_title=data.get("position"),
+                            enrichment_source="hunter",
+                        )
+
+            # Domain Search — find the best contact at the company
+            resp = await client.get(
+                "https://api.hunter.io/v2/domain-search",
+                params={"domain": clean_domain, "api_key": HUNTER_API_KEY},
+                timeout=10.0,
+            )
+
+            if resp.status_code == 200:
+                data = resp.json().get("data", {})
+                emails = data.get("emails", [])
+
+                if not emails:
+                    print(f"   Hunter: no emails found for {clean_domain}")
+                    return EnrichmentResult(enrichment_source="not_found")
+
+                # Pick the best contact — prefer senior / decision-maker roles
+                best = emails[0]
+                for e in emails:
+                    dept = (e.get("department") or "").lower()
+                    seniority = (e.get("seniority") or "").lower()
+                    if dept in ("executive", "management", "engineering", "purchasing") or seniority in ("senior", "director"):
+                        best = e
+                        break
+
+                email = best.get("value")
+                title = best.get("position")
+                name = f"{best.get('first_name', '')} {best.get('last_name', '')}".strip()
+
+                if email:
+                    print(f"   Hunter ✓ {name or clean_domain} — {email} ({title or 'no title'})")
+                    return EnrichmentResult(
+                        email=email,
+                        job_title=title,
+                        enrichment_source="hunter",
+                    )
+
+            elif resp.status_code == 401:
+                print("   Hunter: invalid API key")
+            elif resp.status_code == 429:
+                print("   Hunter: rate limit reached (25/month on free plan)")
             else:
-                print(f"Hunter API error: {response.status_code}")
-                return EnrichmentResult()
-                
+                print(f"   Hunter: HTTP {resp.status_code}")
+
     except Exception as e:
-        print(f"Hunter enrichment failed: {e}")
-        return EnrichmentResult()
+        print(f"   Hunter error: {e}")
+
+    return EnrichmentResult(enrichment_source="not_found")
 
 
 def enable_api_enrichment(enable: bool = True):
     """Enable or disable API-based enrichment."""
-    global ENRICHMENT_CONFIG
-    ENRICHMENT_CONFIG.enable_api_enrichment = enable
+    global _api_enabled
+    _api_enabled = enable
     print(f"API enrichment {'enabled' if enable else 'disabled'}")
 
 
 def get_enrichment_status() -> dict:
     """Get current enrichment configuration status."""
+    configured = bool(HUNTER_API_KEY)
     return {
-        "api_enrichment_enabled": ENRICHMENT_CONFIG.enable_api_enrichment,
-        "apollo_configured": ENRICHMENT_CONFIG.apollo_enabled,
-        "hunter_configured": ENRICHMENT_CONFIG.hunter_enabled,
-        "mode": "API" if ENRICHMENT_CONFIG.enable_api_enrichment else "MANUAL"
+        "api_enrichment_enabled": _api_enabled,
+        "hunter_configured": configured,
+        "mode": "hunter" if configured else "manual",
+        "waterfall_chain": ["hunter"] if configured else ["manual"],
     }
 
 
-# Test
 if __name__ == "__main__":
     import asyncio
-    
+
     async def test():
-        print("Enrichment Status:", get_enrichment_status())
-        
-        # Test manual mode
-        result = await enrich_contact(
-            contact_name="John Smith",
-            company_domain="bostondynamics.com",
-            linkedin_url="https://linkedin.com/in/johnsmith"
-        )
+        print("Status:", get_enrichment_status())
+        enable_api_enrichment(True)
+        result = await enrich_contact(None, "stripe.com")
         print(f"Result: {result}")
-    
+
     asyncio.run(test())

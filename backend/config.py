@@ -52,6 +52,7 @@ KIMI_API_KEY = _get_valid_key("KIMI_API_KEY")
 ANTHROPIC_API_KEY = _get_valid_key("ANTHROPIC_API_KEY")
 
 # Enrichment (optional - skip for manual workflow)
+WATERFULL_API_KEY = os.getenv("WATERFULL_API_KEY", "")
 APOLLO_API_KEY = os.getenv("APOLLO_API_KEY", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 

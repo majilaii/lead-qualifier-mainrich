@@ -105,7 +105,9 @@ function escapeCsvField(value: string): string {
   return value;
 }
 
-function exportToCsv(companies: QualifiedCompany[], filename?: string) {
+function exportToCsv(companies: QualifiedCompany[], filename?: string, enrichedContacts?: Map<string, EnrichedContact>) {
+  const hasEnrichment = enrichedContacts && enrichedContacts.size > 0;
+
   const headers = [
     "Tier",
     "Score",
@@ -117,22 +119,33 @@ function exportToCsv(companies: QualifiedCompany[], filename?: string) {
     "Reasoning",
     "Key Signals",
     "Red Flags",
+    ...(hasEnrichment ? ["Contact Email", "Contact Job Title", "Contact Source"] : []),
   ];
 
   const rows = companies
     .sort((a, b) => b.score - a.score)
-    .map((c) => [
-      c.tier.toUpperCase(),
-      String(c.score),
-      escapeCsvField(c.title),
-      c.domain,
-      c.url,
-      escapeCsvField(c.hardware_type || ""),
-      escapeCsvField(c.industry_category || ""),
-      escapeCsvField(c.reasoning),
-      escapeCsvField(c.key_signals.join("; ")),
-      escapeCsvField(c.red_flags.join("; ")),
-    ]);
+    .map((c) => {
+      const contact = enrichedContacts?.get(c.domain);
+      return [
+        c.tier.toUpperCase(),
+        String(c.score),
+        escapeCsvField(c.title),
+        c.domain,
+        c.url,
+        escapeCsvField(c.hardware_type || ""),
+        escapeCsvField(c.industry_category || ""),
+        escapeCsvField(c.reasoning),
+        escapeCsvField(c.key_signals.join("; ")),
+        escapeCsvField(c.red_flags.join("; ")),
+        ...(hasEnrichment
+          ? [
+              escapeCsvField(contact?.email || ""),
+              escapeCsvField(contact?.job_title || ""),
+              escapeCsvField(contact?.source || ""),
+            ]
+          : []),
+      ];
+    });
 
   const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -151,14 +164,16 @@ function DownloadButton({
   companies,
   label,
   variant = "secondary",
+  enrichedContacts,
 }: {
   companies: QualifiedCompany[];
   label?: string;
   variant?: "primary" | "secondary";
+  enrichedContacts?: Map<string, EnrichedContact>;
 }) {
   return (
     <button
-      onClick={() => exportToCsv(companies)}
+      onClick={() => exportToCsv(companies, undefined, enrichedContacts)}
       disabled={companies.length === 0}
       className={`inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
         variant === "primary"
@@ -665,12 +680,107 @@ function LiveResultsView({
   );
 }
 
-function ResultsSummaryCard({ qualifiedCompanies, summary }: { qualifiedCompanies: QualifiedCompany[]; summary: PipelineSummary }) {
+interface EnrichedContact {
+  domain: string;
+  title: string;
+  url: string;
+  email: string | null;
+  phone: string | null;
+  job_title: string | null;
+  source: string | null;
+  found: boolean;
+}
+
+function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onContinue, enrichedContacts, setEnrichedContacts, enrichDone, setEnrichDone }: {
+  qualifiedCompanies: QualifiedCompany[];
+  summary: PipelineSummary;
+  remainingCount: number;
+  onContinue: (count: number) => void;
+  enrichedContacts: Map<string, EnrichedContact>;
+  setEnrichedContacts: React.Dispatch<React.SetStateAction<Map<string, EnrichedContact>>>;
+  enrichDone: boolean;
+  setEnrichDone: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
   const [expandedTier, setExpandedTier] = useState<string | null>("hot");
+
+  // Enrichment progress (local — fine to reset)
+  const [enriching, setEnriching] = useState(false);
+  const [enrichProgress, setEnrichProgress] = useState<{ index: number; total: number } | null>(null);
+
   const hot = qualifiedCompanies.filter((c) => c.tier === "hot").sort((a, b) => b.score - a.score);
   const review = qualifiedCompanies.filter((c) => c.tier === "review").sort((a, b) => b.score - a.score);
   const rejected = qualifiedCompanies.filter((c) => c.tier === "rejected").sort((a, b) => b.score - a.score);
   const nonRejected = qualifiedCompanies.filter((c) => c.tier !== "rejected").sort((a, b) => b.score - a.score);
+
+  // Enrich hot leads (and optionally review)
+  const enrichLeads = useCallback(async (companies: QualifiedCompany[]) => {
+    if (companies.length === 0) return;
+    setEnriching(true);
+    setEnrichDone(false);
+    setEnrichProgress({ index: 0, total: companies.length });
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/enrich`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companies: companies.map((c) => ({
+            domain: c.domain,
+            title: c.title,
+            url: c.url,
+          })),
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        console.error("Enrichment failed:", response.status);
+        setEnriching(false);
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() || "";
+
+        for (const part of parts) {
+          const match = part.match(/^data:\s*(.*)/);
+          if (!match) continue;
+
+          try {
+            const event = JSON.parse(match[1]);
+
+            if (event.type === "progress") {
+              setEnrichProgress({ index: event.index, total: event.total });
+            } else if (event.type === "result" && event.contact) {
+              setEnrichedContacts((prev) => {
+                const next = new Map(prev);
+                next.set(event.contact.domain, event.contact);
+                return next;
+              });
+              setEnrichProgress({ index: event.index + 1, total: event.total });
+            } else if (event.type === "complete") {
+              setEnriching(false);
+              setEnrichDone(true);
+              setEnrichProgress(null);
+            }
+          } catch {
+            // Skip unparseable
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Enrichment error:", err);
+      setEnriching(false);
+    }
+  }, []);
 
   const tiers = [
     { key: "hot", label: "Hot Leads", icon: "🔥", companies: hot, count: summary.hot },
@@ -690,12 +800,12 @@ function ResultsSummaryCard({ qualifiedCompanies, summary }: { qualifiedCompanie
             </div>
             <div className="flex items-center gap-2">
               {hot.length > 0 && (
-                <DownloadButton companies={hot} label={`Hot leads (${hot.length})`} variant="primary" />
+                <DownloadButton companies={hot} label={`Hot leads (${hot.length})`} variant="primary" enrichedContacts={enrichedContacts} />
               )}
               {nonRejected.length > hot.length && (
-                <DownloadButton companies={nonRejected} label={`Hot + Review (${nonRejected.length})`} />
+                <DownloadButton companies={nonRejected} label={`Hot + Review (${nonRejected.length})`} enrichedContacts={enrichedContacts} />
               )}
-              <DownloadButton companies={qualifiedCompanies} label={`All (${qualifiedCompanies.length})`} />
+              <DownloadButton companies={qualifiedCompanies} label={`All (${qualifiedCompanies.length})`} enrichedContacts={enrichedContacts} />
             </div>
           </div>
           <div className="flex items-center gap-4 font-mono text-xs">
@@ -740,7 +850,9 @@ function ResultsSummaryCard({ qualifiedCompanies, summary }: { qualifiedCompanie
 
                 {isExpanded && (
                   <div className="border-t border-border-dim divide-y divide-border-dim">
-                    {tier.companies.map((c) => (
+                    {tier.companies.map((c) => {
+                      const contact = enrichedContacts.get(c.domain);
+                      return (
                       <div key={c.domain} className="px-5 py-3">
                         <div className="flex items-center gap-3 mb-1">
                           <span className={`font-mono text-xs font-bold ${style.color}`}>{c.score}/10</span>
@@ -763,14 +875,106 @@ function ResultsSummaryCard({ qualifiedCompanies, summary }: { qualifiedCompanie
                             ))}
                           </div>
                         )}
+                        {/* Enriched contact info */}
+                        {contact && contact.found && (
+                          <div className="mt-2 flex flex-wrap items-center gap-2 bg-secondary/5 border border-secondary/10 rounded-lg px-3 py-2">
+                            <span className="font-mono text-[9px] text-secondary/40 uppercase tracking-[0.15em]">Contact</span>
+                            {contact.job_title && (
+                              <span className="font-mono text-[10px] text-text-secondary">{contact.job_title}</span>
+                            )}
+                            {contact.email && (
+                              <a href={`mailto:${contact.email}`} className="font-mono text-[10px] text-secondary hover:text-secondary/80 transition-colors">
+                                ✉ {contact.email}
+                              </a>
+                            )}
+                            {contact.phone && (
+                              <span className="font-mono text-[10px] text-text-secondary">📞 {contact.phone}</span>
+                            )}
+                            {contact.source && (
+                              <span className="font-mono text-[8px] text-text-dim bg-surface-3 px-1 py-0.5 rounded">via {contact.source}</span>
+                            )}
+                          </div>
+                        )}
+                        {contact && !contact.found && (
+                          <div className="mt-2 font-mono text-[9px] text-text-dim">No contact info found</div>
+                        )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
             );
           })}
         </div>
+
+        {/* Find Contacts action */}
+        {hot.length > 0 && !enrichDone && (
+          <div className="px-5 py-4 border-t border-border-dim bg-surface-1/50">
+            {enriching && enrichProgress ? (
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+                <span className="font-mono text-xs text-text-secondary">
+                  Finding contacts... {enrichProgress.index}/{enrichProgress.total}
+                </span>
+                <div className="flex-1 h-1 bg-surface-3 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-secondary/50 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.round((enrichProgress.index / enrichProgress.total) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  onClick={() => enrichLeads(hot)}
+                  className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-xl hover:bg-secondary/20 hover:border-secondary/40 transition-colors cursor-pointer"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
+                  Find contacts for {hot.length} hot lead{hot.length > 1 ? "s" : ""}
+                </button>
+                {nonRejected.length > hot.length && (
+                  <button
+                    onClick={() => enrichLeads(nonRejected)}
+                    className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
+                  >
+                    Or all {nonRejected.length} qualified
+                  </button>
+                )}
+                <span className="font-mono text-[10px] text-text-dim">Waterfull · Apollo · Hunter waterfall</span>
+              </div>
+            )}
+          </div>
+        )}
+        {enrichDone && (
+          <div className="px-5 py-3 border-t border-border-dim bg-secondary/5">
+            <div className="flex items-center gap-2">
+              <span className="text-secondary text-xs">✓</span>
+              <span className="font-mono text-[10px] text-secondary/70">
+                Contacts enriched — {Array.from(enrichedContacts.values()).filter((c) => c.found).length} found, {Array.from(enrichedContacts.values()).filter((c) => !c.found).length} not found
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Continue with remaining batch */}
+        {remainingCount > 0 && (
+          <div className="px-5 py-4 border-t border-border-dim bg-surface-1/50">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                onClick={() => onContinue(remainingCount)}
+                className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-xl hover:bg-white/85 transition-colors cursor-pointer"
+              >
+                Continue with remaining {remainingCount}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
+              </button>
+              <span className="font-mono text-[10px] text-text-dim">~{Math.ceil(remainingCount * 0.6)} min · results will be merged</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -790,10 +994,15 @@ export default function ChatInterface() {
   // Pipeline state
   const [phase, setPhase] = useState<Phase>("chat");
   const [searchCompanies, setSearchCompanies] = useState<SearchCompany[]>([]);
+  const [allSearchCompanies, setAllSearchCompanies] = useState<SearchCompany[]>([]);
   const [qualifiedCompanies, setQualifiedCompanies] = useState<QualifiedCompany[]>([]);
   const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
   const [pipelineSummary, setPipelineSummary] = useState<PipelineSummary | null>(null);
   const [pipelineStartTime, setPipelineStartTime] = useState<number>(0);
+
+  // Enrichment state (lifted so it persists across continue batches)
+  const [enrichedContacts, setEnrichedContacts] = useState<Map<string, EnrichedContact>>(new Map());
+  const [enrichDone, setEnrichDone] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -813,10 +1022,13 @@ export default function ChatInterface() {
     setExtractedContext(null);
     setPhase("chat");
     setSearchCompanies([]);
+    setAllSearchCompanies([]);
     setQualifiedCompanies([]);
     setPipelineProgress(null);
     setPipelineSummary(null);
     setPipelineStartTime(0);
+    setEnrichedContacts(new Map());
+    setEnrichDone(false);
   }, []);
 
   // Send chat message
@@ -876,6 +1088,7 @@ export default function ChatInterface() {
       const data = await response.json();
 
       setSearchCompanies(data.companies || []);
+      setAllSearchCompanies(data.companies || []);
       setPhase("search-complete");
     } catch (err) {
       console.error("Search error:", err);
@@ -888,17 +1101,25 @@ export default function ChatInterface() {
   }, [extractedContext]);
 
   // Launch pipeline (SSE stream directly to FastAPI)
-  const launchPipeline = useCallback(async (batchCount: number) => {
-    if (searchCompanies.length === 0) return;
+  const launchPipeline = useCallback(async (batchCount: number, continueFromRemaining = false) => {
+    // When continuing, use the remaining unprocessed companies from the full search results
+    const source = continueFromRemaining
+      ? allSearchCompanies.filter((c) => !qualifiedCompanies.some((qc) => qc.domain === c.domain))
+      : searchCompanies;
+
+    if (source.length === 0) return;
 
     // Sort by Exa score (descending) and take the requested batch
-    const sorted = [...searchCompanies].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const sorted = [...source].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     const batch = sorted.slice(0, batchCount);
+
+    // Preserve previous results when continuing
+    const previousResults = continueFromRemaining ? qualifiedCompanies : [];
 
     // Reorder searchCompanies so progress/queue reflects the actual processing order
     setSearchCompanies(batch);
     setPhase("qualifying");
-    setQualifiedCompanies([]);
+    setQualifiedCompanies(previousResults);
     setPipelineProgress(null);
     setPipelineSummary(null);
     setPipelineStartTime(Date.now());
@@ -961,12 +1182,23 @@ export default function ChatInterface() {
               throw new Error(event.error);
             } else if (event.type === "complete") {
               setPipelineProgress(null);
-              setPipelineSummary(event.summary);
+              // Merge summary with any previous batch results
+              setPipelineSummary((prev) => {
+                if (!prev) return event.summary;
+                return {
+                  hot: prev.hot + (event.summary?.hot || 0),
+                  review: prev.review + (event.summary?.review || 0),
+                  rejected: prev.rejected + (event.summary?.rejected || 0),
+                  failed: prev.failed + (event.summary?.failed || 0),
+                };
+              });
               setPhase("complete");
               completed = true;
             }
-          } catch {
-            // Skip unparseable events
+          } catch (parseErr) {
+            // Re-throw intentional errors (fatal pipeline errors)
+            if (parseErr instanceof Error && parseErr.message) throw parseErr;
+            // Skip genuinely unparseable SSE events
           }
         }
       }
@@ -988,7 +1220,7 @@ export default function ChatInterface() {
       ]);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchCompanies, extractedContext]);
+  }, [searchCompanies, allSearchCompanies, qualifiedCompanies, extractedContext]);
 
   // Force-launch search with whatever context we have (skip follow-ups)
   const forceSearch = useCallback(async () => {
@@ -1024,6 +1256,7 @@ export default function ChatInterface() {
       const data = await response.json();
 
       setSearchCompanies(data.companies || []);
+      setAllSearchCompanies(data.companies || []);
       setPhase("search-complete");
     } catch (err) {
       console.error("Search error:", err);
@@ -1113,7 +1346,16 @@ export default function ChatInterface() {
 
             {/* Final results */}
             {phase === "complete" && pipelineSummary && (
-              <ResultsSummaryCard qualifiedCompanies={qualifiedCompanies} summary={pipelineSummary} />
+              <ResultsSummaryCard
+                qualifiedCompanies={qualifiedCompanies}
+                summary={pipelineSummary}
+                remainingCount={allSearchCompanies.filter((c) => !qualifiedCompanies.some((qc) => qc.domain === c.domain)).length}
+                onContinue={(count) => launchPipeline(count, true)}
+                enrichedContacts={enrichedContacts}
+                setEnrichedContacts={setEnrichedContacts}
+                enrichDone={enrichDone}
+                setEnrichDone={setEnrichDone}
+              />
             )}
 
             <div ref={messagesEndRef} />

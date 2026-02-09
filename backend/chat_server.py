@@ -26,7 +26,7 @@ from typing import Optional
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from chat_engine import ChatEngine, ExtractedContext
@@ -164,11 +164,15 @@ async def rate_limit_middleware(request: Request, call_next):
 @app.get("/api/health")
 async def health():
     """Health check."""
+    from enrichment import get_enrichment_status
+    enrich = get_enrichment_status()
     return {
         "status": "ok",
         "llm_available": engine is not None
         and (engine.kimi_client is not None or engine.openai_client is not None),
         "exa_available": engine is not None and engine.exa_client is not None,
+        "enrichment_available": bool(enrich["waterfall_chain"] and enrich["waterfall_chain"] != ["manual"]),
+        "enrichment_providers": enrich["waterfall_chain"],
     }
 
 
@@ -221,6 +225,127 @@ async def search(request: SearchRequest):
         queries_used=result.queries_used,
         total_found=result.total_found,
         unique_domains=result.unique_domains,
+    )
+
+
+# ──────────────────────────────────────────────
+# ──────────────────────────────────────────────
+# Contact Enrichment SSE Endpoint
+# ──────────────────────────────────────────────
+
+class EnrichCompany(BaseModel):
+    domain: str = Field(..., max_length=200)
+    title: str = Field(..., max_length=300)
+    url: str = Field(..., max_length=500)
+    contact_name: Optional[str] = Field(None, max_length=200)
+    linkedin_url: Optional[str] = Field(None, max_length=500)
+
+
+class EnrichRequest(BaseModel):
+    companies: list[EnrichCompany] = Field(..., max_length=50)
+
+
+@app.post("/api/enrich")
+async def enrich_contacts(request: EnrichRequest):
+    """
+    Enrich contacts for qualified leads using the waterfall pattern.
+    Streams SSE events: progress, result, complete.
+    
+    Waterfall chain: Waterfull → Apollo → Hunter
+    """
+    from enrichment import enrich_contact, enable_api_enrichment, get_enrichment_status
+
+    # Force-enable API enrichment for this request
+    enable_api_enrichment(True)
+    
+    status = get_enrichment_status()
+    if not status["waterfall_chain"] or status["waterfall_chain"] == ["manual"]:
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "No enrichment APIs configured. Add WATERFULL_API_KEY, APOLLO_API_KEY, or HUNTER_API_KEY to .env"
+            },
+        )
+
+    companies = [c.model_dump() for c in request.companies]
+
+    async def generate():
+        total = len(companies)
+        yield sse_event({"type": "init", "total": total, "providers": status["waterfall_chain"]})
+
+        results_found = 0
+
+        for i, company in enumerate(companies):
+            yield sse_event({
+                "type": "progress",
+                "index": i,
+                "total": total,
+                "company": {"title": company["title"], "domain": company["domain"]},
+            })
+
+            try:
+                result = await enrich_contact(
+                    contact_name=company.get("contact_name"),
+                    company_domain=company["domain"],
+                    linkedin_url=company.get("linkedin_url"),
+                )
+
+                enriched = {
+                    "domain": company["domain"],
+                    "title": company["title"],
+                    "url": company["url"],
+                    "email": result.email,
+                    "phone": result.mobile_number,
+                    "job_title": result.job_title,
+                    "source": result.enrichment_source,
+                    "found": bool(result.email or result.mobile_number),
+                }
+
+                if enriched["found"]:
+                    results_found += 1
+
+                yield sse_event({
+                    "type": "result",
+                    "index": i,
+                    "total": total,
+                    "contact": enriched,
+                })
+
+            except Exception as e:
+                print(f"❌ Enrichment error for {company['domain']}: {e}")
+                yield sse_event({
+                    "type": "result",
+                    "index": i,
+                    "total": total,
+                    "contact": {
+                        "domain": company["domain"],
+                        "title": company["title"],
+                        "url": company["url"],
+                        "email": None,
+                        "phone": None,
+                        "source": "error",
+                        "found": False,
+                    },
+                })
+
+        yield sse_event({
+            "type": "complete",
+            "summary": {
+                "total": total,
+                "found": results_found,
+                "not_found": total - results_found,
+                "providers_used": status["waterfall_chain"],
+            },
+        })
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
