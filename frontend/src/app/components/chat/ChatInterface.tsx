@@ -7,6 +7,7 @@ import {
   useCallback,
   type KeyboardEvent,
 } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -24,6 +25,16 @@ import type {
   Phase,
   Readiness,
 } from "../hunt/HuntContext";
+
+/* Lazy-load the map so mapbox-gl only downloads when needed */
+const LiveMapPanel = dynamic(() => import("./LiveMapPanel"), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-full bg-void">
+      <div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+    </div>
+  ),
+});
 
 /* ══════════════════════════════════════════════
    Types (pipeline types imported from HuntContext)
@@ -128,10 +139,10 @@ function DownloadButton({
 }
 
 const SUGGESTIONS = [
-  { text: "Find US companies importing custom metal fabrication parts", icon: "🏭" },
-  { text: "Consumer electronics brands looking for OEM component suppliers", icon: "📱" },
-  { text: "European EV companies that need battery or motor components", icon: "⚡" },
-  { text: "Construction equipment manufacturers in Southeast Asia", icon: "🏗️" },
+  { text: "Find US companies importing custom metal fabrication parts" },
+  { text: "Consumer electronics brands looking for OEM component suppliers" },
+  { text: "European EV companies that need battery or motor components" },
+  { text: "Construction equipment manufacturers in Southeast Asia" },
 ];
 
 /* ══════════════════════════════════════════════
@@ -250,7 +261,6 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-lg">
           {SUGGESTIONS.map((s) => (
             <button key={s.text} onClick={() => onSuggestionClick(s.text)} className="text-left bg-surface-2 border border-border hover:border-secondary/30 hover:bg-surface-3 rounded-xl px-4 py-3.5 transition-all duration-200 group cursor-pointer">
-              <span className="text-base mb-1.5 block">{s.icon}</span>
               <p className="font-sans text-xs text-text-muted group-hover:text-text-secondary transition-colors leading-relaxed">{s.text}</p>
             </button>
           ))}
@@ -430,9 +440,9 @@ function SearchResultsCard({
 }
 
 const TIER_STYLES = {
-  hot: { label: "Hot Lead", color: "text-hot", bg: "bg-hot/10", border: "border-hot/20", icon: "🔥" },
-  review: { label: "Review", color: "text-review", bg: "bg-review/10", border: "border-review/20", icon: "🔍" },
-  rejected: { label: "Rejected", color: "text-rejected", bg: "bg-surface-3", border: "border-border", icon: "✕" },
+  hot: { label: "Hot Lead", color: "text-hot", bg: "bg-hot/10", border: "border-hot/20" },
+  review: { label: "Review", color: "text-review", bg: "bg-review/10", border: "border-review/20" },
+  rejected: { label: "Rejected", color: "text-rejected", bg: "bg-surface-3", border: "border-border" },
 };
 
 function LiveResultsView({
@@ -484,8 +494,8 @@ function LiveResultsView({
               <span className="font-mono text-xs text-text-primary">Qualifying leads</span>
             </div>
             <div className="flex items-center gap-3">
-              {hotCount > 0 && <span className="font-mono text-[10px] text-hot">🔥 {hotCount}</span>}
-              {reviewCount > 0 && <span className="font-mono text-[10px] text-review">🔍 {reviewCount}</span>}
+              {hotCount > 0 && <span className="font-mono text-[10px] text-hot">{hotCount} hot</span>}
+              {reviewCount > 0 && <span className="font-mono text-[10px] text-review">{reviewCount} review</span>}
               <span className="font-mono text-xs text-text-muted">{done}/{total}</span>
               <span className="font-mono text-[10px] text-text-dim">{etaStr}</span>
               {done >= 2 && <DownloadButton companies={qualifiedCompanies} label="CSV" />}
@@ -545,7 +555,7 @@ function LiveResultsView({
                     <span className={`font-mono text-xs font-bold min-w-[2rem] text-right ${style.color}`}>{c.score}/10</span>
                     <span className="font-mono text-[11px] text-text-secondary flex-1 truncate">{c.domain}</span>
                     <span className={`font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded ${style.bg} ${style.color} ${style.border} border`}>
-                      {style.icon} {style.label}
+                      {style.label}
                     </span>
                     <svg
                       width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
@@ -716,9 +726,9 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
   }, []);
 
   const tiers = [
-    { key: "hot", label: "Hot Leads", icon: "🔥", companies: hot, count: summary.hot },
-    { key: "review", label: "Needs Review", icon: "🔍", companies: review, count: summary.review },
-    { key: "rejected", label: "Rejected", icon: "✕", companies: rejected, count: summary.rejected },
+    { key: "hot", label: "Hot Leads", companies: hot, count: summary.hot },
+    { key: "review", label: "Needs Review", companies: review, count: summary.review },
+    { key: "rejected", label: "Rejected", companies: rejected, count: summary.rejected },
   ];
 
   return (
@@ -742,15 +752,15 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
             </div>
           </div>
           <div className="flex items-center gap-4 font-mono text-xs">
-            <span className="text-hot">🔥 {summary.hot} hot</span>
+            <span className="text-hot">{summary.hot} hot</span>
             <span className="text-border-bright">|</span>
-            <span className="text-review">🔍 {summary.review} review</span>
+            <span className="text-review">{summary.review} review</span>
             <span className="text-border-bright">|</span>
-            <span className="text-text-muted">✕ {summary.rejected} rejected</span>
+            <span className="text-text-muted">{summary.rejected} rejected</span>
             {summary.failed > 0 && (
               <>
                 <span className="text-border-bright">|</span>
-                <span className="text-text-dim">⚠ {summary.failed} failed</span>
+                <span className="text-text-dim">{summary.failed} failed</span>
               </>
             )}
           </div>
@@ -770,7 +780,6 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                   className="w-full px-5 py-3 flex items-center justify-between hover:bg-surface-3/50 transition-colors cursor-pointer"
                 >
                   <div className="flex items-center gap-2">
-                    <span className={`font-mono text-xs ${style.color}`}>{tier.icon}</span>
                     <span className="font-mono text-xs text-text-primary">{tier.label} ({tier.count})</span>
                   </div>
                   <svg
@@ -817,11 +826,11 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                             )}
                             {contact.email && (
                               <a href={`mailto:${contact.email}`} className="font-mono text-[10px] text-secondary hover:text-secondary/80 transition-colors">
-                                ✉ {contact.email}
+                                {contact.email}
                               </a>
                             )}
                             {contact.phone && (
-                              <span className="font-mono text-[10px] text-text-secondary">📞 {contact.phone}</span>
+                              <span className="font-mono text-[10px] text-text-secondary">{contact.phone}</span>
                             )}
                             {contact.source && (
                               <span className="font-mono text-[8px] text-text-dim bg-surface-3 px-1 py-0.5 rounded">via {contact.source}</span>
@@ -947,6 +956,8 @@ export default function ChatInterface() {
 
   // Chat-only state (local to this page)
   const [isLoading, setIsLoading] = useState(false);
+  const [showMap, setShowMap] = useState(true); // map panel visible during qualifying/complete
+  const [showMobileMap, setShowMobileMap] = useState(false); // mobile fullscreen map overlay
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -1036,7 +1047,7 @@ export default function ChatInterface() {
 
   // Force-launch search with whatever context we have (skip follow-ups)
   const forceSearch = useCallback(async () => {
-    const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null };
+    const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null, geographicRegion: null };
 
     if (!ctx.industry && messages.length > 0) {
       const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -1064,35 +1075,127 @@ export default function ChatInterface() {
   const showSkipSearch = !readiness.isReady && phase === "chat" && !isLoading && messages.length >= 2;
   const showChatInput = phase === "chat";
 
+  // Split layout: map + chat sidebar from search-complete onwards
+  const splitMode = (phase === "search-complete" || phase === "qualifying" || phase === "complete") && showMap;
+  // Whether to show the floating mobile map button
+  const showMobileMapBtn = (phase === "search-complete" || phase === "qualifying" || phase === "complete");
+
+  /* ── Chat content (shared between full and split modes) ── */
+  const chatContent = (
+    <>
+      {messages.length === 0 ? (
+        <WelcomeScreen onSuggestionClick={sendMessage} />
+      ) : (
+        <div className={`${splitMode ? "" : "max-w-3xl mx-auto"} py-6 px-4 space-y-5`}>
+          {/* Chat messages */}
+          {messages.map((msg) => (
+            <MessageBubble key={msg.id} message={msg} />
+          ))}
+          {isLoading && <TypingIndicator />}
+
+          {/* Skip & Search — lets users bypass follow-up questions */}
+          {showSkipSearch && (
+            <div className={`animate-slide-up ${splitMode ? "" : "max-w-3xl mx-auto"}`}>
+              <button
+                onClick={forceSearch}
+                className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 mt-2 cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
+              >
+                Skip questions &amp; search now →
+              </button>
+            </div>
+          )}
+
+          {/* Search action card */}
+          {showSearchAction && <SearchActionCard onLaunch={launchSearch} />}
+
+          {/* Searching indicator */}
+          {phase === "searching" && <SearchingCard />}
+
+          {/* Search results with batch size control */}
+          {phase === "search-complete" && searchCompanies.length > 0 && (
+            <SearchResultsCard companies={searchCompanies} onQualify={launchPipeline} />
+          )}
+
+          {/* Live interactive results — browse while processing */}
+          {phase === "qualifying" && (
+            <LiveResultsView
+              progress={pipelineProgress}
+              qualifiedCompanies={qualifiedCompanies}
+              searchCompanies={searchCompanies}
+              startTime={pipelineStartTime}
+            />
+          )}
+
+          {/* Final results */}
+          {phase === "complete" && pipelineSummary && (
+            <ResultsSummaryCard
+              qualifiedCompanies={qualifiedCompanies}
+              summary={pipelineSummary}
+              remainingCount={allSearchCompanies.filter((c) => !qualifiedCompanies.some((qc) => qc.domain === c.domain)).length}
+              onContinue={(count) => launchPipeline(count, true)}
+              enrichedContacts={enrichedContacts}
+              setEnrichedContacts={setEnrichedContacts}
+              enrichDone={enrichDone}
+              setEnrichDone={setEnrichDone}
+            />
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div className="flex flex-col h-dvh bg-void">
       {/* ─── Header ─── */}
-      <header className="flex items-center justify-between px-4 md:px-6 h-14 border-b border-border-dim bg-surface-1/80 backdrop-blur-md flex-shrink-0 z-10">
+      <header className="flex items-center justify-between px-4 md:px-6 h-14 border-b border-border-dim bg-surface-1/80 backdrop-blur-md flex-shrink-0 z-20">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2.5 group">
             <span className="text-secondary text-base font-bold">◈</span>
             <span className="text-text-primary text-xs font-semibold tracking-[0.12em] uppercase group-hover:text-secondary transition-colors duration-200">Hunt</span>
           </Link>
-          {/* Back to dashboard — always visible once pipeline is running */}
+          {/* Back to dashboard — always visible */}
+          <button
+            onClick={() => router.push("/dashboard")}
+            className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-secondary/30 rounded-lg px-2.5 py-1.5 cursor-pointer ml-1"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+            Dashboard
+          </button>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {messages.length > 0 && phase === "chat" && <ReadinessTracker readiness={readiness} />}
           {phase !== "chat" && (
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-secondary/50">
+              {phase === "searching" && "Searching..."}
+              {phase === "search-complete" && `${searchCompanies.length} found — ready to qualify`}
+              {phase === "qualifying" && "Qualifying..."}
+              {phase === "complete" && "Complete"}
+            </span>
+          )}
+
+          {/* Map toggle — visible from search-complete onwards */}
+          {(phase === "search-complete" || phase === "qualifying" || phase === "complete") && (
             <button
-              onClick={() => router.push("/dashboard")}
-              className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-secondary/30 rounded-lg px-2.5 py-1.5 cursor-pointer ml-1"
+              onClick={() => setShowMap((v) => !v)}
+              className={`hidden md:flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors duration-200 border rounded-lg px-2.5 py-1.5 cursor-pointer ${
+                showMap
+                  ? "text-secondary border-secondary/30 bg-secondary/5"
+                  : "text-text-muted border-border-dim hover:border-secondary/30 hover:text-secondary"
+              }`}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
-              Dashboard
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                <line x1="8" y1="2" x2="8" y2="18" />
+                <line x1="16" y1="6" x2="16" y2="22" />
+              </svg>
+              {showMap ? "Hide Map" : "Show Map"}
             </button>
           )}
         </div>
-        {messages.length > 0 && phase === "chat" && <ReadinessTracker readiness={readiness} />}
-        {phase !== "chat" && (
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-secondary/50">
-            {phase === "searching" && "Searching..."}
-            {phase === "search-complete" && `${searchCompanies.length} companies found`}
-            {phase === "qualifying" && "Qualifying..."}
-            {phase === "complete" && "Complete"}
-          </span>
-        )}
+
         {messages.length > 0 && (
           <button onClick={resetChat} className="font-mono text-[10px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-border rounded-lg px-3 py-1.5 cursor-pointer">
             + New Hunt
@@ -1101,90 +1204,100 @@ export default function ChatInterface() {
         {messages.length === 0 && <div />}
       </header>
 
-      {/* ─── Content ─── */}
-      <div className="flex-1 overflow-y-auto">
-        {messages.length === 0 ? (
-          <WelcomeScreen onSuggestionClick={sendMessage} />
-        ) : (
-          <div className="max-w-3xl mx-auto py-6 px-4 space-y-5">
-            {/* Chat messages */}
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
-            {isLoading && <TypingIndicator />}
+      {/* ─── Body: split or full ─── */}
+      {splitMode ? (
+        /* ═══ Split Layout: Chat (left) + Map (right) ═══ */
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Chat sidebar — left 40% */}
+          <div className="flex-1 md:w-[40%] flex flex-col min-w-0 animate-slide-left">
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto">
+              {chatContent}
+            </div>
 
-            {/* Skip & Search — lets users bypass follow-up questions */}
-            {showSkipSearch && (
-              <div className="animate-slide-up max-w-3xl mx-auto">
-                <button
-                  onClick={forceSearch}
-                  className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 mt-2 cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
-                >
-                  Skip questions &amp; search now →
-                </button>
+            {/* Status bar */}
+            <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-3 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <p className="font-mono text-[10px] text-text-dim">
+                  {phase === "search-complete" && `${searchCompanies.length} companies found — qualify them`}
+                  {phase === "qualifying" && `Qualifying ${searchCompanies.length} companies`}
+                  {phase === "complete" && `Done — ${pipelineSummary?.hot || 0} hot leads found`}
+                </p>
+                {phase === "complete" && (
+                  <button onClick={resetChat} className="font-mono text-[10px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
+                    New Hunt →
+                  </button>
+                )}
               </div>
-            )}
-
-            {/* Search action card */}
-            {showSearchAction && <SearchActionCard onLaunch={launchSearch} />}
-
-            {/* Searching indicator */}
-            {phase === "searching" && <SearchingCard />}
-
-            {/* Search results with batch size control */}
-            {phase === "search-complete" && searchCompanies.length > 0 && (
-              <SearchResultsCard companies={searchCompanies} onQualify={launchPipeline} />
-            )}
-
-            {/* Live interactive results — browse while processing */}
-            {phase === "qualifying" && (
-              <LiveResultsView
-                progress={pipelineProgress}
-                qualifiedCompanies={qualifiedCompanies}
-                searchCompanies={searchCompanies}
-                startTime={pipelineStartTime}
-              />
-            )}
-
-            {/* Final results */}
-            {phase === "complete" && pipelineSummary && (
-              <ResultsSummaryCard
-                qualifiedCompanies={qualifiedCompanies}
-                summary={pipelineSummary}
-                remainingCount={allSearchCompanies.filter((c) => !qualifiedCompanies.some((qc) => qc.domain === c.domain)).length}
-                onContinue={(count) => launchPipeline(count, true)}
-                enrichedContacts={enrichedContacts}
-                setEnrichedContacts={setEnrichedContacts}
-                enrichDone={enrichDone}
-                setEnrichDone={setEnrichDone}
-              />
-            )}
-
-            <div ref={messagesEndRef} />
+            </div>
           </div>
-        )}
-      </div>
 
-      {/* ─── Input ─── */}
-      {showChatInput && <ChatInput onSend={sendMessage} isLoading={isLoading} />}
+          {/* Map panel — right 60% (desktop), slides in from right */}
+          <div className="hidden md:block w-[60%] border-l border-border-dim animate-slide-in-right">
+            <LiveMapPanel />
+          </div>
 
-      {/* Status bar for pipeline phases */}
-      {!showChatInput && (
-        <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-3 flex-shrink-0">
-          <div className="max-w-3xl mx-auto flex items-center justify-between">
-            <p className="font-mono text-[10px] text-text-dim">
-              {phase === "searching" && "Generating queries and searching the web..."}
-              {phase === "search-complete" && "Review the results above, then qualify them"}
-              {phase === "qualifying" && `Qualifying ${searchCompanies.length} companies — browse results above while you wait`}
-              {phase === "complete" && `Done — ${pipelineSummary?.hot || 0} hot leads found`}
-            </p>
-            {phase === "complete" && (
-              <button onClick={resetChat} className="font-mono text-[10px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
-                New Hunt →
+          {/* Mobile: floating map toggle */}
+          {showMobileMapBtn && (
+            <>
+              <button
+                onClick={() => setShowMobileMap(true)}
+                className="md:hidden fixed bottom-20 right-4 z-30 w-12 h-12 rounded-full bg-secondary/90 text-void shadow-lg shadow-secondary/20 flex items-center justify-center cursor-pointer hover:bg-secondary transition-colors"
+                aria-label="Toggle map"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+                  <line x1="8" y1="2" x2="8" y2="18" />
+                  <line x1="16" y1="6" x2="16" y2="22" />
+                </svg>
               </button>
-            )}
-          </div>
+              {/* Mobile map overlay */}
+              {showMobileMap && (
+                <div className="md:hidden fixed inset-0 z-40 bg-void/95 flex flex-col">
+                  <div className="flex items-center justify-between px-4 h-12 border-b border-border-dim bg-surface-1/80 backdrop-blur-md flex-shrink-0">
+                    <span className="font-mono text-xs text-text-primary">Live Map</span>
+                    <button onClick={() => setShowMobileMap(false)} className="font-mono text-xs text-text-muted hover:text-text-primary cursor-pointer px-2 py-1">
+                      ✕ Close
+                    </button>
+                  </div>
+                  <div className="flex-1">
+                    <LiveMapPanel />
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </div>
+      ) : (
+        /* ═══ Standard Full-Width Layout ═══ */
+        <>
+          {/* ─── Content ─── */}
+          <div className="flex-1 overflow-y-auto">
+            {chatContent}
+          </div>
+
+          {/* ─── Input ─── */}
+          {showChatInput && <ChatInput onSend={sendMessage} isLoading={isLoading} />}
+
+          {/* Status bar for pipeline phases */}
+          {!showChatInput && (
+            <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-3 flex-shrink-0">
+              <div className="max-w-3xl mx-auto flex items-center justify-between">
+                <p className="font-mono text-[10px] text-text-dim">
+                  {phase === "searching" && "Generating queries and searching the web..."}
+                  {phase === "search-complete" && "Review the results above, then qualify them"}
+                  {phase === "qualifying" && `Qualifying ${searchCompanies.length} companies — browse results above while you wait`}
+                  {phase === "complete" && `Done — ${pipelineSummary?.hot || 0} hot leads found`}
+                </p>
+                {phase === "complete" && (
+                  <button onClick={resetChat} className="font-mono text-[10px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
+                    New Hunt →
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

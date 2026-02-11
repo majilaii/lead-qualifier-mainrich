@@ -126,7 +126,7 @@ Open **http://localhost:3000** → sign up → start hunting.
 
 ### Option B: Docker (recommended for deployment)
 
-Docker bundles Python 3.12, Node 22, Playwright, Chromium, and all dependencies.
+Docker bundles Python 3.12, Node 22, Playwright, Chromium, and all dependencies. Source code is **volume-mounted** so changes reflect instantly — no rebuild needed.
 
 ```bash
 # 1. Configure API keys (one-time)
@@ -141,21 +141,25 @@ docker compose up --build
 
 **Day-to-day commands:**
 ```bash
-docker compose up              # Start (foreground)
+docker compose up              # Start (foreground) — code changes hot-reload automatically
 docker compose up -d           # Start (background)
 docker compose down            # Stop everything
 docker compose logs -f backend # Tail backend logs
-docker compose build --no-cache # Full rebuild
+docker compose up --build      # Rebuild (only needed after requirements.txt or package.json changes)
+docker compose build --no-cache # Full rebuild from scratch
 ```
+
+> **Hot-reload:** Both backend (uvicorn `--reload`) and frontend (Next.js dev server) watch for file changes via volume mounts. Edit code on your host and it reflects in the containers instantly.
 
 ### Chat Flow
 
 1. **Describe** what companies you're looking for (e.g., "metal fabrication shops with CNC capabilities")
 2. **Answer** 2-3 follow-up questions — the AI tracks readiness across: industry, company profile, technology focus, and qualifying criteria
 3. **Launch Search** — generates semantic queries via AI, searches the web via Exa
-4. **Qualify** — crawls each company's website and scores them with the LLM
-5. **Results** — hot leads, needs-review, and rejected, with reasoning and signals for each
-6. **Dashboard** — all results (including the full chat conversation) are saved to your account. Resume any previous hunt from the Hunts page — the conversation, search context, and qualified leads are fully restored
+4. **Live Map** — as soon as results appear, a split layout activates: chat on the left (40%), live map on the right (60%). The map slides in from the right with Mapbox GL (dark theme, glowing dots). Toggle it on/off from the header. On mobile, a floating button opens a fullscreen map overlay
+5. **Qualify** — crawls each company's website and scores them with the LLM. Leads appear on the map in real-time as they're qualified (red = hot, amber = review, grey = rejected)
+6. **Results** — hot leads, needs-review, and rejected, with reasoning and signals for each
+7. **Dashboard** — all results (including the full chat conversation) are saved to your account. Resume any previous hunt from the Hunts page — the conversation, search context, and qualified leads are fully restored
 
 ### Architecture & Security
 
@@ -385,7 +389,8 @@ lead-qualifier/
 │   │   │   └── components/
 │   │   │       ├── Navbar.tsx              # Top nav (Dashboard link when logged in)
 │   │   │       ├── Footer.tsx
-│   │   │       ├── chat/ChatInterface.tsx  # Full chat + pipeline streaming UI
+│   │   │       ├── chat/ChatInterface.tsx  # Full chat + pipeline streaming UI (split layout with map)
+│   │   │       ├── chat/LiveMapPanel.tsx   # Mapbox GL live map — glowing dots, fly-to, popups
 │   │   │       ├── hunt/HuntContext.tsx     # Global state context — persists chat, pipeline, map across navigation
 │   │   │       ├── auth/
 │   │   │       │   ├── AuthGuard.tsx
@@ -715,6 +720,7 @@ The Exa discovery step (`test_exa.py`) is optional. You can skip it entirely and
 - [x] Multi-tenant auth — Supabase user accounts, JWT-protected endpoints
 - [x] Full dashboard — stats, hunts, pipeline table, lead detail drawer
 - [x] Interactive map — Mapbox GL with glowing dots, fly-to, popups, **live pipeline updates**
+- [x] Chat live map — split-panel map slides into the chat interface during qualifying (right 60%), mobile overlay
 - [x] Pipeline CRM — lead status management (new → contacted → won/lost)
 - [x] Chat persistence — full conversation saved to DB, resume any hunt from the dashboard
 - [x] Live map geocoding — LLM extracts HQ location, built-in geocoder plots leads automatically

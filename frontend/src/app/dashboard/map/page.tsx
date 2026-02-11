@@ -193,7 +193,6 @@ export default function MapPage() {
                     : "border-border text-text-dim/50"
                 }`}
               >
-                {tier === "hot" ? "🔥" : tier === "review" ? "🔍" : "❌"}{" "}
                 {tier}
               </button>
             ))}
@@ -280,6 +279,7 @@ export default function MapPage() {
             }}
             style={{ width: "100%", height: "100%" }}
             mapStyle={mapStyle}
+            attributionControl={false}
           >
             <NavigationControl position="top-right" />
 
@@ -365,10 +365,10 @@ export default function MapPage() {
             {allLeads.length} leads
           </span>
           <span className="font-mono text-[9px] text-hot">
-            🔥 {tierCounts.hot}
+            {tierCounts.hot} hot
           </span>
           <span className="font-mono text-[9px] text-review">
-            🔍 {tierCounts.review}
+            {tierCounts.review} review
           </span>
         </div>
       </div>
@@ -405,6 +405,12 @@ export default function MapPage() {
         }
         .animate-ping-once {
           animation: ping-once 0.6s ease-out;
+        }
+        .mapboxgl-ctrl-logo,
+        .mapboxgl-ctrl-attrib,
+        .mapboxgl-ctrl-bottom-left,
+        .mapboxgl-ctrl-bottom-right {
+          display: none !important;
         }
       `}</style>
     </div>

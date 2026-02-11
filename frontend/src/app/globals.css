@@ -100,6 +100,24 @@
   animation: slide-up 0.6s ease-out both;
 }
 
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-slide-in-right {
+  animation: slide-in-right 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slide-left {
+  from { transform: translateX(30%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-slide-left {
+  animation: slide-left 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .animate-typing-dot {
   animation: typing-dot 1.4s ease-in-out infinite;
 }
@@ -119,6 +137,26 @@
 .glow-text {
   text-shadow: 0 0 24px rgba(255, 255, 255, 0.15),
     0 0 60px rgba(255, 255, 255, 0.05);
+}
+
+/* Hide Mapbox branding */
+.mapboxgl-ctrl-logo,
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-attrib-inner,
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right,
+.mapbox-improve-map,
+a[href*="mapbox.com"],
+a[href*="openstreetmap.org"],
+.mapboxgl-compact,
+.mapboxgl-ctrl-attrib a {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
 }
 
 /* Scrollbar styling */
