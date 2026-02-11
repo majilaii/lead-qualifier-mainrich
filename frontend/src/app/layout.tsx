@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import SessionProvider from "./components/auth/SessionProvider";
 import { HuntProvider } from "./components/hunt/HuntContext";
+import BillingProvider from "./components/billing/BillingProvider";
 
 export const metadata: Metadata = {
   title: "Hunt — AI-Powered B2B Lead Discovery Platform",
@@ -24,7 +25,9 @@ export default function RootLayout({
       </head>
       <body className="bg-void text-text-primary font-mono antialiased">
         <SessionProvider>
-          <HuntProvider>{children}</HuntProvider>
+          <BillingProvider>
+            <HuntProvider>{children}</HuntProvider>
+          </BillingProvider>
         </SessionProvider>
       </body>
     </html>

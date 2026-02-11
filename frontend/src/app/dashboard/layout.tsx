@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import AuthGuard from "../components/auth/AuthGuard";
 import UserMenu from "../components/auth/UserMenu";
 import { useHunt } from "../components/hunt/HuntContext";
-import BillingProvider from "../components/billing/BillingProvider";
 import UpgradeModal from "../components/billing/UpgradeModal";
 
 const NAV_ICONS: Record<string, React.ReactNode> = {
@@ -169,10 +168,8 @@ export default function DashboardLayout({
 
         {/* Main content */}
         <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-          <BillingProvider>
-            {children}
-            <UpgradeModal />
-          </BillingProvider>
+          {children}
+          <UpgradeModal />
         </main>
       </div>
     </AuthGuard>
