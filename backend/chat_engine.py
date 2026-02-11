@@ -11,7 +11,7 @@ This separation means even a successful prompt injection on the conversation
 LLM can't directly influence search query generation.
 
 Models (cheapest first):
-  - Kimi K2.5 via Moonshot API (OpenAI-compatible, ~¥0.70/1M input)
+  - Kimi K2 Turbo via Moonshot API (OpenAI-compatible, fast, ~¥0.70/1M input)
   - GPT-4o-mini fallback (~$0.15/1M input)
 """
 
@@ -456,13 +456,37 @@ class ChatEngine:
 
     # ── Conversation LLM ─────────────────────────
 
+    # Known broken/fallback replies that should be stripped from history
+    # to prevent them from polluting the LLM context and causing a loop.
+    _BROKEN_REPLIES = {
+        "could you tell me more?",
+        "i'm processing your request — could you tell me more about what companies you're looking for?",
+        "i had a hiccup processing that — let me try again. what type of companies are you looking for, and where should they be located?",
+        "i had a hiccup generating my response. could you describe what kind of companies you're looking for?",
+        "i didn't quite catch that. what industry are the target companies in?",
+        "something went wrong. please try again.",
+        "i'm having trouble processing that. could you try rephrasing?",
+    }
+
     async def _conversation_llm(
         self, messages: list[dict]
     ) -> ChatResponse:
         """Call the conversation LLM with the chat history."""
+        # Remove broken/fallback assistant replies from history so the LLM
+        # doesn't see them and get confused.  We keep the user messages so
+        # the LLM can re-process the original query.
+        cleaned_messages = []
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                content_lower = (msg.get("content", "") or "").strip().lower()
+                if content_lower in self._BROKEN_REPLIES:
+                    logger.info("Stripping broken fallback reply from history: %s", content_lower[:60])
+                    continue
+            cleaned_messages.append(msg)
+
         llm_messages = [
             {"role": "system", "content": CONVERSATION_SYSTEM_PROMPT},
-            *messages,
+            *cleaned_messages,
         ]
 
         response_text = await self._call_llm(
@@ -588,29 +612,39 @@ class ChatEngine:
     ) -> str:
         """Call the best available LLM. Falls back through the chain."""
 
-        # Tier 1: Kimi (cheapest)
-        # No artificial timeout — Kimi's thinking model can take 30-50s on
-        # multi-turn conversations.  The httpx client already has a 60s
-        # timeout, and the frontend allows 70s total.  If an OpenAI key is
-        # configured we add a 25s cutoff so the fallback still has time.
+        # Tier 1: Kimi (cheapest + fastest)
+        # Turbo model rarely fails, but we retry once for resilience
+        # before falling back to GPT-4o-mini.
         if self.kimi_client:
-            try:
-                coro = self.kimi_client.chat.completions.create(
-                    model="kimi-k2.5",
-                    messages=messages,
-                    temperature=1,  # kimi-k2.5 requires temperature=1
-                    max_tokens=1500,
-                )
-                # Only apply a tight timeout if there's a fallback available
-                if self.openai_client:
-                    response = await asyncio.wait_for(coro, timeout=25.0)
-                else:
-                    response = await coro
-                return self._extract_kimi_response(response.choices[0].message)
-            except asyncio.TimeoutError:
-                logger.warning("Kimi timed out after 25s (%s), falling back to GPT-4o-mini", purpose)
-            except Exception as e:
-                logger.warning("Kimi failed (%s): %s", purpose, e)
+            kimi_attempts = 2 if self.openai_client else 3
+            for attempt in range(1, kimi_attempts + 1):
+                try:
+                    coro = self.kimi_client.chat.completions.create(
+                        model="kimi-k2-turbo-preview",
+                        messages=messages,
+                        temperature=0.7,
+                        max_tokens=1500,
+                        response_format={"type": "json_object"},
+                    )
+                    # Only apply a tight timeout if there's a fallback available
+                    if self.openai_client:
+                        timeout = 25.0 if attempt == 1 else 20.0
+                        response = await asyncio.wait_for(coro, timeout=timeout)
+                    else:
+                        response = await coro
+                    return self._extract_kimi_response(response.choices[0].message)
+                except asyncio.TimeoutError:
+                    logger.warning("Kimi timed out (%s, attempt %d/%d)", purpose, attempt, kimi_attempts)
+                    break  # timeout → don't retry, go straight to fallback
+                except ValueError as e:
+                    # Thinking-only response (no JSON) — retry once
+                    logger.warning("Kimi no-JSON (%s, attempt %d/%d): %s", purpose, attempt, kimi_attempts, e)
+                    if attempt < kimi_attempts:
+                        await asyncio.sleep(0.5)  # brief pause before retry
+                        continue
+                except Exception as e:
+                    logger.warning("Kimi failed (%s, attempt %d/%d): %s", purpose, attempt, kimi_attempts, e)
+                    break  # unknown error → don't retry, go to fallback
 
         # Tier 2: OpenAI GPT-4o-mini (fast, cheap)
         if self.openai_client:
@@ -630,39 +664,130 @@ class ChatEngine:
 
     @staticmethod
     def _extract_kimi_response(message) -> str:
-        """Extract response from Kimi thinking model.
-        Kimi K2.5 puts reasoning in model_extra['reasoning_content']
-        and the final answer in content. We want the JSON answer.
-        
-        Sometimes Kimi puts its thinking into `content` and the JSON
-        into `reasoning_content`, or vice-versa.  We pick whichever
-        field contains a valid JSON *object* (starts with `{`... after
-        stripping markdown fences).
+        """Extract JSON response from a Kimi model response.
+        Handles both turbo (content-only) and thinking models
+        (which split output between content and reasoning_content).
+        We pick whichever field contains valid JSON with our expected keys.
         """
         content = message.content or ""
         reasoning = ""
         if hasattr(message, "model_extra") and isinstance(message.model_extra, dict):
             reasoning = message.model_extra.get("reasoning_content", "") or ""
 
-        def _has_json_object(text: str) -> bool:
-            """Return True if the text contains what looks like a JSON object
-            (not just a stray `{` in prose)."""
-            cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
-            # Must contain {"reply": or {"readiness": — our expected output keys
-            return bool(re.search(r'\{\s*"(?:reply|readiness|queries)', cleaned))
+        logger.info("Kimi raw content (%d chars): %s", len(content), content[:300])
+        logger.info("Kimi raw reasoning (%d chars): %s", len(reasoning), reasoning[:300])
 
-        # Prefer content if it has our expected JSON structure
-        if content.strip() and _has_json_object(content):
-            return content
-        # Fall back to reasoning_content if it has the JSON
-        if reasoning.strip() and _has_json_object(reasoning):
-            return reasoning
-        # Last resort: return whichever has a { at all
-        if content.strip() and "{" in content:
-            return content
-        if reasoning.strip() and "{" in reasoning:
-            return reasoning
-        return content or reasoning
+        def _try_extract_json(text: str) -> Optional[str]:
+            """Try to extract a valid JSON object string from text.
+            Returns the JSON substring if found, else None.
+            
+            Strategy: find ALL balanced {…} regions, try to parse each,
+            and return the first one that contains our expected keys.
+            We search from the END of the text (thinking models put
+            reasoning first, JSON answer last).
+            """
+            if not text or not text.strip():
+                return None
+            cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
+
+            # Collect all top-level {…} regions by scanning right-to-left
+            candidates: list[str] = []
+            pos = len(cleaned) - 1
+            while pos >= 0:
+                if cleaned[pos] == "}":
+                    end = pos
+                    depth = 0
+                    for i in range(end, -1, -1):
+                        if cleaned[i] == "}":
+                            depth += 1
+                        elif cleaned[i] == "{":
+                            depth -= 1
+                        if depth == 0:
+                            candidates.append(cleaned[i : end + 1])
+                            pos = i - 1
+                            break
+                    else:
+                        pos -= 1
+                else:
+                    pos -= 1
+
+            # Try each candidate (rightmost first — most likely the answer)
+            for fragment in candidates:
+                try:
+                    data = json.loads(fragment)
+                    if isinstance(data, dict) and ("reply" in data or "readiness" in data or "queries" in data):
+                        return fragment
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            return None
+
+        def _try_extract_any_json(text: str) -> Optional[str]:
+            """Fallback: extract ANY valid JSON dict from text, even without our expected keys."""
+            if not text or not text.strip():
+                return None
+            cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
+            candidates: list[str] = []
+            pos = len(cleaned) - 1
+            while pos >= 0:
+                if cleaned[pos] == "}":
+                    end = pos
+                    depth = 0
+                    for i in range(end, -1, -1):
+                        if cleaned[i] == "}":
+                            depth += 1
+                        elif cleaned[i] == "{":
+                            depth -= 1
+                        if depth == 0:
+                            candidates.append(cleaned[i : end + 1])
+                            pos = i - 1
+                            break
+                    else:
+                        pos -= 1
+                else:
+                    pos -= 1
+            # Return the LARGEST valid JSON dict (most likely the full response)
+            best = None
+            best_len = 0
+            for fragment in candidates:
+                try:
+                    data = json.loads(fragment)
+                    if isinstance(data, dict) and len(fragment) > best_len:
+                        best = fragment
+                        best_len = len(fragment)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+            return best
+
+        # Try to extract valid JSON from content first (preferred)
+        json_from_content = _try_extract_json(content)
+        if json_from_content:
+            return json_from_content
+
+        # Fall back to reasoning_content
+        json_from_reasoning = _try_extract_json(reasoning)
+        if json_from_reasoning:
+            return json_from_reasoning
+
+        # Try ANY valid JSON dict (without expected-key check) — content first
+        any_json = _try_extract_any_json(content) or _try_extract_any_json(reasoning)
+        if any_json:
+            logger.warning(
+                "Kimi: extracted JSON without expected keys. "
+                "Extracted: %s…", any_json[:200],
+            )
+            return any_json
+
+        # No JSON found anywhere — raise so _call_llm can retry / fallback
+        logger.warning(
+            "Kimi: no JSON in either field (content=%d chars, reasoning=%d chars). "
+            "content=%s… reasoning=%s…",
+            len(content), len(reasoning),
+            content[:200], reasoning[:200],
+        )
+        raise ValueError(
+            f"Kimi returned no JSON — content={len(content)} chars, "
+            f"reasoning={len(reasoning)} chars (thinking-only response)"
+        )
 
     # ── Response Parsing ─────────────────────────
 
@@ -671,11 +796,14 @@ class ChatEngine:
         try:
             data = self._extract_json(text)
             if not data:
-                # If JSON parsing failed, use raw text as reply
+                # If JSON parsing failed, the raw text is likely LLM
+                # thinking/reasoning — never show it to the user.
+                logger.warning("No JSON parsed from LLM response (%d chars): %s…", len(text), text[:200])
                 return ChatResponse(
-                    reply=text.strip()[:1000] or "Could you tell me more about what companies you're looking for?",
+                    reply="I had a hiccup processing that — let me try again. What type of companies are you looking for, and where should they be located?",
                     readiness=Readiness(),
                     extracted_context=ExtractedContext(),
+                    error="json_parse_failure",
                 )
 
             # Parse readiness
@@ -700,58 +828,88 @@ class ChatEngine:
                 country_code=ec.get("countryCode"),
             )
 
+            # Extract reply — handle empty/null/missing
+            reply = data.get("reply") or ""
+            if not reply.strip():
+                # Build a sensible fallback from the extracted context
+                if context.industry:
+                    reply = f"Got it — I'm looking into **{context.industry}** companies"
+                    if context.geographic_region:
+                        reply += f" near **{context.geographic_region}**"
+                    reply += ". Let me ask a couple of follow-up questions to sharpen the search."
+                else:
+                    reply = "I had a hiccup generating my response. Could you describe what kind of companies you're looking for?"
+                logger.warning("LLM returned empty/null reply. Using fallback: %s", reply[:100])
+
             return ChatResponse(
-                reply=data.get("reply", "Could you tell me more?"),
+                reply=reply,
                 readiness=readiness,
                 extracted_context=context,
             )
 
         except Exception as e:
-            logger.warning("Parse error: %s", e)
+            logger.warning("Parse error: %s — raw: %s…", e, text[:200])
             return ChatResponse(
-                reply=text.strip()[:1000] or "I didn't quite catch that. What industry are the target companies in?",
+                reply="I didn't quite catch that. What industry are the target companies in?",
                 readiness=Readiness(),
                 extracted_context=ExtractedContext(),
+                error="parse_exception",
             )
 
     @staticmethod
     def _extract_json(text: str) -> Optional[dict]:
-        """Extract JSON object from LLM response text (handles markdown fences, thinking, etc.)."""
+        """Extract JSON object from LLM response text (handles markdown fences, thinking, etc.).
+        
+        Scans ALL balanced {…} regions right-to-left and returns the first
+        one that parses as a valid JSON dict.  Prefers regions that contain
+        our expected keys ('reply', 'readiness', 'queries').
+        """
         cleaned = text.strip()
 
         # Remove markdown code fences
         cleaned = re.sub(r"```(?:json)?\s*", "", cleaned)
         cleaned = cleaned.replace("```", "")
 
-        # Strategy: find the last complete JSON object (thinking models put reasoning first)
-        last_close = cleaned.rfind("}")
-        if last_close == -1:
+        if "{" not in cleaned:
             return None
 
-        # Walk backwards to find matching opening brace
-        depth = 0
-        for i in range(last_close, -1, -1):
-            if cleaned[i] == "}":
-                depth += 1
-            elif cleaned[i] == "{":
-                depth -= 1
-            if depth == 0:
-                fragment = cleaned[i : last_close + 1]
-                try:
-                    data = json.loads(fragment)
-                    if isinstance(data, dict):
-                        return data
-                except (json.JSONDecodeError, ValueError):
-                    break
+        # Collect all top-level balanced {…} fragments, right-to-left
+        candidates: list[str] = []
+        pos = len(cleaned) - 1
+        while pos >= 0:
+            if cleaned[pos] == "}":
+                end = pos
+                depth = 0
+                for i in range(end, -1, -1):
+                    if cleaned[i] == "}":
+                        depth += 1
+                    elif cleaned[i] == "{":
+                        depth -= 1
+                    if depth == 0:
+                        candidates.append(cleaned[i : end + 1])
+                        pos = i - 1
+                        break
+                else:
+                    pos -= 1
+            else:
+                pos -= 1
 
-        # Fallback: try finding first { to last }
-        first_open = cleaned.find("{")
-        if first_open != -1:
+        # Pass 1: prefer candidates with our expected keys
+        for fragment in candidates:
             try:
-                data = json.loads(cleaned[first_open : last_close + 1])
+                data = json.loads(fragment)
+                if isinstance(data, dict) and ("reply" in data or "readiness" in data or "queries" in data):
+                    return data
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+        # Pass 2: any valid JSON dict
+        for fragment in candidates:
+            try:
+                data = json.loads(fragment)
                 if isinstance(data, dict):
                     return data
             except (json.JSONDecodeError, ValueError):
-                pass
+                continue
 
         return None

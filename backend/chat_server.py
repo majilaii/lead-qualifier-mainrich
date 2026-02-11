@@ -22,8 +22,8 @@ import asyncio
 import json
 import logging
 import os
+import math
 import re
-import random
 import time
 import uuid
 from collections import defaultdict
@@ -626,6 +626,28 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
         qualifier = LeadQualifier(search_context=search_ctx)
         stats = {"hot": 0, "review": 0, "rejected": 0, "failed": 0}
 
+        # ── Spread co-located pins in a spiral so they don't stack ──
+        _geo_hit_count: dict[tuple[float, float], int] = {}
+
+        def _spread_co_located(
+            lat: Optional[float], lng: Optional[float]
+        ) -> tuple[Optional[float], Optional[float]]:
+            """Apply a small deterministic spiral offset when multiple leads
+            share the exact same geocoded point (e.g. city centroid).
+            ~0.0012° per step ≈ 130 m — enough to separate pins at
+            city zoom without moving them to a wrong neighbourhood."""
+            if lat is None or lng is None:
+                return lat, lng
+            key = (round(lat, 6), round(lng, 6))
+            n = _geo_hit_count.get(key, 0)
+            _geo_hit_count[key] = n + 1
+            if n == 0:
+                return lat, lng  # first hit keeps exact position
+            # Archimedean spiral: r grows with sqrt(n) so density stays even
+            angle = n * 2.399_963  # golden angle in radians
+            r = 0.0012 * math.sqrt(n)
+            return lat + r * math.cos(angle), lng + r * math.sin(angle)
+
         # Save search to DB
         search_id = None
         try:
@@ -670,6 +692,7 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                                 geo = await _geocode_location(fail_country)
                                 if geo:
                                     _, fail_lat, fail_lng = geo
+                            fail_lat, fail_lng = _spread_co_located(fail_lat, fail_lng)
 
                             result_data = {
                                 "title": company["title"],
@@ -767,6 +790,8 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                                 geo = await _geocode_location(search_region)
                                 if geo:
                                     country, latitude, longitude = geo
+
+                        latitude, longitude = _spread_co_located(latitude, longitude)
 
                         result_data = {
                             "title": company["title"],

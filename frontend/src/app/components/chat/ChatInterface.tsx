@@ -1104,7 +1104,10 @@ export default function ChatInterface() {
           body: JSON.stringify({ messages: updatedMessages }),
         });
 
-        if (!response.ok) throw new Error("Failed to get response");
+        if (!response.ok) {
+          const errData = await response.json().catch(() => null);
+          throw new Error(errData?.error || "Failed to get response");
+        }
         const data = await response.json();
 
         const assistantMessage: Message = { id: crypto.randomUUID(), role: "assistant", content: data.message, timestamp: Date.now() };
@@ -1112,10 +1115,11 @@ export default function ChatInterface() {
 
         if (data.readiness) setReadiness(data.readiness);
         if (data.extractedContext) setExtractedContext(data.extractedContext);
-      } catch {
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "Something went wrong. Please try again.";
         setMessages((prev) => [
           ...prev,
-          { id: crypto.randomUUID(), role: "assistant", content: "Something went wrong. Please try again.", timestamp: Date.now() },
+          { id: crypto.randomUUID(), role: "assistant", content: errorMsg, timestamp: Date.now() },
         ]);
       } finally {
         setIsLoading(false);
