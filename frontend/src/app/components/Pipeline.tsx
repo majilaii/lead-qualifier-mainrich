@@ -6,56 +6,50 @@ const STEPS = [
   {
     num: "01",
     title: "Discovery",
-    module: "test_exa.py",
     description:
-      "Neural search powered by Exa AI. Describe your ideal customer in plain English — get matching companies back in seconds.",
+      "AI-powered neural search. Describe your ideal customer in plain English — get matching companies back in seconds.",
     icon: "🔍",
-    detail: "12 pre-built ICP queries · Semantic matching · Auto-dedup",
+    detail: "Pre-built ICP templates · Semantic matching · Auto-dedup",
   },
   {
     num: "02",
     title: "Crawling",
-    module: "scraper.py",
     description:
-      "Headless Chromium visits each website. Extracts clean markdown text + captures screenshots. Auto-removes popups and cookie banners.",
+      "Automatically visits each company website. Extracts key content, captures visual data. Works on any website, worldwide.",
     icon: "🌐",
-    detail: "Parallel crawling · Screenshot capture · Bot-detection bypass",
+    detail: "Parallel scanning · Visual capture · Global coverage",
   },
   {
     num: "03",
     title: "Qualification",
-    module: "intelligence.py",
     description:
-      "The LLM reads the website content + screenshot. Scores 1-10 on customer fit. Returns structured signals, red flags, and reasoning.",
+      "AI reads each website's content and visuals. Scores 1-10 on customer fit. Returns structured signals, red flags, and reasoning.",
     icon: "🧠",
-    detail: "Vision + text analysis · Structured JSON output · Pre-filter",
+    detail: "Vision + text analysis · Structured output · Pre-filter",
   },
   {
     num: "04",
     title: "Deep Research",
-    module: "deep_research.py",
     description:
-      "For hot leads (8+), crawls up to 5 pages. Generates a sales brief: products, motor types, magnet requirements, and pitch angles.",
+      "For hot leads (8+), dives deeper across multiple pages. Generates a full sales brief: products, requirements, and pitch angles.",
     icon: "🔬",
-    detail: "Multi-page crawl · Sales brief · Talking points generator",
+    detail: "Multi-page analysis · Sales brief · Talking points",
   },
   {
     num: "05",
     title: "Enrichment",
-    module: "enrichment.py",
     description:
-      "Looks up decision-maker emails and phone numbers via Apollo.io or Hunter.io. Manual mode available at zero cost.",
+      "Finds decision-maker contact details automatically. Emails, phone numbers, and LinkedIn profiles for your top leads.",
     icon: "📇",
-    detail: "Apollo + Hunter integration · Manual fallback · Rate-limited",
+    detail: "Contact lookup · Email verification · LinkedIn enrichment",
   },
   {
     num: "06",
     title: "Export",
-    module: "export.py",
     description:
-      "Results sorted into Hot / Review / Rejected buckets. Export to Excel with color-coded sheets or sync live to Google Sheets.",
+      "Results sorted into Hot / Review / Rejected tiers. Export to Excel, CSV, or sync directly to your CRM.",
     icon: "📊",
-    detail: "Excel + Google Sheets · Watch mode · Auto-categorized",
+    detail: "Excel + CSV · CRM integration · Auto-categorized",
   },
 ];
 
@@ -102,13 +96,10 @@ function StepCard({
           </span>
         </div>
 
-        {/* Title + Module */}
-        <h3 className="font-mono text-sm font-semibold text-text-primary uppercase tracking-[0.15em] mb-1">
+        {/* Title */}
+        <h3 className="font-mono text-sm font-semibold text-text-primary uppercase tracking-[0.15em] mb-3">
           {step.title}
         </h3>
-        <p className="font-mono text-[10px] text-secondary/40 mb-3">
-          {step.module}
-        </p>
 
         {/* Description */}
         <p className="font-sans text-xs text-text-secondary leading-relaxed mb-4">
@@ -144,22 +135,12 @@ export default function Pipeline() {
             The Pipeline
           </span>
           <h2 className="font-mono text-2xl md:text-3xl font-bold text-text-primary tracking-tight mb-4">
-            Six Modules. One Command.
+            Six Steps. Fully Automated.
           </h2>
           <p className="font-sans text-sm text-text-secondary max-w-2xl mx-auto">
             From raw search query to a qualified, enriched sales brief — each
-            step is a standalone Python module that can be run independently or
-            as a full pipeline.
+            step runs automatically so you can focus on closing deals.
           </p>
-
-          {/* Code snippet */}
-          <div className="inline-block mt-6 bg-surface-2 border border-border rounded-lg px-5 py-3 font-mono text-xs text-text-secondary">
-            <span className="text-text-dim">$</span>{" "}
-            <span className="text-secondary/70">python main.py</span>{" "}
-            <span className="text-text-muted">
-              --input leads.csv --deep-research
-            </span>
-          </div>
         </div>
 
         {/* Pipeline Grid */}
@@ -177,25 +158,25 @@ export default function Pipeline() {
           <div className="space-y-3">
             {[
               {
-                file: "qualified_hot_leads.csv",
+                file: "Hot Leads",
                 score: "8-10",
                 color: "#ef4444",
                 emoji: "🔥",
                 action: "Ready for outreach",
               },
               {
-                file: "review_manual_check.csv",
+                file: "Needs Review",
                 score: "4-7",
                 color: "#f59e0b",
                 emoji: "🔍",
-                action: "Human review needed",
+                action: "Human review recommended",
               },
               {
-                file: "rejected_with_reasons.csv",
+                file: "Not a Fit",
                 score: "1-3",
                 color: "#71717a",
                 emoji: "❌",
-                action: "Not a fit (with reasoning)",
+                action: "Auto-rejected with reasoning",
               },
             ].map((bucket) => (
               <div
@@ -205,7 +186,7 @@ export default function Pipeline() {
                 <span className="text-lg">{bucket.emoji}</span>
                 <div className="flex-1 min-w-0">
                   <p className="font-mono text-xs text-text-primary truncate">
-                    output/{bucket.file}
+                    {bucket.file}
                   </p>
                   <p className="font-mono text-[10px] text-text-dim">
                     {bucket.action}

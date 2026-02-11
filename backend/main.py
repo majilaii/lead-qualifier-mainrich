@@ -1,6 +1,8 @@
 """
-Main Orchestrator — The Magnet Hunter
+Main Orchestrator — Hunt (CLI)
 AI-Powered B2B Lead Qualification Pipeline
+
+⚠️  DEPRECATED: This CLI is deprecated. Use the web dashboard at localhost:3000
 
 This is the entry point. It loads leads from CSV, then for each lead:
   1. Crawls the company website (scraper.py)
@@ -20,6 +22,7 @@ Usage:
 import asyncio
 import argparse
 import csv
+import logging
 from pathlib import Path
 from datetime import datetime
 
@@ -51,6 +54,7 @@ from config import (
 )
 from deep_research import DeepResearcher, print_report as print_deep_report
 
+logger = logging.getLogger(__name__)
 console = Console()
 
 
@@ -154,7 +158,7 @@ async def process_lead(
                 use_vision=use_vision
             )
         except Exception as e:
-            print(f"  ❌ LLM qualification error for {lead.company_name}: {e}")
+            logger.error("LLM qualification error for %s: %s", lead.company_name, e)
             qual_result = QualificationResult(
                 is_qualified=False,
                 confidence_score=3,
@@ -269,8 +273,7 @@ async def run_pipeline(
     # Show configuration
     enrichment_status = get_enrichment_status()
     console.print(Panel(f"""
-[bold]The Magnet Hunter - Lead Qualification Pipeline[/bold]
-[cyan]Mainrich International[/cyan]
+[bold]Hunt — B2B Lead Qualification Pipeline[/bold]
 
 Leads to process: {len(leads_to_process)}
 Vision analysis: {'Enabled' if use_vision else 'Disabled'}
@@ -406,7 +409,7 @@ async def run_test(deep_research: bool = False):
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="The Magnet Hunter - B2B Lead Qualification Tool"
+        description="Hunt — AI-Powered B2B Lead Qualification Tool"
     )
     parser.add_argument(
         "--test", 
@@ -444,8 +447,9 @@ def main():
     
     console.print("""
 [bold cyan]╔══════════════════════════════════════════════════╗
-║  🧲 THE MAGNET HUNTER                             ║
+║  ◈ HUNT                                         ║
 ║  AI-Powered B2B Lead Qualification Pipeline       ║
+║  ⚠️  CLI deprecated — use web dashboard instead    ║
 ╚══════════════════════════════════════════════════╝[/bold cyan]
     """)
     

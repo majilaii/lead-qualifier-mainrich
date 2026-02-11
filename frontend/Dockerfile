@@ -1,5 +1,5 @@
 # ============================================================
-# 🧲 Lead Qualifier — Frontend Dockerfile
+# ◈ Hunt — Frontend Dockerfile
 # Next.js 16 multi-stage build
 # ============================================================
 

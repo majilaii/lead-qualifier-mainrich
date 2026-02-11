@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import SessionProvider from "./components/auth/SessionProvider";
+import { HuntProvider } from "./components/hunt/HuntContext";
 
 export const metadata: Metadata = {
-  title: "The Magnet Hunter — AI-Powered B2B Lead Qualification",
+  title: "Hunt — AI-Powered B2B Lead Discovery Platform",
   description:
-    "From 7.2 billion data points to your perfect lead. AI-powered discovery, crawling, and qualification for hardware B2B companies.",
+    "Find and qualify your perfect B2B leads in minutes, not weeks. AI-powered discovery, scoring, and sales briefs. Start free.",
 };
 
 export default function RootLayout({
@@ -21,7 +23,9 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-void text-text-primary font-mono antialiased">
-        {children}
+        <SessionProvider>
+          <HuntProvider>{children}</HuntProvider>
+        </SessionProvider>
       </body>
     </html>
   );

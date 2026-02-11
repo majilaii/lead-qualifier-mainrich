@@ -11,10 +11,13 @@ Usage:
 """
 
 from typing import Optional
+import logging
 import httpx
 
 from models import EnrichmentResult
 from config import HUNTER_API_KEY
+
+logger = logging.getLogger(__name__)
 
 
 # Global flag — starts disabled, enabled via /api/enrich endpoint
@@ -68,7 +71,7 @@ async def enrich_contact(
                     data = resp.json().get("data", {})
                     email = data.get("email")
                     if email:
-                        print(f"   Hunter ✓ {contact_name} — {email}")
+                        logger.debug("Hunter found %s -- %s", contact_name, email)
                         return EnrichmentResult(
                             email=email,
                             job_title=data.get("position"),
@@ -87,7 +90,7 @@ async def enrich_contact(
                 emails = data.get("emails", [])
 
                 if not emails:
-                    print(f"   Hunter: no emails found for {clean_domain}")
+                    logger.debug("Hunter: no emails found for %s", clean_domain)
                     return EnrichmentResult(enrichment_source="not_found")
 
                 # Pick the best contact — prefer senior / decision-maker roles
@@ -104,7 +107,7 @@ async def enrich_contact(
                 name = f"{best.get('first_name', '')} {best.get('last_name', '')}".strip()
 
                 if email:
-                    print(f"   Hunter ✓ {name or clean_domain} — {email} ({title or 'no title'})")
+                    logger.debug("Hunter found %s -- %s (%s)", name or clean_domain, email, title or 'no title')
                     return EnrichmentResult(
                         email=email,
                         job_title=title,
@@ -112,14 +115,14 @@ async def enrich_contact(
                     )
 
             elif resp.status_code == 401:
-                print("   Hunter: invalid API key")
+                logger.error("Hunter: invalid API key")
             elif resp.status_code == 429:
-                print("   Hunter: rate limit reached (25/month on free plan)")
+                logger.warning("Hunter: rate limit reached (25/month on free plan)")
             else:
-                print(f"   Hunter: HTTP {resp.status_code}")
+                logger.warning("Hunter: HTTP %d", resp.status_code)
 
     except Exception as e:
-        print(f"   Hunter error: {e}")
+        logger.error("Hunter error: %s", e)
 
     return EnrichmentResult(enrichment_source="not_found")
 
@@ -128,17 +131,18 @@ def enable_api_enrichment(enable: bool = True):
     """Enable or disable API-based enrichment."""
     global _api_enabled
     _api_enabled = enable
-    print(f"API enrichment {'enabled' if enable else 'disabled'}")
+    logger.info("API enrichment %s", 'enabled' if enable else 'disabled')
 
 
 def get_enrichment_status() -> dict:
     """Get current enrichment configuration status."""
     configured = bool(HUNTER_API_KEY)
+    providers = ["hunter"] if configured else []
     return {
         "api_enrichment_enabled": _api_enabled,
         "hunter_configured": configured,
         "mode": "hunter" if configured else "manual",
-        "waterfall_chain": ["hunter"] if configured else ["manual"],
+        "providers": providers,
     }
 
 

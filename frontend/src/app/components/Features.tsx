@@ -22,50 +22,50 @@ const FEATURES = [
   {
     title: "Vision + Text AI",
     description:
-      "The LLM doesn't just read text — it sees the screenshot. Product pages, factory photos, and technical diagrams all influence the score.",
-    tag: "intelligence.py",
+      "Our AI doesn't just read text — it sees the website. Product pages, factory photos, and technical diagrams all influence the score.",
+    tag: "AI-Powered",
   },
   {
-    title: "Multi-Model Fallback",
+    title: "Multi-Model Intelligence",
     description:
-      "Kimi K2.5 → GPT-4o → GPT-4o-mini → Keyword matching. If one model fails, the next picks up. Qualification never stops.",
-    tag: "Fault-tolerant",
+      "Multiple AI models work in tandem with automatic failover. If one model is unavailable, the next picks up. Qualification never stops.",
+    tag: "Fault-Tolerant",
   },
   {
-    title: "$0.002 Per Lead",
+    title: "Pennies Per Lead",
     description:
-      "Process 100 leads for under $0.50 with Kimi. Vision analysis, deep research, and structured JSON output included.",
-    tag: "Cost-efficient",
+      "Process 100 leads for under $0.50. Vision analysis, deep research, and structured results all included. Enterprise power, startup pricing.",
+    tag: "Cost-Efficient",
   },
   {
-    title: "Checkpoint & Resume",
+    title: "Auto-Save & Resume",
     description:
-      "Pipeline saves progress after every lead. Crash, Ctrl+C, or close your laptop — pick up exactly where you left off.",
+      "Progress is saved after every lead. Connection lost, browser closed, or session expired — pick up exactly where you left off.",
     tag: "Resilient",
   },
   {
-    title: "Structured Output",
+    title: "Structured Reports",
     description:
-      "Every lead gets a JSON result: confidence_score, hardware_type, industry_category, key_signals, red_flags, and reasoning.",
+      "Every lead gets a detailed report: confidence score, company type, industry category, key signals, red flags, and reasoning.",
     tag: "Actionable",
   },
   {
-    title: "Pre-Filter Engine",
+    title: "Smart Pre-Filter",
     description:
-      "Obvious non-fits (SaaS, agencies, consultancies) are rejected instantly without burning any LLM tokens. Smart cost savings.",
+      "Obvious non-fits (consultancies, agencies, pure software) are rejected instantly — saving you time and credits on real prospects only.",
     tag: "Efficient",
   },
   {
-    title: "Parallel Crawling",
+    title: "Parallel Processing",
     description:
-      "One shared Chromium instance, multiple concurrent pages. Process 5 leads simultaneously with configurable concurrency limits.",
+      "Process multiple leads simultaneously. Qualify 5 companies at once with configurable concurrency for maximum throughput.",
     tag: "Fast",
   },
   {
     title: "Deep Sales Briefs",
     description:
-      "For hot leads: products they make, motor types, magnet requirements, decision-maker titles, suggested pitch angle, and talking points.",
-    tag: "deep_research.py",
+      "For hot leads: products they make, key requirements, decision-maker titles, suggested pitch angle, and talking points.",
+    tag: "Sales-Ready",
   },
 ];
 

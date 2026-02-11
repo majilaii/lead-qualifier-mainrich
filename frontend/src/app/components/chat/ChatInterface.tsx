@@ -8,93 +8,29 @@ import {
   type KeyboardEvent,
 } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
+import UsageMeter from "../UsageMeter";
+import { useHunt } from "../hunt/HuntContext";
+import type {
+  ChatMessage,
+  ExtractedContext,
+  SearchCompany,
+  QualifiedCompany,
+  PipelineProgress,
+  PipelineSummary,
+  EnrichedContact,
+  Phase,
+  Readiness,
+} from "../hunt/HuntContext";
 
 /* ══════════════════════════════════════════════
-   Types
+   Types (pipeline types imported from HuntContext)
    ══════════════════════════════════════════════ */
 
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-}
-
-interface Readiness {
-  industry: boolean;
-  companyProfile: boolean;
-  technologyFocus: boolean;
-  qualifyingCriteria: boolean;
-  isReady: boolean;
-}
-
-interface ExtractedContext {
-  industry: string | null;
-  companyProfile: string | null;
-  technologyFocus: string | null;
-  qualifyingCriteria: string | null;
-  disqualifiers: string | null;
-}
-
-interface SearchCompany {
-  url: string;
-  domain: string;
-  title: string;
-  snippet: string;
-  score: number | null;
-  source_query?: string;
-}
-
-interface QualifiedCompany {
-  title: string;
-  domain: string;
-  url: string;
-  score: number;
-  tier: "hot" | "review" | "rejected";
-  hardware_type?: string | null;
-  industry_category?: string | null;
-  reasoning: string;
-  key_signals: string[];
-  red_flags: string[];
-}
-
-interface PipelineProgress {
-  index: number;
-  total: number;
-  phase: "crawling" | "qualifying";
-  company: string;
-}
-
-interface PipelineSummary {
-  hot: number;
-  review: number;
-  rejected: number;
-  failed: number;
-}
-
-type Phase =
-  | "chat"
-  | "searching"
-  | "search-complete"
-  | "qualifying"
-  | "complete";
-
-const INITIAL_READINESS: Readiness = {
-  industry: false,
-  companyProfile: false,
-  technologyFocus: false,
-  qualifyingCriteria: false,
-  isReady: false,
-};
-
-const BACKEND_URL =
-  typeof window !== "undefined"
-    ? (process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000")
-    : "http://localhost:8000";
-
-/* ══════════════════════════════════════════════
-   CSV Export Utility
-   ══════════════════════════════════════════════ */
+// Use ChatMessage as Message alias for internal use
+type Message = ChatMessage;
 
 function escapeCsvField(value: string): string {
   if (!value) return "";
@@ -192,10 +128,10 @@ function DownloadButton({
 }
 
 const SUGGESTIONS = [
-  { text: "Find robotics startups building humanoid robots in the US", icon: "🤖" },
-  { text: "Companies manufacturing BLDC motors for drones", icon: "⚡" },
-  { text: "Medical device makers that use precision motors or magnets", icon: "🏥" },
-  { text: "EV powertrain companies developing in-house motor technology", icon: "🔋" },
+  { text: "Find US companies importing custom metal fabrication parts", icon: "🏭" },
+  { text: "Consumer electronics brands looking for OEM component suppliers", icon: "📱" },
+  { text: "European EV companies that need battery or motor components", icon: "⚡" },
+  { text: "Construction equipment manufacturers in Southeast Asia", icon: "🏗️" },
 ];
 
 /* ══════════════════════════════════════════════
@@ -247,36 +183,41 @@ function TypingIndicator() {
 }
 
 function MessageContent({ content }: { content: string }) {
-  const lines = content.split("\n");
   return (
-    <div className="space-y-1.5">
-      {lines.map((line, i) => {
-        if (!line.trim()) return <div key={i} className="h-1.5" />;
-        const rendered = line.replace(/\*\*(.*?)\*\*/g, '<strong class="text-text-primary font-medium">$1</strong>');
-
-        const numberedMatch = line.match(/^(\d+)\.\s+(.*)/);
-        if (numberedMatch) {
-          return (
-            <div key={i} className="flex gap-2.5 pl-0.5">
-              <span className="text-secondary/50 font-mono text-xs mt-px min-w-[1rem] text-right">{numberedMatch[1]}.</span>
-              <span dangerouslySetInnerHTML={{ __html: numberedMatch[2].replace(/\*\*(.*?)\*\*/g, '<strong class="text-text-primary font-medium">$1</strong>') }} />
-            </div>
-          );
-        }
-
-        if (line.trim().startsWith("- ") || line.trim().startsWith("• ")) {
-          return (
-            <div key={i} className="flex gap-2.5 pl-0.5">
-              <span className="text-secondary/50 mt-1.5">
-                <svg width="4" height="4" viewBox="0 0 4 4"><circle cx="2" cy="2" r="2" fill="currentColor" /></svg>
-              </span>
-              <span dangerouslySetInnerHTML={{ __html: rendered.replace(/^[-•]\s*/, "") }} />
-            </div>
-          );
-        }
-
-        return <p key={i} dangerouslySetInnerHTML={{ __html: rendered }} />;
-      })}
+    <div className="space-y-1.5 prose-sm prose-invert max-w-none">
+      <ReactMarkdown
+        rehypePlugins={[rehypeSanitize]}
+        components={{
+          p: ({ children }) => <p className="my-1">{children}</p>,
+          strong: ({ children }) => (
+            <strong className="text-text-primary font-medium">{children}</strong>
+          ),
+          ol: ({ children }) => <ol className="list-none space-y-1 pl-0.5">{children}</ol>,
+          ul: ({ children }) => <ul className="list-none space-y-1 pl-0.5">{children}</ul>,
+          li: ({ children, ...props }) => {
+            const ordered = (props as Record<string, unknown>).ordered as boolean | undefined;
+            const index = (props as Record<string, unknown>).index as number | undefined;
+            return (
+              <div className="flex gap-2.5">
+                {ordered ? (
+                  <span className="text-secondary/50 font-mono text-xs mt-px min-w-[1rem] text-right">
+                    {(index ?? 0) + 1}.
+                  </span>
+                ) : (
+                  <span className="text-secondary/50 mt-1.5">
+                    <svg width="4" height="4" viewBox="0 0 4 4">
+                      <circle cx="2" cy="2" r="2" fill="currentColor" />
+                    </svg>
+                  </span>
+                )}
+                <span>{children}</span>
+              </div>
+            );
+          },
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -313,6 +254,9 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
               <p className="font-sans text-xs text-text-muted group-hover:text-text-secondary transition-colors leading-relaxed">{s.text}</p>
             </button>
           ))}
+        </div>
+        <div className="mt-8 w-full max-w-lg">
+          <UsageMeter />
         </div>
       </div>
     </div>
@@ -680,17 +624,6 @@ function LiveResultsView({
   );
 }
 
-interface EnrichedContact {
-  domain: string;
-  title: string;
-  url: string;
-  email: string | null;
-  phone: string | null;
-  job_title: string | null;
-  source: string | null;
-  found: boolean;
-}
-
 function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onContinue, enrichedContacts, setEnrichedContacts, enrichDone, setEnrichDone }: {
   qualifiedCompanies: QualifiedCompany[];
   summary: PipelineSummary;
@@ -720,7 +653,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
     setEnrichProgress({ index: 0, total: companies.length });
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/enrich`, {
+      const response = await fetch(`/api/enrich`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -944,7 +877,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                     Or all {nonRejected.length} qualified
                   </button>
                 )}
-                <span className="font-mono text-[10px] text-text-dim">Waterfull · Apollo · Hunter waterfall</span>
+                <span className="font-mono text-[10px] text-text-dim">Hunter.io enrichment</span>
               </div>
             )}
           </div>
@@ -985,24 +918,35 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
    ══════════════════════════════════════════════ */
 
 export default function ChatInterface() {
-  // Chat state
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [readiness, setReadiness] = useState<Readiness>(INITIAL_READINESS);
+  const router = useRouter();
+  const hunt = useHunt();
+
+  // Destructure pipeline state from global context (survives navigation)
+  const {
+    phase,
+    searchCompanies,
+    allSearchCompanies,
+    qualifiedCompanies,
+    pipelineProgress,
+    pipelineSummary,
+    pipelineStartTime,
+    extractedContext,
+    enrichedContacts,
+    enrichDone,
+    messages,
+    setMessages,
+    readiness,
+    setReadiness,
+    setExtractedContext,
+    setEnrichedContacts,
+    setEnrichDone,
+    launchSearch: ctxLaunchSearch,
+    launchPipeline: ctxLaunchPipeline,
+    resetHunt,
+  } = hunt;
+
+  // Chat-only state (local to this page)
   const [isLoading, setIsLoading] = useState(false);
-  const [extractedContext, setExtractedContext] = useState<ExtractedContext | null>(null);
-
-  // Pipeline state
-  const [phase, setPhase] = useState<Phase>("chat");
-  const [searchCompanies, setSearchCompanies] = useState<SearchCompany[]>([]);
-  const [allSearchCompanies, setAllSearchCompanies] = useState<SearchCompany[]>([]);
-  const [qualifiedCompanies, setQualifiedCompanies] = useState<QualifiedCompany[]>([]);
-  const [pipelineProgress, setPipelineProgress] = useState<PipelineProgress | null>(null);
-  const [pipelineSummary, setPipelineSummary] = useState<PipelineSummary | null>(null);
-  const [pipelineStartTime, setPipelineStartTime] = useState<number>(0);
-
-  // Enrichment state (lifted so it persists across continue batches)
-  const [enrichedContacts, setEnrichedContacts] = useState<Map<string, EnrichedContact>>(new Map());
-  const [enrichDone, setEnrichDone] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -1015,21 +959,10 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages, isLoading, phase, qualifiedCompanies, scrollToBottom]);
 
-  // Reset everything
+  // Reset everything (resetHunt clears messages, readiness, pipeline state)
   const resetChat = useCallback(() => {
-    setMessages([]);
-    setReadiness(INITIAL_READINESS);
-    setExtractedContext(null);
-    setPhase("chat");
-    setSearchCompanies([]);
-    setAllSearchCompanies([]);
-    setQualifiedCompanies([]);
-    setPipelineProgress(null);
-    setPipelineSummary(null);
-    setPipelineStartTime(0);
-    setEnrichedContacts(new Map());
-    setEnrichDone(false);
-  }, []);
+    resetHunt();
+  }, [resetHunt]);
 
   // Send chat message
   const sendMessage = useCallback(
@@ -1066,168 +999,45 @@ export default function ChatInterface() {
     [messages]
   );
 
-  // Launch Exa search
+  // Launch Exa search (delegates to global context)
   const launchSearch = useCallback(async () => {
     if (!extractedContext) return;
-    setPhase("searching");
-
     try {
-      const response = await fetch("/api/chat/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          industry: extractedContext.industry || "",
-          technology_focus: extractedContext.technologyFocus || "",
-          qualifying_criteria: extractedContext.qualifyingCriteria || "",
-          company_profile: extractedContext.companyProfile || undefined,
-          disqualifiers: extractedContext.disqualifiers || undefined,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Search failed");
-      const data = await response.json();
-
-      setSearchCompanies(data.companies || []);
-      setAllSearchCompanies(data.companies || []);
-      setPhase("search-complete");
-    } catch (err) {
-      console.error("Search error:", err);
-      setPhase("chat");
+      await ctxLaunchSearch(extractedContext);
+    } catch {
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", content: "Search failed. Please try again.", timestamp: Date.now() },
       ]);
     }
-  }, [extractedContext]);
+  }, [extractedContext, ctxLaunchSearch]);
 
-  // Launch pipeline (SSE stream directly to FastAPI)
+  // Launch pipeline (delegates to global context — SSE runs even if you navigate away)
   const launchPipeline = useCallback(async (batchCount: number, continueFromRemaining = false) => {
-    // When continuing, use the remaining unprocessed companies from the full search results
     const source = continueFromRemaining
       ? allSearchCompanies.filter((c) => !qualifiedCompanies.some((qc) => qc.domain === c.domain))
       : searchCompanies;
 
     if (source.length === 0) return;
 
-    // Sort by Exa score (descending) and take the requested batch
     const sorted = [...source].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     const batch = sorted.slice(0, batchCount);
-
-    // Preserve previous results when continuing
     const previousResults = continueFromRemaining ? qualifiedCompanies : [];
 
-    // Reorder searchCompanies so progress/queue reflects the actual processing order
-    setSearchCompanies(batch);
-    setPhase("qualifying");
-    setQualifiedCompanies(previousResults);
-    setPipelineProgress(null);
-    setPipelineSummary(null);
-    setPipelineStartTime(Date.now());
-
     try {
-      const response = await fetch(`${BACKEND_URL}/api/pipeline/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          companies: batch.map((c) => ({
-            url: c.url,
-            domain: c.domain,
-            title: c.title,
-            score: c.score,
-          })),
-          use_vision: true,
-          search_context: extractedContext ? {
-            industry: extractedContext.industry || undefined,
-            company_profile: extractedContext.companyProfile || undefined,
-            technology_focus: extractedContext.technologyFocus || undefined,
-            qualifying_criteria: extractedContext.qualifyingCriteria || undefined,
-            disqualifiers: extractedContext.disqualifiers || undefined,
-          } : undefined,
-        }),
-      });
-
-      if (!response.ok || !response.body) throw new Error("Pipeline connection failed");
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let completed = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const parts = buffer.split("\n\n");
-        buffer = parts.pop() || "";
-
-        for (const part of parts) {
-          const match = part.match(/^data:\s*(.*)/);
-          if (!match) continue;
-
-          try {
-            const event = JSON.parse(match[1]);
-
-            if (event.type === "progress") {
-              setPipelineProgress({
-                index: event.index,
-                total: event.total,
-                phase: event.phase,
-                company: event.company?.title || event.company?.domain || "",
-              });
-            } else if (event.type === "result") {
-              setPipelineProgress(null);
-              setQualifiedCompanies((prev) => [...prev, event.company]);
-            } else if (event.type === "error" && event.fatal) {
-              throw new Error(event.error);
-            } else if (event.type === "complete") {
-              setPipelineProgress(null);
-              // Merge summary with any previous batch results
-              setPipelineSummary((prev) => {
-                if (!prev) return event.summary;
-                return {
-                  hot: prev.hot + (event.summary?.hot || 0),
-                  review: prev.review + (event.summary?.review || 0),
-                  rejected: prev.rejected + (event.summary?.rejected || 0),
-                  failed: prev.failed + (event.summary?.failed || 0),
-                };
-              });
-              setPhase("complete");
-              completed = true;
-            }
-          } catch (parseErr) {
-            // Re-throw intentional errors (fatal pipeline errors)
-            if (parseErr instanceof Error && parseErr.message) throw parseErr;
-            // Skip genuinely unparseable SSE events
-          }
-        }
-      }
-
-      // If we exited the loop without a "complete" event
-      if (!completed) {
-        setPhase("complete");
-        setPipelineSummary((prev) => {
-          if (prev) return prev;
-          return { hot: 0, review: 0, rejected: 0, failed: 0 };
-        });
-      }
-    } catch (err) {
-      console.error("Pipeline error:", err);
-      setPhase("search-complete");
+      await ctxLaunchPipeline(batch, previousResults, extractedContext);
+    } catch {
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", content: "Pipeline encountered an error. You can try again.", timestamp: Date.now() },
       ]);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchCompanies, allSearchCompanies, qualifiedCompanies, extractedContext]);
+  }, [searchCompanies, allSearchCompanies, qualifiedCompanies, extractedContext, ctxLaunchPipeline]);
 
   // Force-launch search with whatever context we have (skip follow-ups)
   const forceSearch = useCallback(async () => {
-    // Build context from whatever we have — infer from messages if extractedContext is sparse
     const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null };
 
-    // If we have almost nothing extracted, try to derive from the last user message
     if (!ctx.industry && messages.length > 0) {
       const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
       if (lastUserMsg) {
@@ -1237,36 +1047,16 @@ export default function ChatInterface() {
 
     setExtractedContext(ctx);
     setReadiness({ industry: true, companyProfile: true, technologyFocus: true, qualifyingCriteria: true, isReady: true });
-    setPhase("searching");
 
     try {
-      const response = await fetch("/api/chat/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          industry: ctx.industry || "",
-          technology_focus: ctx.technologyFocus || "",
-          qualifying_criteria: ctx.qualifyingCriteria || "",
-          company_profile: ctx.companyProfile || undefined,
-          disqualifiers: ctx.disqualifiers || undefined,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Search failed");
-      const data = await response.json();
-
-      setSearchCompanies(data.companies || []);
-      setAllSearchCompanies(data.companies || []);
-      setPhase("search-complete");
-    } catch (err) {
-      console.error("Search error:", err);
-      setPhase("chat");
+      await ctxLaunchSearch(ctx);
+    } catch {
       setMessages((prev) => [
         ...prev,
         { id: crypto.randomUUID(), role: "assistant", content: "Search failed. Please try again.", timestamp: Date.now() },
       ]);
     }
-  }, [extractedContext, messages]);
+  }, [extractedContext, messages, setExtractedContext, ctxLaunchSearch]);
 
   // Determine if we should show the search action card
   const showSearchAction = readiness.isReady && phase === "chat" && !isLoading;
@@ -1278,10 +1068,22 @@ export default function ChatInterface() {
     <div className="flex flex-col h-dvh bg-void">
       {/* ─── Header ─── */}
       <header className="flex items-center justify-between px-4 md:px-6 h-14 border-b border-border-dim bg-surface-1/80 backdrop-blur-md flex-shrink-0 z-10">
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <span className="text-secondary text-base font-bold">◈</span>
-          <span className="text-text-primary text-xs font-semibold tracking-[0.12em] uppercase group-hover:text-secondary transition-colors duration-200">Hunt</span>
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link href="/" className="flex items-center gap-2.5 group">
+            <span className="text-secondary text-base font-bold">◈</span>
+            <span className="text-text-primary text-xs font-semibold tracking-[0.12em] uppercase group-hover:text-secondary transition-colors duration-200">Hunt</span>
+          </Link>
+          {/* Back to dashboard — always visible once pipeline is running */}
+          {phase !== "chat" && (
+            <button
+              onClick={() => router.push("/dashboard")}
+              className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-secondary/30 rounded-lg px-2.5 py-1.5 cursor-pointer ml-1"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
+              Dashboard
+            </button>
+          )}
+        </div>
         {messages.length > 0 && phase === "chat" && <ReadinessTracker readiness={readiness} />}
         {phase !== "chat" && (
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-secondary/50">

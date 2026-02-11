@@ -5,10 +5,14 @@ const BACKEND_URL = process.env.CHAT_BACKEND_URL || "http://localhost:8000";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
+    const authHeader = request.headers.get("authorization") || "";
 
     const backendResponse = await fetch(`${BACKEND_URL}/api/chat/search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(authHeader ? { Authorization: authHeader } : {}),
+      },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(60000), // 60s — query generation + Exa search
     });

@@ -17,6 +17,7 @@ Models (cheapest first):
 
 import asyncio
 import json
+import logging
 import os
 import re
 import time
@@ -29,6 +30,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
 # ──────────────────────────────────────────────
 # Config
 # ──────────────────────────────────────────────
@@ -38,11 +41,22 @@ KIMI_API_BASE = "https://api.moonshot.ai/v1"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EXA_API_KEY = os.getenv("EXA_API_KEY", "")
 
-# Filter out placeholder values
-for _name in ("KIMI_API_KEY", "OPENAI_API_KEY", "EXA_API_KEY"):
-    _val = locals().get(_name, "")
-    if _val and ("your" in _val.lower() or _val.startswith("sk-your")):
-        locals()[_name] = ""
+
+def _is_placeholder(val: str) -> bool:
+    """Return True if the key looks like a placeholder, not a real API key."""
+    if not val:
+        return False
+    lower = val.lower()
+    return "your" in lower or lower.startswith("sk-your") or lower == "changeme"
+
+
+# Scrub placeholder values so the app treats them as missing
+if _is_placeholder(KIMI_API_KEY):
+    KIMI_API_KEY = ""
+if _is_placeholder(OPENAI_API_KEY):
+    OPENAI_API_KEY = ""
+if _is_placeholder(EXA_API_KEY):
+    EXA_API_KEY = ""
 
 
 # ──────────────────────────────────────────────
@@ -148,14 +162,14 @@ Before asking ANY follow-up, evaluate how much detail the user already provided.
 - SUFFICIENT: User gave specific, actionable detail → mark as ready, do NOT ask about it
 
 EXAMPLES OF SUFFICIENT (do NOT ask follow-ups for these):
-- Industry: "robotics startups and drone companies building hardware" → SUFFICIENT
+- Industry: "CNC machining shops doing custom metal fabrication" → SUFFICIENT
 - Company profile: "SMEs and Series A-C startups, under 500 people, US/Europe" → SUFFICIENT
-- Technology: "BLDC motors, servo actuators, NdFeB magnets, Halbach arrays" → SUFFICIENT
-- Criteria: "websites showing real hardware, motor specs, CAD renders" → SUFFICIENT
+- Technology: "precision CNC milling, 5-axis machining, tight tolerances" → SUFFICIENT
+- Criteria: "websites showing real manufacturing capabilities, machine photos, ISO certs" → SUFFICIENT
 
 EXAMPLES OF THIN (ask ONE targeted follow-up):
-- "robotics companies" → What kind of robotics — **industrial automation**, **humanoid**, **surgical**, **warehouse**?
-- "motor companies" → Companies that **manufacture** motors, **integrate** them into products, or **purchase** them as components?
+- "LED companies" → Companies that **manufacture** LEDs, **distribute** them, or **use** them in products?
+- "electronics companies" → What kind — **consumer electronics**, **industrial controls**, **semiconductors**?
 - "startups" → In which industry? What stage — **pre-seed**, **Series A**, **growth**?
 
 IF THE USER'S FIRST MESSAGE ALREADY COVERS ALL 4 FIELDS WITH SUFFICIENT DETAIL:
@@ -346,8 +360,8 @@ class ChatEngine:
             self.exa_client = Exa(api_key=EXA_API_KEY)
 
         if not self.kimi_client and not self.openai_client:
-            print("⚠️  No LLM API keys configured. Chat will not work.")
-            print("   Set KIMI_API_KEY or OPENAI_API_KEY in .env")
+            logger.warning("No LLM API keys configured. Chat will not work.")
+            logger.warning("Set KIMI_API_KEY or OPENAI_API_KEY in .env")
 
     # ── Public API ───────────────────────────────
 
@@ -376,7 +390,7 @@ class ChatEngine:
             result = await self._conversation_llm(sanitized)
             return result
         except Exception as e:
-            print(f"❌ Chat engine error: {e}")
+            logger.error("Chat engine error: %s", e)
             return ChatResponse(
                 reply="I'm having trouble processing that. Could you try rephrasing?",
                 readiness=Readiness(),
@@ -455,10 +469,10 @@ class ChatEngine:
             data = self._extract_json(response_text)
             if data and validate_query_output(data):
                 return data["queries"]
-            print(f"⚠️  Query validation failed, raw: {response_text[:200]}")
+            logger.warning("Query validation failed, raw: %s", response_text[:200])
             return []
         except Exception as e:
-            print(f"❌ Query generation parse error: {e}")
+            logger.error("Query generation parse error: %s", e)
             return []
 
     # ── Exa Search Execution ─────────────────────
@@ -468,7 +482,7 @@ class ChatEngine:
     ) -> list[dict]:
         """Execute search queries via Exa AI. Deduplicates by domain."""
         if not self.exa_client:
-            print("⚠️  No EXA_API_KEY — cannot execute search")
+            logger.warning("No EXA_API_KEY -- cannot execute search")
             return []
 
         all_results = []
@@ -491,7 +505,7 @@ class ChatEngine:
                         all_results.append(r)
 
             except Exception as e:
-                print(f"⚠️  Exa search failed for '{q.get('name', 'unknown')}': {e}")
+                logger.warning("Exa search failed for '%s': %s", q.get('name', 'unknown'), e)
                 continue
 
         return all_results
@@ -549,7 +563,7 @@ class ChatEngine:
                 )
                 return self._extract_kimi_response(response.choices[0].message)
             except Exception as e:
-                print(f"⚠️  Kimi failed ({purpose}): {e}")
+                logger.warning("Kimi failed (%s): %s", purpose, e)
 
         # Tier 2: OpenAI GPT-4o-mini (fast, cheap)
         if self.openai_client:
@@ -563,7 +577,7 @@ class ChatEngine:
                 )
                 return response.choices[0].message.content or ""
             except Exception as e:
-                print(f"⚠️  OpenAI failed ({purpose}): {e}")
+                logger.warning("OpenAI failed (%s): %s", purpose, e)
 
         raise RuntimeError("No LLM available — set KIMI_API_KEY or OPENAI_API_KEY in .env")
 
@@ -626,7 +640,7 @@ class ChatEngine:
             )
 
         except Exception as e:
-            print(f"⚠️  Parse error: {e}")
+            logger.warning("Parse error: %s", e)
             return ChatResponse(
                 reply=text.strip()[:1000] or "I didn't quite catch that. What industry are the target companies in?",
                 readiness=Readiness(),

@@ -2,9 +2,11 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useAuth } from "./auth/SessionProvider";
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
+  const { user } = useAuth();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 60);
@@ -27,7 +29,7 @@ export default function Navbar() {
             &#x25C8;
           </span>
           <span className="text-text-primary text-sm font-semibold tracking-[0.15em] uppercase">
-            The Magnet Hunter
+            Hunt
           </span>
         </Link>
 
@@ -46,18 +48,37 @@ export default function Navbar() {
             Pipeline
           </a>
           <a
-            href="#features"
+            href="#pricing"
             className="text-text-muted text-xs uppercase tracking-[0.2em] hover:text-text-primary transition-colors duration-200"
           >
-            Features
+            Pricing
           </a>
-          <Link
-            href="/chat"
-            className="inline-flex items-center gap-2 bg-text-primary text-void text-xs font-semibold uppercase tracking-[0.15em] px-5 py-2.5 rounded hover:bg-white/85 transition-colors duration-200"
-          >
-            Start Hunting
-            <span className="text-[10px]">&#x2192;</span>
-          </Link>
+
+          {user ? (
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-2 bg-text-primary text-void text-xs font-semibold uppercase tracking-[0.15em] px-5 py-2.5 rounded hover:bg-white/85 transition-colors duration-200"
+            >
+              Dashboard
+              <span className="text-[10px]">&#x2192;</span>
+            </Link>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="text-text-muted text-xs uppercase tracking-[0.2em] hover:text-text-primary transition-colors duration-200"
+              >
+                Log In
+              </Link>
+              <Link
+                href="/signup"
+                className="inline-flex items-center gap-2 bg-text-primary text-void text-xs font-semibold uppercase tracking-[0.15em] px-5 py-2.5 rounded hover:bg-white/85 transition-colors duration-200"
+              >
+                Get Started Free
+                <span className="text-[10px]">&#x2192;</span>
+              </Link>
+            </>
+          )}
         </nav>
 
         {/* Mobile Menu Button */}
