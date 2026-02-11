@@ -146,3 +146,11 @@ CREATE POLICY "Service can manage usage"
     ON usage_tracking FOR ALL
     USING (true)
     WITH CHECK (true);
+
+
+-- ============================================================
+-- Funnel: add notes, deal_value, status_changed_at to qualified_leads
+-- ============================================================
+ALTER TABLE qualified_leads ADD COLUMN IF NOT EXISTS notes TEXT;
+ALTER TABLE qualified_leads ADD COLUMN IF NOT EXISTS deal_value DOUBLE PRECISION;
+ALTER TABLE qualified_leads ADD COLUMN IF NOT EXISTS status_changed_at TIMESTAMPTZ DEFAULT NOW();

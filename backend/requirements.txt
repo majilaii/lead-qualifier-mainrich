@@ -45,6 +45,9 @@ aiosqlite>=0.19.0      # Async SQLite driver (local dev fallback)
 asyncpg>=0.29.0        # Async PostgreSQL driver (Supabase)
 alembic>=1.12.0        # Database migrations
 
+# --- Billing ---
+stripe>=8.0.0          # Stripe SDK for subscriptions & checkout
+
 # --- Testing ---
 pytest>=8.0.0
 pytest-asyncio>=0.24.0

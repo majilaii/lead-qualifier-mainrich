@@ -34,7 +34,6 @@ from config import (
     KIMI_API_BASE,
     TEXT_MODEL,
     VISION_MODEL,
-    POSITIVE_KEYWORDS,
     NEGATIVE_KEYWORDS,
     COST_PER_1K_TOKENS,
 )
@@ -178,6 +177,7 @@ class LeadQualifier:
         tech = ctx.get("technology_focus") or ""
         criteria = ctx.get("qualifying_criteria") or ""
         disqualifiers = ctx.get("disqualifiers") or ""
+        geographic_region = ctx.get("geographic_region") or ""
 
         parts = [
             f"You are a B2B lead qualification assistant. Your job is to evaluate whether a company is a good match for a client searching for: {industry}.",
@@ -188,6 +188,10 @@ class LeadQualifier:
             parts.append(f"TARGET COMPANY PROFILE: {profile}")
         if tech:
             parts.append(f"TECHNOLOGY/PRODUCT FOCUS: {tech}")
+        if geographic_region:
+            parts.append(f"\nGEOGRAPHIC CONSTRAINT: The client is looking for companies in/near: {geographic_region}")
+            parts.append("If the company is clearly NOT located in or serving this area, reduce the score by 3-4 points. Location is a HARD requirement for this search.")
+            parts.append("Check the company's address, phone number, service area, or 'About Us' page for location clues.")
 
         parts.append("")
         parts.append("SCORING GUIDELINES:")
@@ -642,8 +646,8 @@ Respond with a JSON object in this exact format:
 {
     "is_qualified": boolean,
     "confidence_score": integer from 1-10,
-    "hardware_type": string or null (e.g., "Humanoid Robot", "Drone", "Medical Device"),
-    "industry_category": string or null ("robotics", "aerospace", "medical", "automotive", "industrial", "motor_manufacturer", "consumer_electronics"),
+    "hardware_type": string or null (what kind of company is this, e.g. "Dental Clinic", "SaaS Platform", "Manufacturing"),
+    "industry_category": string or null (their industry sector),
     "reasoning": string (2-3 sentences explaining your decision),
     "key_signals": array of strings (positive signals found),
     "red_flags": array of strings (negative signals found),
@@ -779,31 +783,24 @@ Respond with a JSON object in this exact format:
                 red_flags=["LLM unavailable — keyword-only analysis"]
             )
         
-        # Legacy: hardcoded Mainrich keywords
-        positive_count = sum(1 for kw in POSITIVE_KEYWORDS if kw.lower() in content_lower)
+        # Legacy fallback: no search context, use negative keyword check only
         negative_count = sum(1 for kw in NEGATIVE_KEYWORDS if kw.lower() in content_lower)
         
-        # Simple scoring
-        net_score = positive_count - (negative_count * 2)
-        
-        if net_score >= 5:
-            score = 8
-            qualified = True
-        elif net_score >= 2:
-            score = 6
-            qualified = True
-        elif net_score >= 0:
+        if negative_count >= 2:
+            score = 2
+            qualified = False
+        elif negative_count == 1:
             score = 4
             qualified = False
         else:
-            score = 2
+            score = 5
             qualified = False
         
         return QualificationResult(
             is_qualified=qualified,
             confidence_score=score,
-            reasoning=f"Keyword analysis (LLM unavailable: {error_msg[:50]}). Found {positive_count} positive and {negative_count} negative signals.",
-            key_signals=[kw for kw in POSITIVE_KEYWORDS[:10] if kw.lower() in content_lower],
+            reasoning=f"Keyword analysis (LLM unavailable: {error_msg[:50]}). Found {negative_count} disqualifying signals.",
+            key_signals=[],
             red_flags=[kw for kw in NEGATIVE_KEYWORDS[:10] if kw.lower() in content_lower]
         )
     

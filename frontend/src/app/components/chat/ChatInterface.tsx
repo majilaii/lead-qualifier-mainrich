@@ -14,6 +14,8 @@ import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import UsageMeter from "../UsageMeter";
 import { useHunt } from "../hunt/HuntContext";
+import { useBilling } from "../billing/BillingProvider";
+import OnboardingOverlay, { useFirstVisit } from "../onboarding/OnboardingOverlay";
 import type {
   ChatMessage,
   ExtractedContext,
@@ -233,8 +235,85 @@ function MessageContent({ content }: { content: string }) {
   );
 }
 
+/* ── Quota CTA — inline upgrade card shown when limit is hit ── */
+const QUOTA_CTA_PREFIX = "__QUOTA_CTA__";
+
+function QuotaCTACard({ payload }: { payload: string }) {
+  const { checkout } = useBilling();
+  let data: { used?: number; limit?: number; label?: string; plan?: string } = {};
+  try { data = JSON.parse(payload); } catch { /* ignore */ }
+
+  const { used = "?", limit = "?", label = "items", plan = "Free" } = data;
+
+  return (
+    <div className="animate-slide-up">
+      <div className="flex items-start gap-3">
+        <div className="w-6 h-6 rounded-md flex items-center justify-center bg-amber-500/10 text-amber-400 text-xs flex-shrink-0 mt-0.5">⚠</div>
+        <div className="space-y-3 w-full max-w-md">
+          {/* Quota message */}
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+            <p className="text-sm text-text-primary font-medium">Quota reached</p>
+            <p className="text-xs text-text-muted mt-1">
+              You&apos;ve used <span className="text-amber-400 font-mono font-medium">{String(used)}/{String(limit)}</span> {label} this month on the <span className="capitalize font-medium text-text-secondary">{plan}</span> plan.
+            </p>
+          </div>
+
+          {/* CTA cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {/* Pro */}
+            <button
+              onClick={() => checkout("pro")}
+              className="group relative rounded-xl border border-secondary/30 bg-secondary/5 hover:bg-secondary/10 px-4 py-3 text-left transition-all duration-200 cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-mono text-xs font-bold text-secondary tracking-wide">PRO</span>
+                <span className="font-mono text-xs text-text-muted">$20<span className="text-text-muted/50">/mo</span></span>
+              </div>
+              <ul className="space-y-1 text-[11px] text-text-muted">
+                <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> 20 hunts / month</li>
+                <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> 100 leads per hunt</li>
+                <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> 200 enrichments</li>
+                <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> Deep research</li>
+              </ul>
+              <div className="mt-2.5 text-center text-[11px] font-mono font-medium text-secondary group-hover:underline tracking-wide">
+                Upgrade to Pro →
+              </div>
+            </button>
+
+            {/* Enterprise */}
+            <button
+              onClick={() => checkout("enterprise")}
+              className="group relative rounded-xl border border-amber-400/30 bg-amber-400/5 hover:bg-amber-400/10 px-4 py-3 text-left transition-all duration-200 cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-mono text-xs font-bold text-amber-400 tracking-wide">ENTERPRISE</span>
+                <span className="font-mono text-xs text-text-muted">$50<span className="text-text-muted/50">/mo</span></span>
+              </div>
+              <ul className="space-y-1 text-[11px] text-text-muted">
+                <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> Unlimited hunts</li>
+                <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> 500 leads per hunt</li>
+                <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> 1,000 enrichments</li>
+                <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> Priority support</li>
+              </ul>
+              <div className="mt-2.5 text-center text-[11px] font-mono font-medium text-amber-400 group-hover:underline tracking-wide">
+                Upgrade to Enterprise →
+              </div>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
+  const isQuotaCTA = !isUser && message.content.startsWith(QUOTA_CTA_PREFIX);
+
+  if (isQuotaCTA) {
+    return <QuotaCTACard payload={message.content.slice(QUOTA_CTA_PREFIX.length)} />;
+  }
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} animate-slide-up`}>
       <div className={`flex items-start gap-3 max-w-[88%] md:max-w-[75%] ${isUser ? "flex-row-reverse" : ""}`}>
@@ -929,6 +1008,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
 export default function ChatInterface() {
   const router = useRouter();
   const hunt = useHunt();
+  const { isFirstVisit, checked: onboardingChecked, completeOnboarding } = useFirstVisit();
 
   // Destructure pipeline state from global context (survives navigation)
   const {
@@ -958,6 +1038,8 @@ export default function ChatInterface() {
   const [isLoading, setIsLoading] = useState(false);
   const [showMap, setShowMap] = useState(true); // map panel visible during qualifying/complete
   const [showMobileMap, setShowMobileMap] = useState(false); // mobile fullscreen map overlay
+  const [quotaError, setQuotaError] = useState<{ action: string; used: number; limit: number; plan: string } | null>(null);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -974,6 +1056,38 @@ export default function ChatInterface() {
   const resetChat = useCallback(() => {
     resetHunt();
   }, [resetHunt]);
+
+  // Listen for quota exceeded events from HuntContext
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      setQuotaError(detail);
+
+      // Friendly labels for actions
+      const actionLabels: Record<string, string> = { search: "searches", leads: "leads", enrichment: "enrichments" };
+      const label = actionLabels[detail.action] ?? `${detail.action}s`;
+      const planName = (detail.plan ?? "free").charAt(0).toUpperCase() + (detail.plan ?? "free").slice(1);
+
+      // Render a rich CTA card inline in the chat
+      const payload = JSON.stringify({
+        used: detail.used ?? 0,
+        limit: detail.limit ?? 0,
+        label,
+        plan: planName,
+      });
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant" as const,
+          content: `${QUOTA_CTA_PREFIX}${payload}`,
+          timestamp: Date.now(),
+        },
+      ]);
+    };
+    window.addEventListener("hunt:quota_exceeded", handler);
+    return () => window.removeEventListener("hunt:quota_exceeded", handler);
+  }, [setMessages]);
 
   // Send chat message
   const sendMessage = useCallback(
@@ -1047,7 +1161,7 @@ export default function ChatInterface() {
 
   // Force-launch search with whatever context we have (skip follow-ups)
   const forceSearch = useCallback(async () => {
-    const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null, geographicRegion: null };
+    const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null, geographicRegion: null, countryCode: null };
 
     if (!ctx.industry && messages.length > 0) {
       const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -1148,6 +1262,11 @@ export default function ChatInterface() {
 
   return (
     <div className="flex flex-col h-dvh bg-void">
+      {/* ─── Onboarding Overlay (first visit only) ─── */}
+      {onboardingChecked && isFirstVisit && (
+        <OnboardingOverlay onComplete={completeOnboarding} />
+      )}
+
       {/* ─── Header ─── */}
       <header className="flex items-center justify-between px-4 md:px-6 h-14 border-b border-border-dim bg-surface-1/80 backdrop-blur-md flex-shrink-0 z-20">
         <div className="flex items-center gap-3">

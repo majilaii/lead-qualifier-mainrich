@@ -55,13 +55,21 @@ export default function Navbar() {
           </a>
 
           {user ? (
-            <Link
-              href="/dashboard"
+            <div className="flex items-center gap-4">
+              <Link
+                href="/dashboard/settings?upgrade=true"
+                className="text-text-muted text-xs uppercase tracking-[0.2em] hover:text-secondary transition-colors duration-200"
+              >
+                Upgrade
+              </Link>
+              <Link
+                href="/dashboard"
               className="inline-flex items-center gap-2 bg-text-primary text-void text-xs font-semibold uppercase tracking-[0.15em] px-5 py-2.5 rounded hover:bg-white/85 transition-colors duration-200"
             >
               Dashboard
               <span className="text-[10px]">&#x2192;</span>
             </Link>
+            </div>
           ) : (
             <>
               <Link

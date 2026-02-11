@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useAuth } from "./auth/SessionProvider";
 
 function useInView(ref: React.RefObject<HTMLElement | null>) {
   const [visible, setVisible] = useState(false);
@@ -22,62 +23,54 @@ function useInView(ref: React.RefObject<HTMLElement | null>) {
 const PLANS = [
   {
     name: "Free",
+    id: "free",
     price: "$0",
     period: "forever",
-    description: "Perfect for trying out the platform and small teams.",
-    cta: "Get Started Free",
-    ctaHref: "/signup",
+    description: "Perfect for trying out the platform.",
     highlight: false,
     features: [
-      "50 leads / month",
+      "3 hunts / month",
+      "25 leads per hunt",
+      "10 contact enrichments",
       "Basic AI qualification",
       "CSV export",
-      "3 saved searches",
       "Email support",
-      "Community access",
     ],
     limits: [
       "No deep research",
-      "No contact enrichment",
     ],
   },
   {
     name: "Pro",
+    id: "pro",
     price: "$49",
     period: "/month",
     description: "For growing sales teams that need more power and volume.",
-    cta: "Coming Soon",
-    ctaHref: "#",
     highlight: true,
     features: [
-      "1,000 leads / month",
-      "Advanced AI + vision scoring",
+      "20 hunts / month",
+      "100 leads per hunt",
+      "200 contact enrichments",
       "Deep research briefs",
-      "Contact enrichment",
-      "Excel + CRM export",
-      "Unlimited saved searches",
       "Priority support",
-      "Team collaboration (3 seats)",
+      "Unlimited saved searches",
     ],
     limits: [],
   },
   {
     name: "Enterprise",
-    price: "Custom",
-    period: "",
-    description: "Unlimited volume, custom integrations, and dedicated support.",
-    cta: "Contact Sales",
-    ctaHref: "#",
+    id: "enterprise",
+    price: "$199",
+    period: "/month",
+    description: "Unlimited volume, priority everything, and dedicated support.",
     highlight: false,
     features: [
-      "Unlimited leads",
-      "Custom AI models",
+      "Unlimited hunts",
+      "500 leads per hunt",
+      "1,000 contact enrichments",
+      "Deep research + priority",
       "API access",
-      "White-label option",
-      "SSO / SAML",
       "Dedicated account manager",
-      "Custom integrations",
-      "SLA guarantee",
     ],
     limits: [],
   },
@@ -86,6 +79,48 @@ const PLANS = [
 export default function Pricing() {
   const ref = useRef<HTMLElement>(null);
   const visible = useInView(ref);
+  const { user, session } = useAuth();
+  const [checkingOut, setCheckingOut] = useState<string | null>(null);
+
+  const handleCheckout = async (planId: string) => {
+    if (planId === "free") return;
+    if (!user || !session?.access_token) {
+      // Redirect to signup first
+      window.location.href = "/signup";
+      return;
+    }
+
+    setCheckingOut(planId);
+    try {
+      const resp = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ plan: planId }),
+      });
+      const data = await resp.json();
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch (e) {
+      console.error("Checkout error:", e);
+    } finally {
+      setCheckingOut(null);
+    }
+  };
+
+  const getCtaText = (planId: string) => {
+    if (checkingOut === planId) return "Redirecting…";
+    if (planId === "free") return user ? "Current Plan" : "Get Started Free";
+    return `Upgrade to ${planId.charAt(0).toUpperCase() + planId.slice(1)}`;
+  };
+
+  const getCtaHref = (planId: string) => {
+    if (planId === "free") return user ? "/dashboard" : "/signup";
+    return "#";
+  };
 
   return (
     <section id="pricing" ref={ref} className="bg-surface-1 py-24 px-6 border-y border-border-dim">
@@ -149,16 +184,26 @@ export default function Pricing() {
               </p>
 
               {/* CTA */}
-              <Link
-                href={plan.ctaHref}
-                className={`block w-full text-center font-mono text-xs font-bold uppercase tracking-[0.15em] py-3.5 rounded-lg transition-colors mb-6 ${
-                  plan.highlight
-                    ? "bg-text-primary text-void hover:bg-white/85"
-                    : "bg-surface-3 border border-border text-text-secondary hover:border-border-bright hover:text-text-primary"
-                }`}
-              >
-                {plan.cta}
-              </Link>
+              {plan.id === "free" ? (
+                <Link
+                  href={getCtaHref(plan.id)}
+                  className="block w-full text-center font-mono text-xs font-bold uppercase tracking-[0.15em] py-3.5 rounded-lg transition-colors mb-6 bg-surface-3 border border-border text-text-secondary hover:border-border-bright hover:text-text-primary"
+                >
+                  {getCtaText(plan.id)}
+                </Link>
+              ) : (
+                <button
+                  onClick={() => handleCheckout(plan.id)}
+                  disabled={checkingOut === plan.id}
+                  className={`block w-full text-center font-mono text-xs font-bold uppercase tracking-[0.15em] py-3.5 rounded-lg transition-colors mb-6 cursor-pointer ${
+                    plan.highlight
+                      ? "bg-text-primary text-void hover:bg-white/85"
+                      : "bg-surface-3 border border-border text-text-secondary hover:border-border-bright hover:text-text-primary"
+                  } disabled:opacity-50`}
+                >
+                  {getCtaText(plan.id)}
+                </button>
+              )}
 
               {/* Features */}
               <ul className="space-y-2.5">

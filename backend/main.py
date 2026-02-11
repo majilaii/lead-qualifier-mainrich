@@ -129,11 +129,7 @@ async def process_lead(
         # Website failed to crawl - send to REVIEW queue, not rejected.
         # Crawl failure doesn't mean the company is irrelevant — it often means
         # the site has bot protection (Cloudflare, etc.)
-        # Use keyword check on company name to give a rough score
-        name_lower = lead.company_name.lower()
-        from config import POSITIVE_KEYWORDS
-        has_positive = any(kw.lower() in name_lower for kw in POSITIVE_KEYWORDS)
-        score = 6 if has_positive else 5  # Default to review range (4-7)
+        score = 5  # Default to review range (4-7)
         
         processed = ProcessedLead(
             company_name=lead.company_name,

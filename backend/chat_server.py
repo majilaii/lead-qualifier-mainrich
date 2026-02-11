@@ -18,9 +18,11 @@ Run:
   uvicorn chat_server:app --reload --port 8000
 """
 
+import asyncio
 import json
 import logging
 import os
+import re
 import random
 import time
 import uuid
@@ -38,6 +40,7 @@ from sqlalchemy import select, func, delete
 from auth import require_auth
 from chat_engine import ChatEngine, ExtractedContext
 from logging_config import setup_logging
+from stripe_billing import is_stripe_configured
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -48,16 +51,32 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 
 class RateLimiter:
-    """Simple sliding-window rate limiter."""
+    """Simple sliding-window rate limiter with automatic stale-IP cleanup."""
 
     def __init__(self, max_requests: int = 30, window_seconds: int = 60):
         self.max_requests = max_requests
         self.window = window_seconds
         self._requests: dict[str, list[float]] = defaultdict(list)
+        self._last_cleanup = time.time()
+        self._cleanup_interval = 300  # Prune stale IPs every 5 minutes
+
+    def _maybe_cleanup(self):
+        """Remove IPs with no recent requests to prevent unbounded memory growth."""
+        now = time.time()
+        if now - self._last_cleanup < self._cleanup_interval:
+            return
+        self._last_cleanup = now
+        stale_keys = [
+            k for k, timestamps in self._requests.items()
+            if not timestamps or (now - max(timestamps)) > self.window
+        ]
+        for k in stale_keys:
+            del self._requests[k]
 
     def check(self, client_id: str) -> bool:
         """Returns True if the request is allowed."""
         now = time.time()
+        self._maybe_cleanup()
         # Prune old entries
         self._requests[client_id] = [
             t for t in self._requests[client_id] if now - t < self.window
@@ -93,6 +112,8 @@ class SearchRequest(BaseModel):
     technology_focus: str = Field(..., max_length=500)
     qualifying_criteria: str = Field(..., max_length=500)
     disqualifiers: Optional[str] = Field(None, max_length=500)
+    geographic_region: Optional[str] = Field(None, max_length=200)
+    country_code: Optional[str] = Field(None, max_length=2)  # ISO 3166-1 alpha-2
 
 
 class ChatResponseModel(BaseModel):
@@ -155,7 +176,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in _allowed_origins],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -166,8 +187,12 @@ app.add_middleware(
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    """Apply rate limiting to API routes."""
-    if request.url.path.startswith("/api/"):
+    """Apply rate limiting to API routes (skip CORS preflight & health)."""
+    if (
+        request.url.path.startswith("/api/")
+        and request.method != "OPTIONS"
+        and request.url.path != "/api/health"
+    ):
         client_ip = request.client.host if request.client else "unknown"
         if not rate_limiter.check(client_ip):
             raise HTTPException(
@@ -203,8 +228,106 @@ async def get_user_usage(user=Depends(require_auth)):
     from db import get_db as _get_db
 
     async for db in _get_db():
-        data = await get_usage(db, user.id, plan_tier="free")
+        # Get user's plan from profile
+        from db.models import Profile
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+        data = await get_usage(db, user.id, plan_tier=plan)
         return data
+
+
+# ──────────────────────────────────────────────
+# Billing Endpoints (Stripe)
+# ──────────────────────────────────────────────
+
+class CheckoutRequest(BaseModel):
+    plan: str = Field(..., pattern=r"^(pro|enterprise)$")
+
+
+@app.post("/api/billing/checkout")
+async def billing_checkout(request: CheckoutRequest, user=Depends(require_auth)):
+    """Create a Stripe Checkout Session and return the URL."""
+    from stripe_billing import create_checkout_session
+    from db import get_db as _get_db
+
+    if not is_stripe_configured():
+        raise HTTPException(status_code=503, detail="Billing not configured")
+
+    async for db in _get_db():
+        try:
+            url = await create_checkout_session(
+                db=db,
+                user_id=user.id,
+                user_email=user.email or "",
+                plan=request.plan,
+            )
+            return {"url": url}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error("Checkout error: %s", e)
+            raise HTTPException(status_code=500, detail="Failed to create checkout session")
+
+
+@app.post("/api/billing/portal")
+async def billing_portal(user=Depends(require_auth)):
+    """Create a Stripe Customer Portal session and return the URL."""
+    from stripe_billing import create_portal_session
+    from db import get_db as _get_db
+
+    if not is_stripe_configured():
+        raise HTTPException(status_code=503, detail="Billing not configured")
+
+    async for db in _get_db():
+        try:
+            url = await create_portal_session(db=db, user_id=user.id)
+            return {"url": url}
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error("Portal error: %s", e)
+            raise HTTPException(status_code=500, detail="Failed to create portal session")
+
+
+@app.post("/api/billing/webhook")
+async def billing_webhook(request: Request):
+    """
+    Stripe webhook receiver — no auth required (uses Stripe signature).
+    Must receive the raw body for signature verification.
+    """
+    from stripe_billing import handle_webhook
+    from db import get_db as _get_db
+
+    if not is_stripe_configured():
+        raise HTTPException(status_code=503, detail="Billing not configured")
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    async for db in _get_db():
+        try:
+            result = await handle_webhook(payload, sig_header, db)
+            return result
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            logger.error("Webhook error: %s", e)
+            raise HTTPException(status_code=500, detail="Webhook processing failed")
+
+
+@app.get("/api/billing/status")
+async def billing_status(user=Depends(require_auth)):
+    """Return current plan + billing status for the authenticated user."""
+    from stripe_billing import get_billing_status
+    from usage import get_usage
+    from db import get_db as _get_db
+
+    async for db in _get_db():
+        billing = await get_billing_status(db, user.id)
+        usage = await get_usage(db, user.id, plan_tier=billing["plan"])
+        return {**billing, "usage": usage}
 
 
 @app.post("/api/chat", response_model=ChatResponseModel)
@@ -240,6 +363,24 @@ async def search(request: SearchRequest, user=Depends(require_auth)):
     if not engine:
         raise HTTPException(status_code=503, detail="Chat engine not initialized")
 
+    # ── Quota check: searches ──
+    from usage import check_quota, increment_usage
+    from db import get_db as _get_db
+    from db.models import Profile
+
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        exceeded = await check_quota(db, user.id, plan_tier=plan, action="search")
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        # Increment search count
+        await increment_usage(db, user.id, searches_run=1)
+
     # Build ExtractedContext from the validated request
     context = ExtractedContext(
         industry=request.industry,
@@ -247,6 +388,8 @@ async def search(request: SearchRequest, user=Depends(require_auth)):
         technology_focus=request.technology_focus,
         qualifying_criteria=request.qualifying_criteria,
         disqualifiers=request.disqualifiers,
+        geographic_region=request.geographic_region,
+        country_code=request.country_code,
     )
 
     result = await engine.generate_and_search(context)
@@ -277,16 +420,33 @@ class EnrichRequest(BaseModel):
 
 
 @app.post("/api/enrich")
-async def enrich_contacts(request: EnrichRequest):
+async def enrich_contacts(request: EnrichRequest, user=Depends(require_auth)):
     """
     Enrich contacts for qualified leads using Hunter.io.
     Streams SSE events: progress, result, complete.
     """
-    from enrichment import enrich_contact, enable_api_enrichment, get_enrichment_status
+    from enrichment import enrich_contact, get_enrichment_status
+    from usage import check_quota, increment_usage
+    from db import get_db as _get_db
+    from db.models import Profile
 
-    # Force-enable API enrichment for this request
-    enable_api_enrichment(True)
-    
+    # ── Quota check: enrichments ──
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        exceeded = await check_quota(
+            db, user.id, plan_tier=plan,
+            action="enrichment", count=len(request.companies),
+        )
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        # Increment enrichment usage
+        await increment_usage(db, user.id, enrichments_used=len(request.companies))
+
     status = get_enrichment_status()
     if not status["providers"]:
         return JSONResponse(
@@ -424,7 +584,30 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
       error    — { index, company, error }
       complete — { summary: { hot, review, rejected, failed } }
     """
-    companies = [c.model_dump() for c in request.companies]
+    # ── Quota check: leads ──
+    from usage import check_quota, increment_usage, LEADS_PER_HUNT
+    from db import get_db as _get_db
+    from db.models import Profile
+
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        # Enforce leads-per-hunt cap
+        max_leads = LEADS_PER_HUNT.get(plan, 25)
+        companies_list = request.companies[:max_leads]
+
+        # Check monthly leads quota
+        exceeded = await check_quota(db, user.id, plan_tier=plan, action="leads", count=len(companies_list))
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        # Increment leads counter upfront (same pattern as searches_run)
+        await increment_usage(db, user.id, leads_qualified=len(companies_list))
+
+    companies = [c.model_dump() for c in companies_list]
     use_vision = request.use_vision
     search_ctx = request.search_context.model_dump() if request.search_context else None
 
@@ -484,7 +667,7 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                             fail_lat = None
                             fail_lng = None
                             if fail_country:
-                                geo = _geocode_location(fail_country)
+                                geo = await _geocode_location(fail_country)
                                 if geo:
                                     _, fail_lat, fail_lng = geo
 
@@ -544,7 +727,7 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                         if hq_location:
                             # Cross-check: does the LLM location match the user's search region?
                             if _location_matches_region(hq_location, search_region):
-                                geo = _geocode_location(hq_location)
+                                geo = await _geocode_location(hq_location)
                                 if geo:
                                     country, latitude, longitude = geo
                             else:
@@ -555,23 +738,33 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                                     company.get("domain"), hq_location, search_region,
                                 )
                                 if domain_country:
-                                    geo = _geocode_location(domain_country)
+                                    geo = await _geocode_location(domain_country)
                                     if geo:
                                         country, latitude, longitude = geo
                                 elif search_region:
-                                    geo = _geocode_location(search_region)
+                                    geo = await _geocode_location(search_region)
                                     if geo:
                                         country, latitude, longitude = geo
 
                         if not country:
                             if domain_country:
                                 country = domain_country
-                                geo = _geocode_location(country)
-                                if geo:
-                                    _, latitude, longitude = geo
+                                # If we have a search region and the domain country
+                                # matches the region's country, use the search region
+                                # for geocoding (much more precise than country centroid).
+                                # E.g. user wants "Paddington, London, UK" + domain is .co.uk
+                                # → place at Paddington, not the UK centroid (which is in Scotland).
+                                if search_region and _location_matches_region(domain_country, search_region):
+                                    geo = await _geocode_location(search_region)
+                                    if geo:
+                                        _, latitude, longitude = geo
+                                if not latitude:
+                                    geo = await _geocode_location(country)
+                                    if geo:
+                                        _, latitude, longitude = geo
                             elif search_region:
                                 # Last resort: use the user's search region centroid
-                                geo = _geocode_location(search_region)
+                                geo = await _geocode_location(search_region)
                                 if geo:
                                     country, latitude, longitude = geo
 
@@ -702,6 +895,88 @@ async def dashboard_stats(user=Depends(require_auth)):
             "total_searches": total_searches,
             "contacts_enriched": contacts_enriched,
             "leads_this_month": leads_this_month,
+        }
+
+
+@app.get("/api/dashboard/funnel")
+async def dashboard_funnel(user=Depends(require_auth)):
+    """Return funnel metrics for the authenticated user."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead
+
+    async for db in _get_db():
+        user_id = user.id
+
+        # Stage counts
+        stage_rows = (await db.execute(
+            select(QualifiedLead.status, func.count(QualifiedLead.id))
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user_id)
+            .group_by(QualifiedLead.status)
+        )).all()
+
+        stages = {row[0]: row[1] for row in stage_rows}
+        total_leads = sum(stages.values())
+
+        # Total pipeline value (everything except lost/archived)
+        total_pipeline_value = (await db.execute(
+            select(func.coalesce(func.sum(QualifiedLead.deal_value), 0))
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user_id)
+            .where(QualifiedLead.status.notin_(["lost", "archived"]))
+        )).scalar() or 0
+
+        # Won value
+        won_value = (await db.execute(
+            select(func.coalesce(func.sum(QualifiedLead.deal_value), 0))
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user_id)
+            .where(QualifiedLead.status == "won")
+        )).scalar() or 0
+
+        # Lost value
+        lost_value = (await db.execute(
+            select(func.coalesce(func.sum(QualifiedLead.deal_value), 0))
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user_id)
+            .where(QualifiedLead.status == "lost")
+        )).scalar() or 0
+
+        # Conversion rate: won / (total non-archived) * 100
+        non_archived = total_leads - stages.get("archived", 0)
+        won_count = stages.get("won", 0)
+        conversion_rate = round((won_count / non_archived) * 100, 1) if non_archived > 0 else 0
+
+        # Avg days to close: AVG(status_changed_at - created_at) WHERE status = 'won'
+        from sqlalchemy import extract, cast, Numeric
+        avg_days_result = (await db.execute(
+            select(
+                func.avg(
+                    extract("epoch", QualifiedLead.status_changed_at - QualifiedLead.created_at) / 86400.0
+                )
+            )
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user_id)
+            .where(QualifiedLead.status == "won")
+            .where(QualifiedLead.status_changed_at.isnot(None))
+        )).scalar()
+        avg_days_to_close = round(float(avg_days_result), 1) if avg_days_result else 0
+
+        return {
+            "stages": {
+                "new": stages.get("new", 0),
+                "contacted": stages.get("contacted", 0),
+                "in_progress": stages.get("in_progress", 0),
+                "won": stages.get("won", 0),
+                "lost": stages.get("lost", 0),
+                "archived": stages.get("archived", 0),
+            },
+            "total_pipeline_value": float(total_pipeline_value),
+            "won_value": float(won_value),
+            "lost_value": float(lost_value),
+            "conversion_rate": conversion_rate,
+            "avg_days_to_close": avg_days_to_close,
+            "total_leads": total_leads,
         }
 
 
@@ -871,6 +1146,9 @@ async def list_leads(
                 "latitude": l.latitude,
                 "longitude": l.longitude,
                 "status": l.status,
+                "notes": l.notes,
+                "deal_value": l.deal_value,
+                "status_changed_at": l.status_changed_at.isoformat() if l.status_changed_at else None,
                 "created_at": l.created_at.isoformat() if l.created_at else None,
             }
             for l in leads
@@ -898,12 +1176,18 @@ async def leads_geo(user=Depends(require_auth)):
                 "search_id": row[0].search_id,
                 "company_name": row[0].company_name,
                 "domain": row[0].domain,
+                "website_url": row[0].website_url,
                 "score": row[0].score,
                 "tier": row[0].tier,
                 "country": row[0].country,
                 "latitude": row[0].latitude,
                 "longitude": row[0].longitude,
                 "status": row[0].status,
+                "hardware_type": row[0].hardware_type,
+                "industry_category": row[0].industry_category,
+                "reasoning": row[0].reasoning,
+                "key_signals": row[0].key_signals or [],
+                "red_flags": row[0].red_flags or [],
                 "search_label": row[1] or row[2] or "Untitled Hunt",
                 "search_date": row[3].isoformat() if row[3] else None,
             }
@@ -950,6 +1234,9 @@ async def get_lead(lead_id: str, user=Depends(require_auth)):
             "latitude": lead.latitude,
             "longitude": lead.longitude,
             "status": lead.status,
+            "notes": lead.notes,
+            "deal_value": lead.deal_value,
+            "status_changed_at": lead.status_changed_at.isoformat() if lead.status_changed_at else None,
             "created_at": lead.created_at.isoformat() if lead.created_at else None,
         }
 
@@ -966,6 +1253,8 @@ async def get_lead(lead_id: str, user=Depends(require_auth)):
 
 class UpdateLeadStatusRequest(BaseModel):
     status: str = Field(..., pattern=r"^(new|contacted|in_progress|won|lost|archived)$")
+    notes: Optional[str] = None
+    deal_value: Optional[float] = None
 
 
 @app.patch("/api/leads/{lead_id}/status")
@@ -984,9 +1273,42 @@ async def update_lead_status(lead_id: str, request: UpdateLeadStatusRequest, use
         if not lead:
             raise HTTPException(status_code=404, detail="Lead not found")
 
-        lead.status = request.status
+        if lead.status != request.status:
+            lead.status = request.status
+            lead.status_changed_at = datetime.now(timezone.utc)
+        if request.notes is not None:
+            lead.notes = request.notes
+        if request.deal_value is not None:
+            lead.deal_value = request.deal_value
         await db.commit()
-        return {"ok": True, "status": lead.status}
+        return {
+            "ok": True,
+            "status": lead.status,
+            "notes": lead.notes,
+            "deal_value": lead.deal_value,
+            "status_changed_at": lead.status_changed_at.isoformat() if lead.status_changed_at else None,
+        }
+
+
+@app.delete("/api/leads/{lead_id}")
+async def delete_lead(lead_id: str, user=Depends(require_auth)):
+    """Delete a single lead."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead
+
+    async for db in _get_db():
+        lead = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id == lead_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        await db.delete(lead)
+        await db.commit()
+        return {"ok": True}
 
 
 # ──────────────────────────────────────────────
@@ -1069,191 +1391,89 @@ _TLD_COUNTRY_MAP = {
     ".ru": "Russia", ".tr": "Turkey", ".ae": "UAE", ".sa": "Saudi Arabia",
 }
 
-# ── Static Geocoding ──────────────────────────
-# City/region → (lat, lng) for common headquarters locations.
-# Covers major tech/business hubs worldwide — no API calls needed.
-_CITY_COORDS: dict = {
-    # USA cities
-    "new york": (40.71, -74.01), "nyc": (40.71, -74.01),
-    "los angeles": (34.05, -118.24), "la": (34.05, -118.24),
-    "san francisco": (37.77, -122.42), "sf": (37.77, -122.42),
-    "san jose": (37.34, -121.89), "silicon valley": (37.39, -122.03),
-    "seattle": (47.61, -122.33), "boston": (42.36, -71.06),
-    "chicago": (41.88, -87.63), "houston": (29.76, -95.37),
-    "dallas": (32.78, -96.80), "austin": (30.27, -97.74),
-    "denver": (39.74, -104.99), "phoenix": (33.45, -112.07),
-    "atlanta": (33.75, -84.39), "miami": (25.76, -80.19),
-    "washington": (38.91, -77.04), "dc": (38.91, -77.04),
-    "charlotte": (35.23, -80.84), "raleigh": (35.78, -78.64),
-    "detroit": (42.33, -83.05), "minneapolis": (44.98, -93.27),
-    "portland": (45.52, -122.68), "san diego": (32.72, -117.16),
-    "pittsburgh": (40.44, -80.00), "philadelphia": (39.95, -75.17),
-    "salt lake city": (40.76, -111.89), "nashville": (36.16, -86.78),
-    "columbus": (39.96, -83.00), "indianapolis": (39.77, -86.16),
-    "milwaukee": (43.04, -87.91), "kansas city": (39.10, -94.58),
-    "st. louis": (38.63, -90.20), "st louis": (38.63, -90.20),
-    "tampa": (27.95, -82.46), "orlando": (28.54, -81.38),
-    "new haven": (41.31, -72.92), "irvine": (33.68, -117.83),
-    "palo alto": (37.44, -122.14), "mountain view": (37.39, -122.08),
-    "cupertino": (37.32, -122.03), "sunnyvale": (37.37, -122.04),
-    "santa clara": (37.35, -121.96), "redmond": (47.67, -122.12),
-    "menlo park": (37.45, -122.18),
-    # Europe
-    "london": (51.51, -0.13), "paris": (48.86, 2.35),
-    "berlin": (52.52, 13.41), "munich": (48.14, 11.58),
-    "frankfurt": (50.11, 8.68), "hamburg": (53.55, 9.99),
-    "düsseldorf": (51.23, 6.77), "dusseldorf": (51.23, 6.77),
-    "cologne": (50.94, 6.96), "köln": (50.94, 6.96),
-    "stuttgart": (48.78, 9.18), "hanover": (52.37, 9.74),
-    "amsterdam": (52.37, 4.90), "rotterdam": (51.92, 4.48),
-    "brussels": (50.85, 4.35), "zurich": (47.38, 8.54),
-    "zürich": (47.38, 8.54), "geneva": (46.20, 6.14), "bern": (46.95, 7.45),
-    "vienna": (48.21, 16.37), "prague": (50.08, 14.44),
-    "warsaw": (52.23, 21.01), "budapest": (47.50, 19.04),
-    "madrid": (40.42, -3.70), "barcelona": (41.39, 2.17),
-    "rome": (41.90, 12.50), "milan": (45.46, 9.19),
-    "lisbon": (38.72, -9.14), "dublin": (53.35, -6.26),
-    "edinburgh": (55.95, -3.19), "manchester": (53.48, -2.24),
-    "stockholm": (59.33, 18.07), "oslo": (59.91, 10.75),
-    "copenhagen": (55.68, 12.57), "helsinki": (60.17, 24.94),
-    "tallinn": (59.44, 24.75), "riga": (56.95, 24.11),
-    # Asia
-    "tokyo": (35.68, 139.69), "osaka": (34.69, 135.50),
-    "kyoto": (35.01, 135.77), "nagoya": (35.18, 136.91),
-    "seoul": (37.57, 126.98), "busan": (35.18, 129.08),
-    "beijing": (39.90, 116.40), "shanghai": (31.23, 121.47),
-    "shenzhen": (22.54, 114.06), "guangzhou": (23.13, 113.26),
-    "hong kong": (22.32, 114.17), "taipei": (25.03, 121.57),
-    "singapore": (1.35, 103.82), "kuala lumpur": (3.14, 101.69),
-    "bangkok": (13.76, 100.50), "ho chi minh": (10.82, 106.63),
-    "jakarta": (6.21, 106.85), "manila": (14.60, 120.98),
-    "mumbai": (19.08, 72.88), "delhi": (28.61, 77.23),
-    "new delhi": (28.61, 77.23), "bangalore": (12.97, 77.59),
-    "bengaluru": (12.97, 77.59), "hyderabad": (17.39, 78.49),
-    "chennai": (13.08, 80.27), "pune": (18.52, 73.86),
-    "tel aviv": (32.09, 34.77), "haifa": (32.79, 34.99),
-    "dubai": (25.20, 55.27), "abu dhabi": (24.45, 54.65),
-    "riyadh": (24.71, 46.68),
-    # Other
-    "toronto": (43.65, -79.38), "vancouver": (49.28, -123.12),
-    "montreal": (45.50, -73.57), "ottawa": (45.42, -75.70),
-    "calgary": (51.05, -114.07),
-    "sydney": (33.87, 151.21), "melbourne": (-37.81, 144.96),
-    "brisbane": (-27.47, 153.03), "perth": (-31.95, 115.86),
-    "auckland": (-36.85, 174.76), "wellington": (-41.29, 174.78),
-    "são paulo": (-23.55, -46.63), "sao paulo": (-23.55, -46.63),
-    "rio de janeiro": (-22.91, -43.17),
-    "mexico city": (19.43, -99.13), "buenos aires": (-34.60, -58.38),
-    "bogota": (4.71, -74.07), "lima": (-12.05, -77.04),
-    "santiago": (-33.45, -70.67),
-    "cape town": (-33.93, 18.42), "johannesburg": (-26.20, 28.05),
-    "nairobi": (-1.29, 36.82), "lagos": (6.52, 3.38),
-    "cairo": (30.04, 31.24), "istanbul": (41.01, 28.98),
-    "moscow": (55.76, 37.62), "saint petersburg": (59.93, 30.32),
-}
+# ── Geocoding via Nominatim (OpenStreetMap) ──────────────────
+# Uses the free Nominatim API to geocode any location on Earth.
+# Results are cached in-memory to avoid redundant requests.
+import httpx
 
-# Country centroids — fallback when city not matched
-_COUNTRY_COORDS: dict = {
-    "united states": (39.83, -98.58), "usa": (39.83, -98.58),
-    "us": (39.83, -98.58), "united states of america": (39.83, -98.58),
-    "united kingdom": (55.38, -3.44), "uk": (55.38, -3.44),
-    "great britain": (55.38, -3.44), "england": (52.36, -1.17),
-    "germany": (51.17, 10.45), "france": (46.23, 2.21),
-    "italy": (41.87, 12.57), "spain": (40.46, -3.75),
-    "netherlands": (52.13, 5.29), "belgium": (50.50, 4.47),
-    "austria": (47.52, 14.55), "switzerland": (46.82, 8.23),
-    "sweden": (60.13, 18.64), "norway": (60.47, 8.47),
-    "denmark": (56.26, 9.50), "finland": (61.92, 25.75),
-    "poland": (51.92, 19.15), "czech republic": (49.82, 15.47),
-    "czechia": (49.82, 15.47), "portugal": (39.40, -8.22),
-    "ireland": (53.14, -7.69), "scotland": (56.49, -4.20),
-    "hungary": (47.16, 19.50), "romania": (45.94, 24.97),
-    "greece": (39.07, 21.82), "croatia": (45.10, 15.20),
-    "japan": (36.20, 138.25), "china": (35.86, 104.20),
-    "south korea": (35.91, 127.77), "korea": (35.91, 127.77),
-    "taiwan": (23.70, 120.96), "india": (20.59, 78.96),
-    "singapore": (1.35, 103.82), "malaysia": (4.21, 101.98),
-    "thailand": (15.87, 100.99), "vietnam": (14.06, 108.28),
-    "indonesia": (-0.79, 113.92), "philippines": (12.88, 121.77),
-    "australia": (-25.27, 133.78), "new zealand": (-40.90, 174.89),
-    "canada": (56.13, -106.35), "mexico": (23.63, -102.55),
-    "brazil": (-14.24, -51.93), "argentina": (-38.42, -63.62),
-    "colombia": (4.57, -74.30), "chile": (-35.68, -71.54),
-    "peru": (-9.19, -75.02),
-    "south africa": (-30.56, 22.94), "nigeria": (9.08, 8.68),
-    "kenya": (-0.02, 37.91), "egypt": (26.82, 30.80),
-    "israel": (31.05, 34.85), "uae": (23.42, 53.85),
-    "united arab emirates": (23.42, 53.85),
-    "saudi arabia": (23.89, 45.08), "turkey": (38.96, 35.24),
-    "russia": (61.52, 105.32), "ukraine": (48.38, 31.17),
-    "hong kong": (22.32, 114.17),
-    # Broad regions (centroids)
-    "europe": (50.1, 9.7),
-    "north america": (45.0, -100.0),
-    "south america": (-15.0, -60.0),
-    "asia": (34.0, 100.0),
-    "middle east": (29.0, 47.0),
-    "africa": (8.8, 34.5),
-    "oceania": (-27.0, 140.0),
-    "southeast asia": (10.0, 106.0),
-    "east asia": (35.0, 115.0),
-    "latin america": (-10.0, -65.0),
-    "scandinavia": (62.0, 15.0),
-    "nordic": (62.0, 15.0),
+_nominatim_cache: dict[str, Optional[tuple]] = {}
+_nominatim_lock = asyncio.Lock()
+
+# Nominatim requires a unique User-Agent per application
+_NOMINATIM_HEADERS = {
+    "User-Agent": "LeadQualifier/1.0 (lead-discovery-tool)",
+    "Accept": "application/json",
 }
 
 
-def _geocode_location(location_str: str) -> Optional[tuple]:
+async def _geocode_location(location_str: str) -> Optional[tuple]:
     """
-    Geocode a location string to (country, lat, lng) using static lookup.
-    Tries city-level first, then country-level.
-    Returns None if no match found.
+    Geocode a location string to (country, lat, lng) using OpenStreetMap Nominatim.
+    Results are cached in-memory. Returns None if no match found.
     """
-    if not location_str:
+    if not location_str or not location_str.strip():
         return None
 
     loc = location_str.lower().strip()
-    # Remove common noise
+    # Remove common noise prefixes
     for noise in ["headquartered in ", "based in ", "hq: ", "hq "]:
         if loc.startswith(noise):
             loc = loc[len(noise):]
 
-    # Try to find a city match in the location string
-    best_city = None
-    best_len = 0
-    for city, coords in _CITY_COORDS.items():
-        if city in loc and len(city) > best_len:
-            best_city = city
-            best_len = len(city)
+    # Check cache first
+    if loc in _nominatim_cache:
+        cached = _nominatim_cache[loc]
+        if cached is None:
+            return None
+        return cached
 
-    if best_city:
-        coords = _CITY_COORDS[best_city]
-        # Try to determine country from the rest of the string
-        country_name = None
-        for cname in _COUNTRY_COORDS:
-            if cname in loc:
-                country_name = cname.title()
-                break
-        # Add small jitter (±0.05°) so co-located dots don't perfectly overlap
-        jitter_lat = random.uniform(-0.05, 0.05)
-        jitter_lng = random.uniform(-0.05, 0.05)
-        return (country_name, coords[0] + jitter_lat, coords[1] + jitter_lng)
+    # Query Nominatim
+    try:
+        async with _nominatim_lock:  # Nominatim rate limit: 1 req/sec
+            await asyncio.sleep(0.15)  # Be polite to the free API
 
-    # Try country match
-    best_country = None
-    best_len = 0
-    for cname, coords in _COUNTRY_COORDS.items():
-        if cname in loc and len(cname) > best_len:
-            best_country = cname
-            best_len = len(cname)
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params={
+                        "q": loc,
+                        "format": "jsonv2",
+                        "limit": 1,
+                        "addressdetails": 1,
+                        "accept-language": "en",
+                    },
+                    headers=_NOMINATIM_HEADERS,
+                )
+                resp.raise_for_status()
+                results = resp.json()
 
-    if best_country:
-        coords = _COUNTRY_COORDS[best_country]
-        jitter_lat = random.uniform(-0.3, 0.3)
-        jitter_lng = random.uniform(-0.3, 0.3)
-        return (best_country.title(), coords[0] + jitter_lat, coords[1] + jitter_lng)
+        if not results:
+            _nominatim_cache[loc] = None
+            return None
 
-    return None
+        hit = results[0]
+        lat = float(hit["lat"])
+        lng = float(hit["lon"])
+
+        # Extract country from address details
+        addr = hit.get("address", {})
+        country = addr.get("country", None)
+
+        _nominatim_cache[loc] = (country, lat, lng)
+
+        return (country, lat, lng)
+
+    except Exception as e:
+        logger.warning("Nominatim geocode failed for '%s': %s", loc, e)
+        _nominatim_cache[loc] = None
+        return None
+
+
+async def _geocode_with_fallback(location_str: str) -> Optional[tuple]:
+    """Geocode with Nominatim. Handles all locations including broad regions."""
+    if not location_str:
+        return None
+    return await _geocode_location(location_str)
 
 
 def _guess_country_from_domain(domain: str) -> Optional[str]:
@@ -1285,10 +1505,11 @@ _REGION_COUNTRIES: dict[str, set[str]] = {
     "south america": {"brazil", "argentina", "chile", "colombia", "peru", "venezuela", "ecuador", "uruguay"},
     "asia": {
         "china", "japan", "south korea", "india", "singapore", "taiwan",
-        "hong kong", "malaysia", "thailand", "indonesia", "philippines",
+        "hong kong", "macao", "macau", "malaysia", "thailand", "indonesia", "philippines",
         "vietnam", "pakistan", "bangladesh",
+        "uae", "united arab emirates", "emirates",
     },
-    "middle east": {"uae", "saudi arabia", "israel", "turkey", "qatar", "bahrain", "kuwait", "oman"},
+    "middle east": {"uae", "united arab emirates", "emirates", "saudi arabia", "israel", "turkey", "qatar", "bahrain", "kuwait", "oman"},
     "oceania": {"australia", "new zealand"},
     "africa": {"south africa", "nigeria", "kenya", "egypt", "morocco"},
 }
@@ -1298,6 +1519,12 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
     """
     Check whether a geocoded location is plausible given the user's search region.
     Returns True if the location seems consistent, False if it's a likely mismatch.
+
+    Handles cases like:
+      - location="Marylebone, London" region="Paddington, London, UK" → True (both in London)
+      - location="United Kingdom" region="Paddington, London, UK" → True (UK contains Paddington)
+      - location="Edinburgh" region="Paddington, London, UK" → True (both in UK, close enough)
+      - location="New York" region="Paddington, London, UK" → False
     """
     if not location_str or not search_region:
         return True  # No region constraint → anything is fine
@@ -1305,25 +1532,76 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
     loc = location_str.lower().strip()
     region = search_region.lower().strip()
 
-    # If the user specified a specific country (e.g. "Germany"), check directly
-    if region in loc or loc in region:
+    # Country alias map: canonical names and abbreviations
+    _COUNTRY_ALIASES = {
+        "united states": ["usa", "america"],
+        "usa": ["united states", "america"],
+        "united kingdom": ["uk", "britain"],
+        "uk": ["united kingdom", "britain"],
+        "uae": ["united arab emirates", "emirates"],
+        "united arab emirates": ["uae", "emirates"],
+        "hong kong": ["hk"],
+        "macao": ["macau"],
+        "macau": ["macao"],
+        "south korea": ["korea"],
+        "new zealand": ["nz"],
+    }
+
+    # Expand both loc and region with aliases for matching
+    # Use word-boundary matching to avoid substring issues
+    loc_expanded = loc
+    region_expanded = region
+    for canon, aliases in _COUNTRY_ALIASES.items():
+        # Use word boundary to check: "uk" should match standalone, not inside "duke"
+        pattern = r'(?:^|[\s,;/\-()])' + re.escape(canon) + r'(?:$|[\s,;/\-()])'  
+        if re.search(pattern, loc):
+            loc_expanded += " " + " ".join(aliases)
+        if re.search(pattern, region):
+            region_expanded += " " + " ".join(aliases)
+
+    # Direct substring match in either direction (using expanded forms)
+    if region_expanded in loc_expanded or loc_expanded in region_expanded:
         return True
 
-    # Check if the user's region is a broad region (e.g. "Europe")
-    for region_key, countries in _REGION_COUNTRIES.items():
-        if region_key in region or region in region_key:
-            # Check if any country in this region matches the location
-            for country in countries:
-                if country in loc:
-                    return True
-            # The user wanted this region but location doesn't match any country in it
-            return False
+    # Check if they share a common city or country token
+    # E.g. loc="Marylebone, London" region="Paddington, London, UK"
+    # Both contain "london" → match
+    # Exclude common geographic prefix words that appear in multiple country names
+    _GEO_STOPWORDS = {"the", "and", "of", "in", "near", "united", "new", "south", "north", "east", "west", "central", "arab"}
+    loc_tokens = {t.strip().strip(",") for t in loc_expanded.replace(",", " ").split() if len(t.strip()) > 2}
+    region_tokens = {t.strip().strip(",") for t in region_expanded.replace(",", " ").split() if len(t.strip()) > 2}
+    shared = loc_tokens & region_tokens
+    # If they share a meaningful geographic token (city/country name), consider it a match
+    if shared - _GEO_STOPWORDS:
+        return True
 
-    # If user's region is a specific country, check if location contains it
+    # Determine if the search_region is a broad region name (e.g. "Europe", "Asia")
+    # vs a specific location (e.g. "Paddington, London, UK", "Central, Hong Kong")
+    region_is_broad = False
+    for region_key in _REGION_COUNTRIES:
+        if region_key in region or region in region_key:
+            region_is_broad = True
+            break
+
+    # If the user's search region IS a broad region, check if location falls within it
+    if region_is_broad:
+        for region_key, countries in _REGION_COUNTRIES.items():
+            if region_key in region or region in region_key:
+                for country in countries:
+                    if country in loc_expanded:
+                        return True
+                return False
+
+    # For specific location-based search regions (cities, neighborhoods):
+    # Only match via shared tokens (already checked above) or country match.
+    # Do NOT match just because both are in the same continent.
+    # E.g. "Singapore" vs "Hong Kong" → both in Asia but should NOT match.
+
+    # Check if the location's country matches a country in the search region
     for region_key, countries in _REGION_COUNTRIES.items():
         for country in countries:
-            if country in region:
-                # User specified a country — check if location matches
-                return country in loc
+            if country in region_expanded:
+                # User's region contains this country — check if location also contains it
+                return country in loc_expanded
 
     return True  # Can't determine → don't block

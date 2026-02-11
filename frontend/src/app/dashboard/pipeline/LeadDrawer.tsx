@@ -21,6 +21,9 @@ interface LeadDetail {
   latitude: number | null;
   longitude: number | null;
   status: string | null;
+  notes: string | null;
+  deal_value: number | null;
+  status_changed_at: string | null;
   created_at: string | null;
   enrichment?: {
     email: string | null;
@@ -51,15 +54,21 @@ export default function LeadDrawer({
   leadId,
   onClose,
   onStatusChange,
+  onLeadUpdate,
 }: {
   leadId: string;
   onClose: () => void;
   onStatusChange?: (leadId: string, status: string) => void;
+  onLeadUpdate?: (leadId: string, updates: { notes?: string | null; deal_value?: number | null }) => void;
 }) {
   const { session } = useAuth();
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
+  const [notes, setNotes] = useState<string>("");
+  const [dealValue, setDealValue] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     if (!session?.access_token || !leadId) return;
@@ -68,9 +77,39 @@ export default function LeadDrawer({
       headers: { Authorization: `Bearer ${session.access_token}` },
     })
       .then((r) => (r.ok ? r.json() : null))
-      .then(setLead)
+      .then((data) => {
+        setLead(data);
+        if (data) {
+          setNotes(data.notes || "");
+          setDealValue(data.deal_value);
+        }
+      })
       .finally(() => setLoading(false));
   }, [leadId, session]);
+
+  const saveField = async (fields: { notes?: string; deal_value?: number | null }) => {
+    if (!session?.access_token || !lead) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API}/api/leads/${lead.id}/status`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ status: lead.status || "new", ...fields }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setLead({ ...lead, notes: updated.notes, deal_value: updated.deal_value, status_changed_at: updated.status_changed_at });
+        onLeadUpdate?.(lead.id, fields);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 1500);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateStatus = async (status: string) => {
     if (!session?.access_token || !lead) return;
@@ -211,6 +250,44 @@ export default function LeadDrawer({
                     {opt.label}
                   </button>
                 ))}
+              </div>
+              {saving && (
+                <span className="font-mono text-[9px] text-text-dim mt-1 block">Saving…</span>
+              )}
+              {saved && (
+                <span className="font-mono text-[9px] text-green-400 mt-1 block">Saved ✓</span>
+              )}
+            </div>
+
+            {/* Notes */}
+            <div className="bg-surface-2 border border-border rounded-xl p-4">
+              <h3 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2">
+                Notes
+              </h3>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                onBlur={() => saveField({ notes })}
+                placeholder="Add notes about this lead..."
+                className="w-full bg-surface-3 border border-border rounded-lg p-3 font-sans text-xs text-text-primary placeholder:text-text-dim resize-none focus:outline-none focus:border-secondary/40 min-h-[80px]"
+              />
+            </div>
+
+            {/* Deal Value */}
+            <div className="bg-surface-2 border border-border rounded-xl p-4">
+              <h3 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2">
+                Deal Value
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-text-dim">$</span>
+                <input
+                  type="number"
+                  value={dealValue ?? ""}
+                  onChange={(e) => setDealValue(e.target.value ? parseFloat(e.target.value) : null)}
+                  onBlur={() => saveField({ deal_value: dealValue })}
+                  placeholder="0.00"
+                  className="flex-1 bg-surface-3 border border-border rounded-lg px-3 py-2 font-mono text-sm text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/40"
+                />
               </div>
             </div>
 

@@ -18,6 +18,11 @@ export async function POST(request: Request) {
     });
 
     if (!backendResponse.ok) {
+      // Forward 429 quota responses as-is so the frontend gets used/limit/action/plan
+      if (backendResponse.status === 429) {
+        const err = await backendResponse.json().catch(() => ({ error: "quota_exceeded" }));
+        return NextResponse.json(err, { status: 429 });
+      }
       const err = await backendResponse.text();
       return NextResponse.json(
         { error: `Search failed: ${err}` },

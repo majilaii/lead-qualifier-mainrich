@@ -50,6 +50,15 @@ ANTHROPIC_API_KEY = _get_valid_key("ANTHROPIC_API_KEY")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 
 # ===========================================
+# Stripe Billing
+# ===========================================
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRO_PRICE_ID = os.getenv("STRIPE_PRO_PRICE_ID", "")
+STRIPE_ENT_PRICE_ID = os.getenv("STRIPE_ENT_PRICE_ID", "")
+FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# ===========================================
 # Processing Config
 # ===========================================
 CONCURRENCY_LIMIT = int(os.getenv("CONCURRENCY_LIMIT", "5"))
@@ -77,15 +86,12 @@ SCORE_REVIEW = 4        # Score 4-7 → Manual review needed
 
 # ===========================================
 # Minimal Universal B2B Negative Keywords
-# (Used only in legacy CLI fallback path)
+# (Used only in legacy CLI keyword-fallback path when no LLM is available)
 # ===========================================
 NEGATIVE_KEYWORDS = [
     "restaurant", "law firm", "hair salon", "real estate",
     "property management", "hotel", "hospitality", "food service",
 ]
-
-# Legacy: kept for backward compatibility only. Not used in dynamic path.
-POSITIVE_KEYWORDS: list[str] = []
 
 # ===========================================
 # Cost Tracking (approximate USD)

@@ -16,6 +16,9 @@ interface Lead {
   industry_category: string | null;
   country: string | null;
   status: string | null;
+  notes: string | null;
+  deal_value: number | null;
+  status_changed_at: string | null;
   created_at: string | null;
 }
 
@@ -298,6 +301,15 @@ export default function PipelinePage() {
           leadId={selectedLeadId}
           onClose={() => setSelectedLeadId(null)}
           onStatusChange={handleStatusChange}
+          onLeadUpdate={(leadId, updates) => {
+            setLeads((prev) =>
+              prev.map((l) =>
+                l.id === leadId
+                  ? { ...l, ...(updates.notes !== undefined && { notes: updates.notes ?? null }), ...(updates.deal_value !== undefined && { deal_value: updates.deal_value ?? null }) }
+                  : l
+              )
+            );
+          }}
         />
       )}
     </div>

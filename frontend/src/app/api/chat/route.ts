@@ -147,7 +147,7 @@ export async function POST(request: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(backendPayload),
-        signal: AbortSignal.timeout(30000), // 30s timeout
+        signal: AbortSignal.timeout(70000), // 70s timeout — thinking models can be slow
       });
 
       if (backendResponse.ok) {

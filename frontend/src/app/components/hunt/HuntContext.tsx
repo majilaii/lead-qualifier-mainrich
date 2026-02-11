@@ -21,6 +21,7 @@ export interface ExtractedContext {
   qualifyingCriteria: string | null;
   disqualifiers: string | null;
   geographicRegion: string | null;
+  countryCode: string | null;
 }
 
 export interface SearchCompany {
@@ -231,10 +232,21 @@ export function HuntProvider({ children }: { children: ReactNode }) {
             qualifying_criteria: ctx.qualifyingCriteria || "",
             company_profile: ctx.companyProfile || undefined,
             disqualifiers: ctx.disqualifiers || undefined,
+            geographic_region: ctx.geographicRegion || undefined,
+            country_code: ctx.countryCode || undefined,
           }),
         });
 
-        if (!response.ok) throw new Error("Search failed");
+        if (!response.ok) {
+          if (response.status === 429) {
+            const err = await response.json();
+            // Dispatch custom event for quota exceeded
+            window.dispatchEvent(new CustomEvent("hunt:quota_exceeded", { detail: err }));
+            setPhase("chat");
+            return;
+          }
+          throw new Error("Search failed");
+        }
         const data = await response.json();
 
         setSearchCompanies(data.companies || []);
@@ -302,7 +314,16 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           signal: controller.signal,
         });
 
-        if (!response.ok || !response.body) throw new Error("Pipeline connection failed");
+        if (!response.ok || !response.body) {
+          if (response.status === 429) {
+            const err = await response.json();
+            window.dispatchEvent(new CustomEvent("hunt:quota_exceeded", { detail: err }));
+            setPhase("search-complete");
+            setIsPipelineRunning(false);
+            return;
+          }
+          throw new Error("Pipeline connection failed");
+        }
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -400,6 +421,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         qualifyingCriteria: search.qualifying_criteria || null,
         disqualifiers: null,
         geographicRegion: search.geographic_region || null,
+        countryCode: search.country_code || null,
       });
 
       // Restore messages

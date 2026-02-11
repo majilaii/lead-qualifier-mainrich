@@ -53,11 +53,6 @@ class DeepResearchResult:
     confidence: str = "None"
 
 
-# ── Legacy alias so existing code referencing old fields still works ──
-# ``motor_types_used`` and ``magnet_requirements`` map to the new generic fields
-DeepResearchResult.motor_types_used = property(lambda self: self.technologies_used)  # type: ignore[attr-defined]
-DeepResearchResult.magnet_requirements = property(lambda self: self.relevant_capabilities)  # type: ignore[attr-defined]
-
 
 def _build_analysis_prompt(search_context: Optional[dict] = None) -> str:
     """Build an analysis prompt dynamically from the user's search context.
@@ -191,7 +186,7 @@ class DeepResearcher:
         
         try:
             response = await self.client.chat.completions.create(
-                model="moonshot-v1-32k",
+                model="kimi-k2-turbo-preview",
                 messages=[{
                     "role": "user", 
                     "content": self._analysis_prompt.format(
