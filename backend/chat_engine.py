@@ -88,6 +88,7 @@ class ExtractedContext:
     technology_focus: Optional[str] = None
     qualifying_criteria: Optional[str] = None
     disqualifiers: Optional[str] = None
+    geographic_region: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -96,6 +97,7 @@ class ExtractedContext:
             "technologyFocus": self.technology_focus,
             "qualifyingCriteria": self.qualifying_criteria,
             "disqualifiers": self.disqualifiers,
+            "geographicRegion": self.geographic_region,
         }
 
     def to_query_input(self) -> str:
@@ -111,6 +113,8 @@ class ExtractedContext:
             parts.append(f"Qualifying signals: {self.qualifying_criteria}")
         if self.disqualifiers:
             parts.append(f"Disqualifiers: {self.disqualifiers}")
+        if self.geographic_region:
+            parts.append(f"Geographic region: {self.geographic_region}")
         return "\n".join(parts)
 
 
@@ -212,7 +216,8 @@ OUTPUT FORMAT (strict JSON, no text outside the JSON):
     "companyProfile": "what you've gathered so far, or null",
     "technologyFocus": "what you've gathered so far, or null",
     "qualifyingCriteria": "what you've gathered so far, or null",
-    "disqualifiers": "what you've gathered so far, or null"
+    "disqualifiers": "what you've gathered so far, or null",
+    "geographicRegion": "target region/country mentioned by user, e.g. 'Europe', 'North America', 'Germany', 'Asia-Pacific', or null if not specified"
   }
 }
 
@@ -631,6 +636,7 @@ class ChatEngine:
                 technology_focus=ec.get("technologyFocus"),
                 qualifying_criteria=ec.get("qualifyingCriteria"),
                 disqualifiers=ec.get("disqualifiers"),
+                geographic_region=ec.get("geographicRegion"),
             )
 
             return ChatResponse(

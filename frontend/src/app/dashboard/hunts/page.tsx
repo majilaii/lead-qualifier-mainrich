@@ -153,11 +153,11 @@ export default function HuntsPage() {
               )}
 
               <div className="flex items-center gap-3 mb-3 font-mono text-[10px]">
-                <span className="text-hot">🔥 {s.hot}</span>
+                <span className="text-hot">{s.hot} hot</span>
                 <span className="text-text-dim">·</span>
-                <span className="text-review">🔍 {s.review}</span>
+                <span className="text-review">{s.review} review</span>
                 <span className="text-text-dim">·</span>
-                <span className="text-text-dim">❌ {s.rejected}</span>
+                <span className="text-text-dim">{s.rejected} rejected</span>
               </div>
 
               <div className="flex items-center justify-between">

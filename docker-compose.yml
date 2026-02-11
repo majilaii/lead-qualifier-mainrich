@@ -2,10 +2,11 @@
 # ◈ Hunt — Docker Compose
 #
 # Usage:
-#   docker compose up              # Start both services
+#   docker compose up              # Start both services (dev mode, hot-reload)
 #   docker compose up backend      # Backend only
 #   docker compose up -d           # Detached mode
 #   docker compose down            # Stop everything
+#   docker compose up --build      # Force rebuild (after dep changes)
 #
 #   # Run the CLI pipeline instead of the API server:
 #   docker compose run --rm backend python main.py --test
@@ -24,10 +25,12 @@ services:
     env_file:
       - ./backend/.env
     volumes:
-      # Persist output files to host
-      - ./backend/output:/app/output
-      # Mount input CSVs so you can feed new leads without rebuild
-      - ./backend/sample_leads.csv:/app/sample_leads.csv:ro
+      # ── Mount ALL source code so edits reflect instantly ──
+      - ./backend:/app
+      # Prevent host node artifacts from leaking in
+      - /app/__pycache__
+    # Override CMD → run with --reload so uvicorn picks up file changes
+    command: ["uvicorn", "chat_server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
@@ -40,19 +43,26 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      target: deps            # Only use the deps stage (node_modules installed)
     container_name: hunt-web
     ports:
       - "3000:3000"
     environment:
-      # Server-side API routes (run inside container) → reach backend via Docker DNS
       - CHAT_BACKEND_URL=http://backend:8000
-      # Client-side code (runs in user's browser) → reach backend via host port mapping
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
-      # Supabase — set these or mount an .env.local
       - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
       - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
       - NEXT_PUBLIC_MAPBOX_TOKEN=${NEXT_PUBLIC_MAPBOX_TOKEN:-}
+      - WATCHPACK_POLLING=true   # Ensures file-watching works inside Docker on macOS
+    volumes:
+      # ── Mount ALL source code so edits reflect instantly ──
+      - ./frontend:/app
+      # Keep container's node_modules (don't overwrite with host's)
+      - /app/node_modules
+      - /app/.next
+    # Override CMD → run Next.js dev server instead of production standalone
+    command: ["npx", "next", "dev", "--hostname", "0.0.0.0", "--port", "3000"]
     depends_on:
       backend:
         condition: service_healthy

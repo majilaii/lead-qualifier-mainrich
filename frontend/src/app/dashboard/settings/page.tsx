@@ -115,17 +115,15 @@ export default function SettingsPage() {
         </div>
         <div className="px-5 py-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <UsageStat label="Searches" value={usage?.searches ?? 0} icon="🔍" />
-            <UsageStat label="Leads" value={usage?.leads ?? 0} icon="📋" />
+            <UsageStat label="Searches" value={usage?.searches ?? 0} />
+            <UsageStat label="Leads" value={usage?.leads ?? 0} />
             <UsageStat
               label="Enrichments"
               value={usage?.enrichments ?? 0}
-              icon="📇"
             />
             <UsageStat
               label="Cost ($)"
               value={usage?.cost ? `$${usage.cost.toFixed(2)}` : "$0.00"}
-              icon="💰"
             />
           </div>
 
@@ -261,15 +259,12 @@ function StatusRow({
 function UsageStat({
   label,
   value,
-  icon,
 }: {
   label: string;
   value: number | string;
-  icon: string;
 }) {
   return (
     <div className="text-center">
-      <span className="text-lg block mb-1">{icon}</span>
       <span className="font-mono text-lg font-bold text-text-primary block">
         {value}
       </span>

@@ -20,6 +20,7 @@ export interface ExtractedContext {
   technologyFocus: string | null;
   qualifyingCriteria: string | null;
   disqualifiers: string | null;
+  geographicRegion: string | null;
 }
 
 export interface SearchCompany {
@@ -292,6 +293,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
                   technology_focus: ctx.technologyFocus || undefined,
                   qualifying_criteria: ctx.qualifyingCriteria || undefined,
                   disqualifiers: ctx.disqualifiers || undefined,
+                  geographic_region: ctx.geographicRegion || undefined,
                 }
               : undefined,
             // Persist chat history alongside the search record
@@ -397,6 +399,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         technologyFocus: search.technology_focus || null,
         qualifyingCriteria: search.qualifying_criteria || null,
         disqualifiers: null,
+        geographicRegion: search.geographic_region || null,
       });
 
       // Restore messages

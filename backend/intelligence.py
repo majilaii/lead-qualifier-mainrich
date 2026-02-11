@@ -246,7 +246,7 @@ Respond with a JSON object in this exact format:
     "reasoning": string (2-3 sentences explaining how well they match the search for: {industry}),
     "key_signals": array of strings (positive signals found that match the search),
     "red_flags": array of strings (signals that suggest they don't match),
-    "headquarters_location": string or null (company HQ city/country if mentioned, e.g. "Charlotte, NC, USA", "Munich, Germany")
+    "headquarters_location": string or null (the company's ACTUAL headquarters city/country — look for 'About Us', 'Contact', or footer address. Ignore the language or origin of the page itself. e.g. "Charlotte, NC, USA", "Munich, Germany")
 }}"""
     
     async def qualify_lead(
@@ -647,7 +647,7 @@ Respond with a JSON object in this exact format:
     "reasoning": string (2-3 sentences explaining your decision),
     "key_signals": array of strings (positive signals found),
     "red_flags": array of strings (negative signals found),
-    "headquarters_location": string or null (company HQ city/country if mentioned, e.g. "Charlotte, NC, USA", "Munich, Germany")
+    "headquarters_location": string or null (the company's ACTUAL headquarters city/country — look for 'About Us', 'Contact', or footer address. Ignore the language or origin of the page itself. e.g. "Charlotte, NC, USA", "Munich, Germany")
 }"""
     
     def _parse_llm_response(self, response_text: str) -> QualificationResult:

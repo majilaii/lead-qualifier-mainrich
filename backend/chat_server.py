@@ -396,6 +396,7 @@ class SearchContext(BaseModel):
     technology_focus: Optional[str] = None
     qualifying_criteria: Optional[str] = None
     disqualifiers: Optional[str] = None
+    geographic_region: Optional[str] = None
 
 
 class PipelineRequest(BaseModel):
@@ -532,22 +533,47 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                         tier = determine_tier(qual_result.confidence_score)
 
                         # Geocode: try LLM-extracted location, fall back to domain TLD
+                        # Validate against user's search region to catch SEO-mislocated pages
                         hq_location = qual_result.headquarters_location
+                        search_region = (search_ctx or {}).get("geographic_region")
+                        domain_country = _guess_country_from_domain(company.get("domain", ""))
                         country = None
                         latitude = None
                         longitude = None
 
                         if hq_location:
-                            geo = _geocode_location(hq_location)
-                            if geo:
-                                country, latitude, longitude = geo
+                            # Cross-check: does the LLM location match the user's search region?
+                            if _location_matches_region(hq_location, search_region):
+                                geo = _geocode_location(hq_location)
+                                if geo:
+                                    country, latitude, longitude = geo
+                            else:
+                                # LLM location conflicts with search region — likely an SEO mirror
+                                # Prefer domain TLD if available, otherwise use search region
+                                logger.info(
+                                    "Geo mismatch for %s: LLM said '%s' but search region is '%s' — using domain/region fallback",
+                                    company.get("domain"), hq_location, search_region,
+                                )
+                                if domain_country:
+                                    geo = _geocode_location(domain_country)
+                                    if geo:
+                                        country, latitude, longitude = geo
+                                elif search_region:
+                                    geo = _geocode_location(search_region)
+                                    if geo:
+                                        country, latitude, longitude = geo
 
                         if not country:
-                            country = _guess_country_from_domain(company.get("domain", ""))
-                            if country:
+                            if domain_country:
+                                country = domain_country
                                 geo = _geocode_location(country)
                                 if geo:
                                     _, latitude, longitude = geo
+                            elif search_region:
+                                # Last resort: use the user's search region centroid
+                                geo = _geocode_location(search_region)
+                                if geo:
+                                    country, latitude, longitude = geo
 
                         result_data = {
                             "title": company["title"],
@@ -853,32 +879,35 @@ async def list_leads(
 
 @app.get("/api/leads/geo")
 async def leads_geo(user=Depends(require_auth)):
-    """All leads with lat/lng coordinates for map plotting."""
+    """All leads with lat/lng coordinates for map plotting, grouped by hunt."""
     from db import get_db as _get_db
     from db.models import Search, QualifiedLead
 
     async for db in _get_db():
         leads = (await db.execute(
-            select(QualifiedLead)
+            select(QualifiedLead, Search.industry, Search.technology_focus, Search.created_at.label("search_date"))
             .join(Search, QualifiedLead.search_id == Search.id)
             .where(Search.user_id == user.id)
             .where(QualifiedLead.latitude.isnot(None))
             .where(QualifiedLead.longitude.isnot(None))
-        )).scalars().all()
+        )).all()
 
         return [
             {
-                "id": l.id,
-                "company_name": l.company_name,
-                "domain": l.domain,
-                "score": l.score,
-                "tier": l.tier,
-                "country": l.country,
-                "latitude": l.latitude,
-                "longitude": l.longitude,
-                "status": l.status,
+                "id": row[0].id,
+                "search_id": row[0].search_id,
+                "company_name": row[0].company_name,
+                "domain": row[0].domain,
+                "score": row[0].score,
+                "tier": row[0].tier,
+                "country": row[0].country,
+                "latitude": row[0].latitude,
+                "longitude": row[0].longitude,
+                "status": row[0].status,
+                "search_label": row[1] or row[2] or "Untitled Hunt",
+                "search_date": row[3].isoformat() if row[3] else None,
             }
-            for l in leads
+            for row in leads
         ]
 
 
@@ -1158,6 +1187,19 @@ _COUNTRY_COORDS: dict = {
     "saudi arabia": (23.89, 45.08), "turkey": (38.96, 35.24),
     "russia": (61.52, 105.32), "ukraine": (48.38, 31.17),
     "hong kong": (22.32, 114.17),
+    # Broad regions (centroids)
+    "europe": (50.1, 9.7),
+    "north america": (45.0, -100.0),
+    "south america": (-15.0, -60.0),
+    "asia": (34.0, 100.0),
+    "middle east": (29.0, 47.0),
+    "africa": (8.8, 34.5),
+    "oceania": (-27.0, 140.0),
+    "southeast asia": (10.0, 106.0),
+    "east asia": (35.0, 115.0),
+    "latin america": (-10.0, -65.0),
+    "scandinavia": (62.0, 15.0),
+    "nordic": (62.0, 15.0),
 }
 
 
@@ -1225,3 +1267,63 @@ def _guess_country_from_domain(domain: str) -> Optional[str]:
             return country
     # .com, .org, .io — can't determine
     return None
+
+
+# ── Region validation ─────────────────────────
+# Maps broad region keywords to sets of countries that belong to them.
+# Used to cross-check LLM-extracted HQ location against user's intended region.
+
+_REGION_COUNTRIES: dict[str, set[str]] = {
+    "europe": {
+        "germany", "france", "italy", "spain", "netherlands", "belgium",
+        "austria", "switzerland", "sweden", "norway", "denmark", "finland",
+        "poland", "czech republic", "portugal", "united kingdom", "uk",
+        "ireland", "greece", "hungary", "romania", "croatia", "slovakia",
+        "slovenia", "lithuania", "latvia", "estonia", "luxembourg", "bulgaria",
+    },
+    "north america": {"united states", "usa", "us", "canada", "mexico"},
+    "south america": {"brazil", "argentina", "chile", "colombia", "peru", "venezuela", "ecuador", "uruguay"},
+    "asia": {
+        "china", "japan", "south korea", "india", "singapore", "taiwan",
+        "hong kong", "malaysia", "thailand", "indonesia", "philippines",
+        "vietnam", "pakistan", "bangladesh",
+    },
+    "middle east": {"uae", "saudi arabia", "israel", "turkey", "qatar", "bahrain", "kuwait", "oman"},
+    "oceania": {"australia", "new zealand"},
+    "africa": {"south africa", "nigeria", "kenya", "egypt", "morocco"},
+}
+
+
+def _location_matches_region(location_str: str, search_region: str) -> bool:
+    """
+    Check whether a geocoded location is plausible given the user's search region.
+    Returns True if the location seems consistent, False if it's a likely mismatch.
+    """
+    if not location_str or not search_region:
+        return True  # No region constraint → anything is fine
+
+    loc = location_str.lower().strip()
+    region = search_region.lower().strip()
+
+    # If the user specified a specific country (e.g. "Germany"), check directly
+    if region in loc or loc in region:
+        return True
+
+    # Check if the user's region is a broad region (e.g. "Europe")
+    for region_key, countries in _REGION_COUNTRIES.items():
+        if region_key in region or region in region_key:
+            # Check if any country in this region matches the location
+            for country in countries:
+                if country in loc:
+                    return True
+            # The user wanted this region but location doesn't match any country in it
+            return False
+
+    # If user's region is a specific country, check if location contains it
+    for region_key, countries in _REGION_COUNTRIES.items():
+        for country in countries:
+            if country in region:
+                # User specified a country — check if location matches
+                return country in loc
+
+    return True  # Can't determine → don't block

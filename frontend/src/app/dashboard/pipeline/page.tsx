@@ -25,14 +25,14 @@ type SortField = "score" | "company_name" | "created_at";
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 const TIER_BADGE: Record<string, { bg: string; label: string }> = {
-  hot: { bg: "bg-hot/10 text-hot border-hot/20", label: "🔥 Hot" },
+  hot: { bg: "bg-hot/10 text-hot border-hot/20", label: "Hot" },
   review: {
     bg: "bg-review/10 text-review border-review/20",
-    label: "🔍 Review",
+    label: "Review",
   },
   rejected: {
     bg: "bg-text-dim/10 text-text-dim border-text-dim/20",
-    label: "❌ Rejected",
+    label: "Rejected",
   },
 };
 
@@ -159,7 +159,7 @@ export default function PipelinePage() {
                   : "text-text-muted hover:text-text-primary"
               }`}
             >
-              {t === "all" ? "All" : t === "hot" ? "🔥" : t === "review" ? "🔍" : "❌"}{" "}
+              {t === "all" ? "All" : t === "hot" ? "Hot" : t === "review" ? "Review" : "Rejected"}{" "}
               {tierCounts[t]}
             </button>
           ))}

@@ -42,9 +42,9 @@ const STATUS_OPTIONS = [
 ];
 
 const TIER_CONFIG: Record<string, { bg: string; text: string; label: string }> = {
-  hot: { bg: "bg-hot/10 border-hot/20", text: "text-hot", label: "🔥 HOT" },
-  review: { bg: "bg-review/10 border-review/20", text: "text-review", label: "🔍 REVIEW" },
-  rejected: { bg: "bg-text-dim/10 border-text-dim/20", text: "text-text-dim", label: "❌ REJECTED" },
+  hot: { bg: "bg-hot/10 border-hot/20", text: "text-hot", label: "HOT" },
+  review: { bg: "bg-review/10 border-review/20", text: "text-review", label: "REVIEW" },
+  rejected: { bg: "bg-text-dim/10 border-text-dim/20", text: "text-text-dim", label: "REJECTED" },
 };
 
 export default function LeadDrawer({
@@ -162,7 +162,7 @@ export default function LeadDrawer({
               <p className="font-mono text-xs text-text-muted">{lead.domain}</p>
               {lead.country && (
                 <p className="font-mono text-[10px] text-text-dim mt-1">
-                  📍 {lead.country}
+                  {lead.country}
                 </p>
               )}
             </div>
@@ -275,7 +275,7 @@ export default function LeadDrawer({
                       key={i}
                       className="flex items-start gap-2 font-sans text-xs text-text-secondary"
                     >
-                      <span className="text-red-400 mt-0.5 shrink-0">⚠</span>
+                      <span className="text-red-400 mt-0.5 shrink-0">•</span>
                       {f}
                     </li>
                   ))}

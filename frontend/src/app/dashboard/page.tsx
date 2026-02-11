@@ -60,13 +60,12 @@ export default function DashboardPage() {
   }
 
   const statCards = [
-    { label: "Total Leads", value: stats?.total_leads ?? 0, icon: "📋" },
-    { label: "Hot Leads", value: stats?.hot_leads ?? 0, icon: "🔥" },
-    { label: "Searches Run", value: stats?.total_searches ?? 0, icon: "🔍" },
+    { label: "Total Leads", value: stats?.total_leads ?? 0 },
+    { label: "Hot Leads", value: stats?.hot_leads ?? 0 },
+    { label: "Searches Run", value: stats?.total_searches ?? 0 },
     {
       label: "Contacts Enriched",
       value: stats?.contacts_enriched ?? 0,
-      icon: "📇",
     },
   ];
 
@@ -98,7 +97,6 @@ export default function DashboardPage() {
             className="bg-surface-2 border border-border rounded-xl p-5"
           >
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xl">{card.icon}</span>
               <span className="font-mono text-2xl font-bold text-text-primary">
                 {card.value}
               </span>
@@ -156,13 +154,13 @@ export default function DashboardPage() {
                 </div>
                 <div className="flex items-center gap-3 ml-4">
                   <span className="font-mono text-[10px] text-hot">
-                    🔥 {s.hot}
+                    {s.hot} hot
                   </span>
                   <span className="font-mono text-[10px] text-review">
-                    🔍 {s.review}
+                    {s.review} review
                   </span>
                   <span className="font-mono text-[10px] text-text-dim">
-                    ❌ {s.rejected}
+                    {s.rejected} rejected
                   </span>
                   {s.created_at && (
                     <span className="font-mono text-[9px] text-text-dim">
