@@ -17,6 +17,14 @@ export async function POST(request: Request) {
     });
 
     if (!backendResponse.ok) {
+      // Forward 429 quota responses with JSON content-type so frontend gets used/limit/action/plan
+      if (backendResponse.status === 429) {
+        const err = await backendResponse.json().catch(() => ({ error: "quota_exceeded" }));
+        return new Response(JSON.stringify(err), {
+          status: 429,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       const err = await backendResponse.text();
       return new Response(err, { status: backendResponse.status });
     }

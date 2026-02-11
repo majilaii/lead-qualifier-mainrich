@@ -37,19 +37,19 @@ class LeadInput(BaseModel):
 class QualificationResult(BaseModel):
     """Structured output from LLM qualification"""
     is_qualified: bool = Field(
-        description="Whether the company is a potential customer for magnets/motors"
+        description="Whether the company matches the search criteria"
     )
     confidence_score: int = Field(
         ge=1, le=10,
-        description="Confidence score from 1 (definitely not) to 10 (perfect fit)"
+        description="Confidence score from 1 (definitely not a match) to 10 (perfect fit)"
     )
     hardware_type: Optional[str] = Field(
         default=None,
-        description="Type of hardware they build (e.g., 'Humanoid Robot', 'Drone', 'Surgical Device')"
+        description="Type of company or primary product/service category"
     )
     industry_category: Optional[str] = Field(
         default=None,
-        description="Industry category: robotics, aerospace, medical, automotive, industrial, motor_manufacturer, consumer_electronics"
+        description="Industry sector the company operates in"
     )
     reasoning: str = Field(
         description="Brief explanation of why they are/aren't qualified"
@@ -140,8 +140,8 @@ class ProcessedLead(BaseModel):
             "mobile_number": self.mobile_number or "",
             # Deep research fields
             "products_found": "; ".join(dr.get("products_found", [])),
-            "technologies_used": "; ".join(dr.get("technologies_used", dr.get("motor_types_used", []))),
-            "relevant_capabilities": "; ".join(dr.get("relevant_capabilities", dr.get("magnet_requirements", []))),
+            "technologies_used": "; ".join(dr.get("technologies_used", [])),
+            "relevant_capabilities": "; ".join(dr.get("relevant_capabilities", [])),
             "industries_served": "; ".join(dr.get("industries_served", [])),
             "applications": "; ".join(dr.get("applications", [])),
             "decision_maker_titles": "; ".join(dr.get("decision_maker_titles", [])),

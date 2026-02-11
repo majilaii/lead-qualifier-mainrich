@@ -24,6 +24,8 @@ services:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    environment:
+      - FRONTEND_URL=http://localhost:3000
     volumes:
       # ── Mount ALL source code so edits reflect instantly ──
       - ./backend:/app
@@ -47,13 +49,13 @@ services:
     container_name: hunt-web
     ports:
       - "3000:3000"
+    env_file:
+      - ./frontend/.env.local
     environment:
       - CHAT_BACKEND_URL=http://backend:8000
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
       - NEXT_PUBLIC_API_URL=http://localhost:8000
-      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
-      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
-      - NEXT_PUBLIC_MAPBOX_TOKEN=${NEXT_PUBLIC_MAPBOX_TOKEN:-}
+      - OUTPUT_MODE=standalone
       - WATCHPACK_POLLING=true   # Ensures file-watching works inside Docker on macOS
     volumes:
       # ── Mount ALL source code so edits reflect instantly ──

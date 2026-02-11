@@ -5,6 +5,8 @@ import { usePathname, useRouter } from "next/navigation";
 import AuthGuard from "../components/auth/AuthGuard";
 import UserMenu from "../components/auth/UserMenu";
 import { useHunt } from "../components/hunt/HuntContext";
+import BillingProvider from "../components/billing/BillingProvider";
+import UpgradeModal from "../components/billing/UpgradeModal";
 
 const NAV_ICONS: Record<string, React.ReactNode> = {
   "/dashboard": <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>,
@@ -166,7 +168,12 @@ export default function DashboardLayout({
         )}
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto pb-20 md:pb-0">{children}</main>
+        <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+          <BillingProvider>
+            {children}
+            <UpgradeModal />
+          </BillingProvider>
+        </main>
       </div>
     </AuthGuard>
   );

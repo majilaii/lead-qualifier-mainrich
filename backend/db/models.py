@@ -48,6 +48,12 @@ class Profile(Base):
     email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     plan_tier: Mapped[str] = mapped_column(String(20), default="free")
+    # Stripe billing
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), unique=True, nullable=True, index=True)
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    plan: Mapped[str] = mapped_column(String(20), default="free")  # free | pro | enterprise
+    plan_period_start: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    plan_period_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
@@ -105,6 +111,9 @@ class QualifiedLead(Base):
     longitude: Mapped[Optional[float]] = mapped_column(Double, nullable=True)
     # Pipeline status
     status: Mapped[str] = mapped_column(String(20), default="new")  # new, contacted, in_progress, won, lost, archived
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    deal_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    status_changed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
@@ -145,6 +154,7 @@ class UsageTracking(Base):
     year_month: Mapped[str] = mapped_column(String(7))  # "2026-02"
     leads_qualified: Mapped[int] = mapped_column(Integer, default=0)
     searches_run: Mapped[int] = mapped_column(Integer, default=0)
+    enrichments_used: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )

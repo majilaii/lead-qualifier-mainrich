@@ -20,10 +20,6 @@ from config import HUNTER_API_KEY
 logger = logging.getLogger(__name__)
 
 
-# Global flag — starts disabled, enabled via /api/enrich endpoint
-_api_enabled = False
-
-
 async def enrich_contact(
     contact_name: Optional[str],
     company_domain: str,
@@ -40,9 +36,6 @@ async def enrich_contact(
     Returns:
         EnrichmentResult with email, job_title, and source
     """
-    if not _api_enabled:
-        return EnrichmentResult(enrichment_source="manual_required")
-
     if not HUNTER_API_KEY:
         return EnrichmentResult(enrichment_source="not_configured")
 
@@ -127,19 +120,11 @@ async def enrich_contact(
     return EnrichmentResult(enrichment_source="not_found")
 
 
-def enable_api_enrichment(enable: bool = True):
-    """Enable or disable API-based enrichment."""
-    global _api_enabled
-    _api_enabled = enable
-    logger.info("API enrichment %s", 'enabled' if enable else 'disabled')
-
-
 def get_enrichment_status() -> dict:
     """Get current enrichment configuration status."""
     configured = bool(HUNTER_API_KEY)
     providers = ["hunter"] if configured else []
     return {
-        "api_enrichment_enabled": _api_enabled,
         "hunter_configured": configured,
         "mode": "hunter" if configured else "manual",
         "providers": providers,
@@ -151,7 +136,6 @@ if __name__ == "__main__":
 
     async def test():
         print("Status:", get_enrichment_status())
-        enable_api_enrichment(True)
         result = await enrich_contact(None, "stripe.com")
         print(f"Result: {result}")
 

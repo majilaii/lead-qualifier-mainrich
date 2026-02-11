@@ -1,13 +1,13 @@
 """
 Usage Tracking — Per-user monthly limits and metering.
 
-Plan tiers:
-  - free:  50 leads/month, 5 searches/month
-  - pro:   500 leads/month, 50 searches/month
-  - scale: unlimited
+Plan tiers (SaaS):
+  - free:       3 hunts/mo, 25 leads/hunt, 10 enrichments/mo
+  - pro:        20 hunts/mo, 100 leads/hunt, 200 enrichments/mo
+  - enterprise: unlimited hunts, 500 leads/hunt, 1000 enrichments/mo
 
 Usage:
-    from usage import get_usage, increment_usage, check_limit
+    from usage import get_usage, increment_usage, check_limit, check_quota
 
     usage = await get_usage(db, user_id)
     ok    = await check_limit(db, user_id, "leads_qualified", count=10)
@@ -25,14 +25,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import UsageTracking
 
 # ──────────────────────────────────────────────
-# Plan limits
+# Plan limits (aligned with SAAS_PLAN.md)
 # ──────────────────────────────────────────────
 
 PLAN_LIMITS: dict[str, dict[str, int | None]] = {
-    "free":  {"leads_qualified": 50,   "searches_run": 5},
-    "pro":   {"leads_qualified": 500,  "searches_run": 50},
-    "scale": {"leads_qualified": None, "searches_run": None},  # unlimited
+    "free":       {"searches_run": 3,    "leads_qualified": 75,    "enrichments_used": 10},
+    "pro":        {"searches_run": 20,   "leads_qualified": 2000,  "enrichments_used": 200},
+    "enterprise": {"searches_run": None, "leads_qualified": None,  "enrichments_used": 1000},
 }
+
+# Leads per hunt cap (not stored in usage, enforced at pipeline time)
+LEADS_PER_HUNT = {
+    "free": 25,
+    "pro": 100,
+    "enterprise": 500,
+}
+
+# Deep research access
+DEEP_RESEARCH_PLANS = {"pro", "enterprise"}
 
 
 def _current_month() -> str:
@@ -58,6 +68,7 @@ async def _get_or_create_row(
             year_month=ym,
             leads_qualified=0,
             searches_run=0,
+            enrichments_used=0,
         )
         db.add(row)
         await db.flush()
@@ -71,22 +82,32 @@ async def get_usage(db: AsyncSession, user_id: str, plan_tier: str = "free") -> 
 
     Returns:
         {
+            "plan": "free",
             "year_month": "2026-02",
             "leads_qualified": 12,
-            "leads_limit": 50,
+            "leads_limit": 75,
             "searches_run": 2,
-            "searches_limit": 5,
+            "searches_limit": 3,
+            "enrichments_used": 5,
+            "enrichments_limit": 10,
+            "leads_per_hunt": 25,
+            "deep_research": false,
         }
     """
     row = await _get_or_create_row(db, user_id)
     limits = PLAN_LIMITS.get(plan_tier, PLAN_LIMITS["free"])
 
     return {
+        "plan": plan_tier,
         "year_month": row.year_month,
         "leads_qualified": row.leads_qualified,
         "leads_limit": limits["leads_qualified"],
         "searches_run": row.searches_run,
         "searches_limit": limits["searches_run"],
+        "enrichments_used": row.enrichments_used,
+        "enrichments_limit": limits["enrichments_used"],
+        "leads_per_hunt": LEADS_PER_HUNT.get(plan_tier, 25),
+        "deep_research": plan_tier in DEEP_RESEARCH_PLANS,
     }
 
 
@@ -117,6 +138,7 @@ async def increment_usage(
     user_id: str,
     leads_qualified: int = 0,
     searches_run: int = 0,
+    enrichments_used: int = 0,
 ) -> None:
     """Increment usage counters for the current month."""
     row = await _get_or_create_row(db, user_id)
@@ -125,5 +147,50 @@ async def increment_usage(
         row.leads_qualified += leads_qualified
     if searches_run:
         row.searches_run += searches_run
+    if enrichments_used:
+        row.enrichments_used += enrichments_used
 
     await db.commit()
+
+
+async def check_quota(
+    db: AsyncSession,
+    user_id: str,
+    plan_tier: str = "free",
+    action: str = "search",
+    count: int = 1,
+) -> dict | None:
+    """
+    Check if the user has quota for an action. Returns None if OK,
+    or a dict with quota details if exceeded (for 429 response body).
+
+    Actions: "search", "leads", "enrichment"
+    """
+    metric_map = {
+        "search": "searches_run",
+        "leads": "leads_qualified",
+        "enrichment": "enrichments_used",
+    }
+
+    metric = metric_map.get(action)
+    if not metric:
+        return None  # Unknown action → allow
+
+    ok = await check_limit(db, user_id, metric, count=count, plan_tier=plan_tier)
+    if ok:
+        return None  # Within limits
+
+    # Build quota exceeded response
+    row = await _get_or_create_row(db, user_id)
+    limits = PLAN_LIMITS.get(plan_tier, PLAN_LIMITS["free"])
+    limit_val = limits.get(metric)
+
+    return {
+        "error": "quota_exceeded",
+        "action": action,
+        "metric": metric,
+        "limit": limit_val,
+        "used": getattr(row, metric, 0),
+        "plan": plan_tier,
+        "upgrade_url": "/dashboard/settings?upgrade=true",
+    }

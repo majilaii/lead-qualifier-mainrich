@@ -89,6 +89,7 @@ class ExtractedContext:
     qualifying_criteria: Optional[str] = None
     disqualifiers: Optional[str] = None
     geographic_region: Optional[str] = None
+    country_code: Optional[str] = None  # ISO 3166-1 alpha-2 (e.g. "GB", "US")
 
     def to_dict(self) -> dict:
         return {
@@ -98,6 +99,7 @@ class ExtractedContext:
             "qualifyingCriteria": self.qualifying_criteria,
             "disqualifiers": self.disqualifiers,
             "geographicRegion": self.geographic_region,
+            "countryCode": self.country_code,
         }
 
     def to_query_input(self) -> str:
@@ -114,7 +116,7 @@ class ExtractedContext:
         if self.disqualifiers:
             parts.append(f"Disqualifiers: {self.disqualifiers}")
         if self.geographic_region:
-            parts.append(f"Geographic region: {self.geographic_region}")
+            parts.append(f"GEOGRAPHIC CONSTRAINT (CRITICAL): {self.geographic_region} — ALL results MUST be located in or near this area")
         return "\n".join(parts)
 
 
@@ -158,6 +160,16 @@ Gather enough information to build effective company search queries. You need to
 3. TECHNOLOGY FOCUS (required) — What products, services, components, or technologies should they work with or offer?
 4. QUALIFYING CRITERIA (required) — What signals on their website would indicate they're a good match?
 5. DISQUALIFIERS (helpful) — What should immediately exclude a company?
+
+LOCATION HANDLING (CRITICAL):
+- If the user mentions a LOCATION (city, neighborhood, area, region), you MUST disambiguate it if it's ambiguous.
+  Example: "near Paddington" → ask "Do you mean Paddington, London, UK?" (there are Paddingtons in Australia too)
+  Example: "in Cambridge" → ask "Cambridge, UK or Cambridge, MA, USA?"
+  Example: "near Portland" → ask "Portland, OR or Portland, ME?"
+- If the location is unambiguous (e.g. "in Tokyo", "in Berlin", "in New York"), accept it directly.
+- ALWAYS extract the disambiguated location into geographicRegion with full detail (e.g. "Paddington, London, UK" not just "Paddington").
+- ALWAYS extract a 2-letter ISO country code into countryCode (e.g. "GB", "US", "DE", "JP").
+- Location-based searches ("dentists near me", "companies in London") should treat location as a HARD constraint, not a preference.
 
 DETAIL-AWARE BEHAVIOR (CRITICAL):
 Before asking ANY follow-up, evaluate how much detail the user already provided. Score each required field:
@@ -217,7 +229,8 @@ OUTPUT FORMAT (strict JSON, no text outside the JSON):
     "technologyFocus": "what you've gathered so far, or null",
     "qualifyingCriteria": "what you've gathered so far, or null",
     "disqualifiers": "what you've gathered so far, or null",
-    "geographicRegion": "target region/country mentioned by user, e.g. 'Europe', 'North America', 'Germany', 'Asia-Pacific', or null if not specified"
+    "geographicRegion": "target region/country/city mentioned by user, fully disambiguated, e.g. 'Paddington, London, UK', 'Cambridge, MA, USA', 'Munich, Germany', or null if not specified",
+    "countryCode": "ISO 3166-1 alpha-2 country code, e.g. 'GB', 'US', 'DE', 'JP', or null if no location specified"
   }
 }
 
@@ -243,6 +256,16 @@ QUERY GUIDELINES:
 - Each query should approach the target from a different angle (industry, product, technology, use case)
 - Category should always be "company"
 - Use 10-15 results per query for good coverage without excess
+
+GEOGRAPHIC CONSTRAINT (CRITICAL):
+- If a geographic region/city/area is specified in the context, you MUST include the location in EVERY query.
+- The location must appear naturally in each query string — Exa searches by meaning, so embedding "in Paddington, London" or "near Berlin, Germany" directly in the query text is essential.
+- Example: If region is "Paddington, London, UK", write queries like:
+  - "best dental practice near Paddington London with great patient reviews"
+  - "established dentist in Paddington or Bayswater London area"
+  - "highly rated dental clinic in W2 London Paddington"
+- NEVER omit the location from any query when a geographic constraint exists.
+- Include nearby neighborhoods, postcodes, or district names as variations across different queries.
 
 OUTPUT FORMAT (strict JSON only):
 {
@@ -421,8 +444,8 @@ class ChatEngine:
         if not queries:
             return SearchResult()
 
-        # Step 2: Execute via Exa
-        companies = await self._execute_exa_search(queries)
+        # Step 2: Execute via Exa (pass country code for geographic filtering)
+        companies = await self._execute_exa_search(queries, country_code=context.country_code)
 
         return SearchResult(
             companies=companies,
@@ -483,7 +506,7 @@ class ChatEngine:
     # ── Exa Search Execution ─────────────────────
 
     async def _execute_exa_search(
-        self, queries: list[dict]
+        self, queries: list[dict], country_code: Optional[str] = None
     ) -> list[dict]:
         """Execute search queries via Exa AI. Deduplicates by domain."""
         if not self.exa_client:
@@ -500,6 +523,7 @@ class ChatEngine:
                     query=q["query"],
                     num_results=q.get("num_results", 10),
                     category=q.get("category", "company"),
+                    user_location=country_code,
                 )
 
                 for r in results:
@@ -516,12 +540,13 @@ class ChatEngine:
         return all_results
 
     def _exa_search_sync(
-        self, query: str, num_results: int = 10, category: str = "company"
+        self, query: str, num_results: int = 10, category: str = "company",
+        user_location: Optional[str] = None,
     ) -> list[dict]:
         """Synchronous Exa search (called via asyncio.to_thread)."""
         from urllib.parse import urlparse
 
-        results = self.exa_client.search(
+        search_kwargs = dict(
             query=query,
             type="auto",
             category=category,
@@ -531,6 +556,12 @@ class ChatEngine:
                 "highlights": {"max_characters": 500},
             },
         )
+        # Pass ISO country code to Exa for geographic relevance
+        if user_location and len(user_location) == 2:
+            search_kwargs["user_location"] = user_location.upper()
+            logger.info("Exa search with userLocation=%s for query: %s", user_location.upper(), query[:80])
+
+        results = self.exa_client.search(**search_kwargs)
 
         parsed = []
         for r in results.results:
@@ -558,15 +589,26 @@ class ChatEngine:
         """Call the best available LLM. Falls back through the chain."""
 
         # Tier 1: Kimi (cheapest)
+        # No artificial timeout — Kimi's thinking model can take 30-50s on
+        # multi-turn conversations.  The httpx client already has a 60s
+        # timeout, and the frontend allows 70s total.  If an OpenAI key is
+        # configured we add a 25s cutoff so the fallback still has time.
         if self.kimi_client:
             try:
-                response = await self.kimi_client.chat.completions.create(
+                coro = self.kimi_client.chat.completions.create(
                     model="kimi-k2.5",
                     messages=messages,
                     temperature=1,  # kimi-k2.5 requires temperature=1
                     max_tokens=1500,
                 )
+                # Only apply a tight timeout if there's a fallback available
+                if self.openai_client:
+                    response = await asyncio.wait_for(coro, timeout=25.0)
+                else:
+                    response = await coro
                 return self._extract_kimi_response(response.choices[0].message)
+            except asyncio.TimeoutError:
+                logger.warning("Kimi timed out after 25s (%s), falling back to GPT-4o-mini", purpose)
             except Exception as e:
                 logger.warning("Kimi failed (%s): %s", purpose, e)
 
@@ -590,16 +632,34 @@ class ChatEngine:
     def _extract_kimi_response(message) -> str:
         """Extract response from Kimi thinking model.
         Kimi K2.5 puts reasoning in model_extra['reasoning_content']
-        and the final answer in content. We want the JSON answer."""
+        and the final answer in content. We want the JSON answer.
+        
+        Sometimes Kimi puts its thinking into `content` and the JSON
+        into `reasoning_content`, or vice-versa.  We pick whichever
+        field contains a valid JSON *object* (starts with `{`... after
+        stripping markdown fences).
+        """
         content = message.content or ""
         reasoning = ""
         if hasattr(message, "model_extra") and isinstance(message.model_extra, dict):
             reasoning = message.model_extra.get("reasoning_content", "") or ""
 
-        # Prefer content if it has JSON
+        def _has_json_object(text: str) -> bool:
+            """Return True if the text contains what looks like a JSON object
+            (not just a stray `{` in prose)."""
+            cleaned = re.sub(r"```(?:json)?\s*", "", text).replace("```", "").strip()
+            # Must contain {"reply": or {"readiness": — our expected output keys
+            return bool(re.search(r'\{\s*"(?:reply|readiness|queries)', cleaned))
+
+        # Prefer content if it has our expected JSON structure
+        if content.strip() and _has_json_object(content):
+            return content
+        # Fall back to reasoning_content if it has the JSON
+        if reasoning.strip() and _has_json_object(reasoning):
+            return reasoning
+        # Last resort: return whichever has a { at all
         if content.strip() and "{" in content:
             return content
-        # Fall back to reasoning_content
         if reasoning.strip() and "{" in reasoning:
             return reasoning
         return content or reasoning
@@ -637,6 +697,7 @@ class ChatEngine:
                 qualifying_criteria=ec.get("qualifyingCriteria"),
                 disqualifiers=ec.get("disqualifiers"),
                 geographic_region=ec.get("geographicRegion"),
+                country_code=ec.get("countryCode"),
             )
 
             return ChatResponse(
