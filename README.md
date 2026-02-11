@@ -1,21 +1,22 @@
-# 🧲 The Magnet Hunter
+# ◈ Hunt
 
-**AI-Powered B2B Lead Discovery & Qualification Pipeline**
+**AI-Powered B2B Lead Discovery & Qualification Platform**
 
-Automatically discover, crawl, qualify, and research potential B2B customers using AI. Built for Mainrich International's magnet & motor business, designed to be generalized for any hardware B2B company.
+Discover, crawl, qualify, and research potential B2B customers using AI. Describe your ideal customer in plain English — Hunt finds them, scores them, and organises everything in a full-featured dashboard with pipeline management and a live map view.
 
 ---
 
 ## What It Does
 
 ```
-Two modes:
+Web App (primary):
 
-CLI:   CSV / Exa Search ──→ Web Crawler ──→ AI Qualifier ──→ Deep Research ──→ CSV Output
-            (find)            (scrape)        (score)          (analyze)
+  Chat  ──→  AI Query Gen  ──→  Exa Search  ──→  Crawl + Qualify  ──→  Dashboard
+(describe)    (dual-LLM)         (find)          (stream SSE)       (map · pipeline · stats)
 
-Chat:  Conversation ──→ AI Query Gen ──→ Exa Search ──→ Crawl + Qualify ──→ Live Results
-         (describe)      (dual-LLM)       (find)         (stream SSE)       (scored UI)
+CLI (legacy, deprecated):
+
+  CSV / Exa  ──→  Web Crawler  ──→  AI Qualifier  ──→  Deep Research  ──→  CSV Output
 ```
 
 | Step | Module | What Happens |
@@ -25,108 +26,136 @@ Chat:  Conversation ──→ AI Query Gen ──→ Exa Search ──→ Crawl 
 | **3. Qualification** | `intelligence.py` | LLM reads the website content + screenshot and scores 1-10 on how likely this company needs your product |
 | **4. Deep Research** | `deep_research.py` | For hot leads (score 8+), crawls multiple pages and generates a sales brief: products they make, who to talk to, what to say |
 | **5. Enrichment** | `enrichment.py` | Looks up contact emails/phones via Apollo.io or Hunter.io (optional, manual mode by default) |
-| **6. Export** | `export.py` | Combines results into Excel or Google Sheets |
+| **6. Dashboard** | Frontend | Full pipeline view: stats, searchable leads table, detail drawer, interactive map, settings |
 
-### Output
+### Lead Tiers
 
-Leads are automatically sorted into 3 buckets:
+Leads are automatically sorted into 3 tiers:
 
-| File | Score | Action |
+| Tier | Score | Action |
 |------|-------|--------|
-| `output/qualified_hot_leads.csv` | 8-10 🔥 | Ready for outreach |
-| `output/review_manual_check.csv` | 4-7 🔍 | Human review needed |
-| `output/rejected_with_reasons.csv` | 1-3 ❌ | Not a fit (with explanation) |
+| 🔥 **Hot** | 70-100 | Ready for outreach |
+| 🔍 **Review** | 40-69 | Human review needed |
+| ❌ **Rejected** | 0-39 | Not a fit (with explanation) |
 
 ---
 
-## Chat Interface (Web UI)
+## Dashboard
 
-The chat interface lets you describe your ideal customer in plain English. An AI assistant asks follow-up questions to sharpen the search, then runs the full pipeline — discovery, crawling, and qualification — with live progress in the browser.
+Once logged in, the full dashboard is available at `/dashboard`. It includes:
 
-### How to Run
+| Page | Route | Description |
+|------|-------|-------------|
+| **Overview** | `/dashboard` | Stats cards (total leads, hot leads, searches, enrichments), recent hunts list |
+| **Hunts** | `/dashboard/hunts` | Card grid of all saved searches — tier breakdown, delete, click to **resume** any previous hunt with full conversation + results restored |
+| **Pipeline** | `/dashboard/pipeline` | Sortable leads table with tier/text filters. Click any row to open the detail drawer (score gauge, AI reasoning, signals, red flags, status management, enrichment data) |
+| **Map** | `/dashboard/map` | Split-panel interactive map — left list + right Mapbox GL dark map with glowing dots (red=hot, amber=review, grey=rejected), click-to-fly, popups. **Live mode:** leads pop up on the map in real-time as the pipeline qualifies them |
+| **Settings** | `/dashboard/settings` | API status indicators, usage stats, account info, sign out |
+
+### Pipeline Statuses
+
+Each lead can be moved through a CRM-like pipeline:
+
+`new` → `contacted` → `in_progress` → `won` / `lost` / `archived`
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- **Python 3.9+** and **Node.js 18+** — or just [Docker Desktop](https://www.docker.com/products/docker-desktop/) (skips all local setup)
+- **At least one LLM API key** (Kimi or OpenAI)
+- **Supabase project** for auth + database (already provisioned)
+
+### Option A: Local Development (recommended for contributors)
 
 You need **two terminals** — one for the Python backend, one for the Next.js frontend.
 
-**Terminal 1: Backend (FastAPI)**
+**1. Clone & install**
+
+```bash
+git clone <repo-url>
+cd lead-qualifier
+```
+
+**2. Backend setup**
 
 ```bash
 cd backend
-python -m venv venv              # First time only
-source venv/bin/activate         # macOS/Linux (venv\Scripts\activate on Windows)
-pip install -r requirements.txt  # First time only
-playwright install chromium      # First time only
+python3 -m venv venv
+source venv/bin/activate           # macOS/Linux (venv\Scripts\activate on Windows)
+pip install -r requirements.txt
+playwright install chromium        # headless browser for web scraping
 
-python -m uvicorn chat_server:app --reload --port 8000
+# Configure environment
+cp .env.example .env
+# Edit .env — at minimum set KIMI_API_KEY or OPENAI_API_KEY and DATABASE_URL
 ```
 
-You should see:
-```
-🧲 Starting Lead Discovery Chat Server...
-✅ Chat engine ready
-INFO:     Uvicorn running on http://127.0.0.1:8000
-```
-
-**Terminal 2: Frontend (Next.js)**
+**3. Frontend setup**
 
 ```bash
 cd frontend
-npm install    # First time only
+npm install
+
+# .env.local should already exist with Supabase keys
+# If not, create it:
+cat > .env.local << 'EOF'
+NEXT_PUBLIC_SUPABASE_URL=https://fwtxlbjnjfzqmqqmsssb.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_MAPBOX_TOKEN=<optional-mapbox-token>
+EOF
+```
+
+**4. Run both servers**
+
+```bash
+# Terminal 1 — Backend (FastAPI on :8000)
+cd backend
+source venv/bin/activate
+python3 -m uvicorn chat_server:app --reload --port 8000
+
+# Terminal 2 — Frontend (Next.js on :3000)
+cd frontend
 npm run dev
 ```
 
-Then open **http://localhost:3000/chat** in your browser.
+Open **http://localhost:3000** → sign up → start hunting.
 
-### 🐳 Option B: Docker (Recommended)
+### Option B: Docker (recommended for deployment)
 
-Docker bundles Python 3.12, Node 22, Playwright, Chromium, and all dependencies into containers — no local setup required.
-
-**Prerequisites:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
+Docker bundles Python 3.12, Node 22, Playwright, Chromium, and all dependencies.
 
 ```bash
-# 1. Set up your API keys (one-time)
+# 1. Configure API keys (one-time)
 cp backend/.env.example backend/.env
-# Edit backend/.env and add your KIMI_API_KEY or OPENAI_API_KEY
+# Edit backend/.env — add KIMI_API_KEY or OPENAI_API_KEY + DATABASE_URL
 
-# 2. Build & start both services
+# 2. Build & start
 docker compose up --build
 
-# That's it. Open http://localhost:3000/chat
+# Open http://localhost:3000
 ```
 
-**Subsequent runs** (no rebuild needed):
+**Day-to-day commands:**
 ```bash
-docker compose up        # Foreground
-docker compose up -d     # Detached (background)
-docker compose down      # Stop everything
+docker compose up              # Start (foreground)
+docker compose up -d           # Start (background)
+docker compose down            # Stop everything
+docker compose logs -f backend # Tail backend logs
+docker compose build --no-cache # Full rebuild
 ```
-
-**Run the CLI pipeline via Docker:**
-```bash
-# Test with sample companies
-docker compose run --rm backend python main.py --test
-
-# Process your own leads
-docker compose run --rm backend python main.py --input sample_leads.csv
-
-# With deep research
-docker compose run --rm backend python main.py --input sample_leads.csv --deep-research
-
-# Discover leads via Exa
-docker compose run --rm backend python test_exa.py --export
-
-# Deep research on a single company
-docker compose run --rm backend python deep_research.py "Maxon Group" "https://www.maxongroup.com"
-```
-
-> **Note:** Output files are volume-mounted — results appear in `backend/output/` on your host machine.
 
 ### Chat Flow
 
-1. **Describe** what companies you're looking for (e.g., "robotics startups building humanoid robots")
+1. **Describe** what companies you're looking for (e.g., "metal fabrication shops with CNC capabilities")
 2. **Answer** 2-3 follow-up questions — the AI tracks readiness across: industry, company profile, technology focus, and qualifying criteria
 3. **Launch Search** — generates semantic queries via AI, searches the web via Exa
-4. **Qualify** — crawls each company's website and scores them 1-10 with the LLM
+4. **Qualify** — crawls each company's website and scores them with the LLM
 5. **Results** — hot leads, needs-review, and rejected, with reasoning and signals for each
+6. **Dashboard** — all results (including the full chat conversation) are saved to your account. Resume any previous hunt from the Hunts page — the conversation, search context, and qualified leads are fully restored
 
 ### Architecture & Security
 
@@ -142,13 +171,42 @@ The chat uses a **dual-LLM pattern** for prompt injection defense:
 
 ### Required API Keys
 
-Same as the CLI pipeline — at minimum `KIMI_API_KEY` or `OPENAI_API_KEY` in `backend/.env`. For search, also add `EXA_API_KEY`.
+At minimum `KIMI_API_KEY` or `OPENAI_API_KEY` in `backend/.env`. For search, also add `EXA_API_KEY`. See the [Configuration](#2-configure-api-keys) section for the full list.
 
 ---
 
-## CLI Pipeline
+## Environment Variables
+
+### Backend (`backend/.env`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | ✅ | PostgreSQL connection string: `postgresql+asyncpg://user:pass@host:5432/postgres` |
+| `SUPABASE_URL` | ✅ | Supabase project URL (for JWT verification) |
+| `KIMI_API_KEY` | ✅* | Moonshot Kimi API key (cheapest LLM option) |
+| `OPENAI_API_KEY` | ✅* | OpenAI API key (fallback) |
+| `EXA_API_KEY` | Recommended | Exa AI key for lead discovery |
+| `APOLLO_API_KEY` | Optional | Contact enrichment (50 free/month) |
+| `HUNTER_API_KEY` | Optional | Email finder (25 free/month) |
+
+*At least one of `KIMI_API_KEY` or `OPENAI_API_KEY` is required.
+
+### Frontend (`frontend/.env.local`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_SUPABASE_URL` | ✅ | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ✅ | Supabase anonymous key |
+| `NEXT_PUBLIC_API_URL` | ✅ | Backend URL (default: `http://localhost:8000`) |
+| `NEXT_PUBLIC_MAPBOX_TOKEN` | Optional | Mapbox GL token for the map page (falls back to free CARTO tiles) |
+
+---
+
+## CLI Pipeline (Legacy)
 
 ### Quick Start
+
+> **Note:** The CLI pipeline is deprecated in favour of the web dashboard. It still works but results are not saved to the database.
 
 ### Prerequisites
 
@@ -264,15 +322,13 @@ lead-qualifier/
 │
 ├── docker-compose.yml          # 🐳 Orchestrates backend + frontend containers
 │
-├── backend/                    # Python pipeline + chat API
+├── backend/                    # Python pipeline + API server
 │   ├── Dockerfile              # 🐳 Python 3.12 + Playwright/Chromium image
-│   ├── .dockerignore           # 🐳 Files excluded from Docker build
-│   ├── main.py                 # 🎯 CLI pipeline orchestrator
-│   ├── chat_server.py          # 🌐 FastAPI server for the chat interface
+│   ├── chat_server.py          # 🌐 FastAPI server — chat, pipeline, dashboard API
 │   ├── chat_engine.py          # 🧠 Dual-LLM chat engine (conversation + query gen)
-│   │
-│   ├── config.py               # ⚙️  Settings: API keys, prompts, keywords, thresholds
+│   ├── config.py               # ⚙️  Settings: API keys, thresholds (no hardcoded ICP)
 │   ├── models.py               # 📦 Pydantic data models
+│   ├── main.py                 # 🎯 CLI pipeline orchestrator (deprecated)
 │   │
 │   ├── test_exa.py             # 🔍 Step 1: Exa AI lead discovery
 │   ├── scraper.py              # 🌐 Step 2: Web crawling (crawl4ai + Playwright)
@@ -281,30 +337,62 @@ lead-qualifier/
 │   ├── enrichment.py           # 📇 Step 5: Contact enrichment (Apollo / Hunter)
 │   ├── export.py               # 📊 Step 6: Export to Excel / Google Sheets
 │   │
+│   ├── db/                     # Database layer
+│   │   ├── __init__.py         # SQLAlchemy async engine + session factory
+│   │   └── models.py           # ORM models: profiles, searches, qualified_leads, etc.
+│   ├── auth/
+│   │   └── __init__.py         # Supabase JWT verification (JWKS)
+│   │
 │   ├── utils.py                # 🔧 Helpers: checkpointing, cost tracking
+│   ├── usage.py                # 📊 Usage tracking
+│   ├── logging_config.py       # 📝 Structured logging
 │   ├── run.sh                  # 🚀 Convenience shell script
-│   ├── sample_leads.csv        # 📄 Example input file
+│   ├── supabase_migration.sql  # 🗄️  Database schema (CREATE TABLE statements)
 │   ├── requirements.txt        # 📦 Python dependencies
 │   ├── .env.example            # 🔑 API key template — copy to .env
-│   └── output/                 # 📁 Generated results (gitignored)
+│   └── output/                 # 📁 CLI output files (gitignored)
 │
-├── frontend/                   # Next.js web UI
-│   ├── Dockerfile              # 🐳 Multi-stage Node 22 build (73 MB image)
-│   ├── .dockerignore           # 🐳 Files excluded from Docker build
-│   ├── next.config.ts          # Next.js config (standalone output for Docker)
-│   ├── src/app/
-│   │   ├── page.tsx            # Landing page
-│   │   ├── chat/page.tsx       # Chat interface page
-│   │   ├── api/chat/           # Next.js API proxy routes
-│   │   │   ├── route.ts        # Chat message proxy (→ FastAPI)
-│   │   │   └── search/route.ts # Search proxy (→ FastAPI)
-│   │   ├── layout.tsx          # Root layout
-│   │   ├── globals.css         # Global styles + animations
-│   │   └── components/
-│   │       ├── chat/
-│   │       │   └── ChatInterface.tsx  # Full chat + pipeline UI
-│   │       ├── Navbar.tsx
-│   │       └── ...             # Landing page components
+├── frontend/                   # Next.js 16 web UI
+│   ├── Dockerfile              # 🐳 Multi-stage Node 22 build
+│   ├── src/
+│   │   ├── middleware.ts       # Auth guards (/chat/*, /dashboard/*)
+│   │   ├── app/
+│   │   │   ├── page.tsx        # Landing page
+│   │   │   ├── layout.tsx      # Root layout
+│   │   │   ├── globals.css     # Theme tokens + animations
+│   │   │   │
+│   │   │   ├── chat/page.tsx               # AI chat interface
+│   │   │   ├── login/page.tsx              # Login page
+│   │   │   ├── signup/page.tsx             # Signup page
+│   │   │   │
+│   │   │   ├── dashboard/
+│   │   │   │   ├── layout.tsx              # Sidebar shell (nav, mobile bottom bar)
+│   │   │   │   ├── page.tsx                # Overview (stats + recent hunts)
+│   │   │   │   ├── hunts/page.tsx          # Saved searches grid
+│   │   │   │   ├── pipeline/
+│   │   │   │   │   ├── page.tsx            # Leads table (filter, sort, search)
+│   │   │   │   │   └── LeadDrawer.tsx      # Detail slide-out (score, signals, status)
+│   │   │   │   ├── map/page.tsx            # Interactive map (Mapbox GL, live pipeline)
+│   │   │   │   └── settings/page.tsx       # API status, usage, account
+│   │   │   │
+│   │   │   ├── api/                        # Next.js API proxy routes
+│   │   │   │   ├── chat/route.ts
+│   │   │   │   ├── chat/search/route.ts
+│   │   │   │   ├── enrich/route.ts
+│   │   │   │   ├── pipeline/run/route.ts
+│   │   │   │   └── usage/route.ts
+│   │   │   │
+│   │   │   └── components/
+│   │   │       ├── Navbar.tsx              # Top nav (Dashboard link when logged in)
+│   │   │       ├── Footer.tsx
+│   │   │       ├── chat/ChatInterface.tsx  # Full chat + pipeline streaming UI
+│   │   │       ├── hunt/HuntContext.tsx     # Global state context — persists chat, pipeline, map across navigation
+│   │   │       ├── auth/
+│   │   │       │   ├── AuthGuard.tsx
+│   │   │       │   ├── SessionProvider.tsx
+│   │   │       │   └── UserMenu.tsx
+│   │   │       └── ...                     # Landing page components
+│   │   └── lib/supabase/                   # Supabase client helpers
 │   ├── package.json
 │   └── tsconfig.json
 │
@@ -313,20 +401,70 @@ lead-qualifier/
 
 ---
 
+## Database Schema
+
+Hunt uses Supabase PostgreSQL. The schema is defined in `backend/supabase_migration.sql` and the ORM models live in `backend/db/models.py`.
+
+| Table | Purpose |
+|-------|---------|
+| `profiles` | User profiles (synced from Supabase Auth via trigger) |
+| `searches` | Saved search sessions — industry, criteria, query list, lead counts, **chat messages (JSONB)** |
+| `qualified_leads` | Individual leads — company, score, tier, reasoning, signals, geo, status |
+| `enrichment_results` | Contact data (email, phone, job title) linked to leads |
+| `usage_tracking` | Per-user usage logs (searches, enrichments, costs) |
+
+**Key columns on `qualified_leads`:**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `score` | Integer | AI qualification score (0-100) |
+| `tier` | String | `hot` / `review` / `rejected` |
+| `status` | String | Pipeline status: `new` / `contacted` / `in_progress` / `won` / `lost` / `archived` |
+| `country` | String | Extracted from LLM analysis or inferred from domain TLD |
+| `latitude` / `longitude` | Float | Geo coordinates for map plotting (auto-geocoded from HQ location) |
+| `key_signals` | Text | JSON array of positive signals |
+| `red_flags` | Text | JSON array of concerns |
+| `deep_research` | Text | Multi-page sales intelligence brief |
+
+To run migrations against Supabase:
+```bash
+cd backend
+python3 -c "
+import asyncio, asyncpg
+async def migrate():
+    conn = await asyncpg.connect('postgresql://postgres.YOUR_REF:YOUR_PASS@YOUR_HOST:5432/postgres')
+    with open('supabase_migration.sql') as f: await conn.execute(f.read())
+    print('Done')
+    await conn.close()
+asyncio.run(migrate())
+"
+```
+
+---
+
 ## How Each Module Works
 
-### `chat_server.py` — Chat API Server
+### `chat_server.py` — API Server
 
-FastAPI server that powers the chat interface. Endpoints:
+FastAPI server that powers the entire platform. All dashboard endpoints require a Supabase JWT.
 
-| Endpoint | What |
-|----------|------|
-| `POST /api/chat` | Sends conversation to the LLM, returns response + readiness state |
-| `POST /api/chat/search` | Generates Exa queries from structured context, executes search |
-| `POST /api/pipeline/run` | Runs crawl + qualify on found companies, streams results via SSE |
-| `GET /api/health` | Health check (reports LLM and Exa availability) |
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `POST /api/chat` | — | Send conversation to LLM, returns response + readiness state |
+| `POST /api/chat/search` | ✅ | Generate Exa queries from structured context, execute search |
+| `POST /api/pipeline/run` | ✅ | Run crawl + qualify on found companies, stream results via SSE |
+| `GET /api/health` | — | Health check (LLM + Exa availability) |
+| `GET /api/usage` | ✅ | Usage stats for the current user |
+| `GET /api/dashboard/stats` | ✅ | Aggregate stats (total leads, hot, searches, enrichments) |
+| `GET /api/searches` | ✅ | List all saved searches |
+| `GET /api/searches/:id` | ✅ | Single search with lead counts |
+| `DELETE /api/searches/:id` | ✅ | Delete a search and all its leads |
+| `GET /api/leads` | ✅ | List leads (filterable by `tier`, `search_id`, sortable) |
+| `GET /api/leads/geo` | ✅ | Leads with lat/lng for map plotting |
+| `GET /api/leads/:id` | ✅ | Full lead detail + enrichment data |
+| `PATCH /api/leads/:id/status` | ✅ | Update pipeline status (new/contacted/in_progress/won/lost/archived) |
 
-Includes per-IP rate limiting (30 req/min) and CORS for the frontend.
+Rate limited at 30 requests/min per IP. CORS configured for the frontend.
 
 ### `chat_engine.py` — Dual-LLM Chat Engine
 
@@ -341,7 +479,7 @@ Falls back through: Kimi K2.5 → GPT-4o-mini. Input sanitization strips prompt 
 
 Uses [Exa AI](https://exa.ai) neural search to find companies matching your ideal customer profile. Exa is like Google but understands *meaning*, not just keywords. Describe the company you want (e.g., "humanoid robot company building actuators") and it returns matching websites.
 
-- **Input:** Natural language search queries (12 pre-built for robotics/motors/magnets)
+- **Input:** Natural language search queries (generated dynamically from the chat, or manual)
 - **Output:** Company URLs + titles + text snippets + relevance scores
 - **Does NOT qualify leads** — just finds them. Qualification is `intelligence.py`'s job.
 
@@ -360,8 +498,10 @@ Screenshots are resized to 720px wide JPEG to keep vision API costs low.
 This is where the magic happens. The LLM:
 1. Reads the website markdown text
 2. Optionally analyzes the screenshot (vision mode)
-3. Scores the company 1-10 on likelihood they need your product
-4. Returns structured JSON with: `confidence_score`, `hardware_type`, `industry_category`, `reasoning`, `key_signals`, `red_flags`
+3. Scores the company 1-10 on how well they match the user's ICP
+4. Returns structured JSON with: `confidence_score`, `hardware_type`, `industry_category`, `headquarters_location`, `reasoning`, `key_signals`, `red_flags`
+
+Qualification prompts are built dynamically from the user's search context (industry, technology focus, qualifying criteria, disqualifiers) — no hardcoded industry assumptions.
 
 **Model priority chain:**
 1. **Kimi K2.5** (vision + text) — cheapest option, supports screenshots
@@ -369,14 +509,13 @@ This is where the magic happens. The LLM:
 3. **GPT-4o-mini** (text-only fallback)
 4. **Keyword matching** (zero-cost fallback if all APIs fail)
 
-Includes a quick pre-filter that rejects obvious non-hardware companies (SaaS, agencies, consultancies) without burning any LLM tokens.
+Includes a quick pre-filter that rejects obvious non-fit companies (SaaS-only, agencies, consultancies) without burning any LLM tokens.
 
 ### `deep_research.py` — Sales Intelligence
 
 For hot leads (score ≥ 8), crawls up to 5 pages on their site and generates:
-- Products they manufacture
-- Motor types they use (BLDC, stepper, servo, etc.)
-- Magnet requirements (NdFeB, SmCo, Halbach)
+- Products they manufacture or services they provide
+- Technology stack and capabilities
 - Company size and production volume estimates
 - Decision-maker titles to target
 - A suggested pitch angle and talking points
@@ -464,14 +603,14 @@ All configuration is in `backend/config.py`. Key settings:
 
 ### Customizing the ICP (Ideal Customer Profile)
 
-To target a different industry, edit these in `backend/config.py`:
+Hunt's qualification logic is **fully dynamic** — driven by the user's search context from the chat interface. There are no hardcoded industry prompts.
 
-- **`POSITIVE_KEYWORDS`** — Terms that signal a good-fit company (e.g., "robotics", "BLDC", "actuator")
-- **`NEGATIVE_KEYWORDS`** — Terms that signal a bad fit (e.g., "SaaS", "marketing agency", "law firm")
-- **`SYSTEM_PROMPT_QUALIFIER`** — The system prompt telling the LLM exactly what makes a good customer
-- **`INDUSTRY_CATEGORIES`** — How to classify leads by industry vertical
+When a user describes their ideal customer in chat, the AI extracts structured parameters (industry, technology focus, qualifying criteria, disqualifiers) and builds LLM prompts on-the-fly for each search.
 
-For Exa discovery queries, edit `LEAD_QUERIES` in `backend/test_exa.py`.
+For the CLI pipeline, you can still tweak `backend/config.py`:
+
+- **`NEGATIVE_KEYWORDS`** — Universal B2B negatives (SaaS, agencies, etc.) used for quick pre-filtering
+- **Score thresholds** — `SCORE_HOT_LEAD` (default: 8), `SCORE_REVIEW` (default: 4)
 
 ---
 
@@ -510,10 +649,16 @@ python main.py --clear-checkpoint
 
 ### Chat interface not connecting to backend
 Make sure both servers are running:
-- Backend: `cd backend && source venv/bin/activate && python -m uvicorn chat_server:app --reload --port 8000`
+- Backend: `cd backend && source venv/bin/activate && python3 -m uvicorn chat_server:app --reload --port 8000`
 - Frontend: `cd frontend && npm run dev`
 
-Check `http://localhost:8000/api/health` — it should return `{"status": "ok", "llm_available": true, ...}`. If `llm_available` is false, your API keys aren't configured. The frontend falls back to mock responses when the backend is down.
+Check `http://localhost:8000/api/health` — it should return `{"status": "ok", "llm_available": true, ...}`.
+
+### Dashboard shows no data
+Make sure you've run at least one search from the chat interface (`/chat`). The pipeline saves results to the database automatically. Check that `DATABASE_URL` in `backend/.env` is set correctly.
+
+### Map page is blank
+The map requires a Mapbox GL token. Set `NEXT_PUBLIC_MAPBOX_TOKEN` in `frontend/.env.local` to enable the dark-v11 map style. Leads appear on the map automatically — the LLM extracts company headquarters from website content and a built-in geocoder converts locations to coordinates. If no HQ is found, the system falls back to domain TLD country detection.
 
 ### Docker build fails
 ```bash
@@ -566,26 +711,50 @@ The Exa discovery step (`test_exa.py`) is optional. You can skip it entirely and
 - [x] Web-based pipeline — full crawl + qualify with live streaming results
 - [x] Dual-LLM security — prompt injection defense via isolated query generation
 - [x] Docker — containerized deployment with `docker compose up`
-- [ ] Generalize ICP config — per-campaign keywords/prompts instead of hardcoded
+- [x] Industry-agnostic — dynamic ICP from chat, no hardcoded keywords/prompts
+- [x] Multi-tenant auth — Supabase user accounts, JWT-protected endpoints
+- [x] Full dashboard — stats, hunts, pipeline table, lead detail drawer
+- [x] Interactive map — Mapbox GL with glowing dots, fly-to, popups, **live pipeline updates**
+- [x] Pipeline CRM — lead status management (new → contacted → won/lost)
+- [x] Chat persistence — full conversation saved to DB, resume any hunt from the dashboard
+- [x] Live map geocoding — LLM extracts HQ location, built-in geocoder plots leads automatically
 - [ ] Email drafting module — auto-generate cold emails from deep research
 - [ ] CRM integrations — push hot leads to HubSpot, Salesforce, etc.
-- [ ] Multi-tenant auth — user accounts and campaign history
 - [ ] Deep research in chat — trigger multi-page analysis from the web UI
+- [ ] Team workspaces — shared searches and lead assignments
 
 ---
 
 ## Contributing
 
+### Getting Started
+
 1. Fork the repo
 2. Create a feature branch (`git checkout -b feature/my-feature`)
-3. Make your changes
-4. Test with `cd backend && python main.py --test --clear-checkpoint`
-5. Submit a PR
+3. Set up local dev (see [Quick Start](#option-a-local-development-recommended-for-contributors))
+4. Make your changes
+5. Test:
+   - Backend: `cd backend && python -m pytest tests/`
+   - Frontend: `cd frontend && npm run build` (type checks)
+   - Manual: run both servers and exercise the changed feature
+6. Submit a PR
 
-Please keep the modular architecture — each module should do one thing and be independently testable.
+### Architecture Notes
+
+- **Backend** — Python 3.9+, FastAPI, SQLAlchemy async, asyncpg. All routes in `chat_server.py`. Database models in `db/models.py`. Auth via Supabase JWT (JWKS verification in `auth/__init__.py`).
+- **Frontend** — Next.js 16, React 19, TypeScript 5, Tailwind CSS 4. Design tokens defined in `globals.css` (`--color-*`, `--font-*`). Dashboard pages under `src/app/dashboard/`. Auth via `@supabase/ssr`.
+- **Qualification is dynamic** — The ICP is extracted from the user’s chat conversation and passed as structured context to the LLM. No hardcoded industry prompts. If you’re adding features, don’t assume a specific industry.
+- **Dual-LLM security** — Raw user input never reaches the query generation LLM. Keep this separation.
+- Keep the modular architecture — each module should do one thing and be independently testable.
+
+### Code Style
+
+- Python: follow existing patterns, type hints encouraged
+- TypeScript: `font-mono` for UI labels, `font-sans` for body text, `text-[10px] uppercase tracking-[0.15em]` for micro-labels
+- Colours: use theme tokens (`text-primary`, `secondary`, `hot`, `review`, `surface-2`, etc.) from `globals.css`
 
 ---
 
 ## License
 
-Private — Mainrich International
+Private — Mainrich International / Hunt

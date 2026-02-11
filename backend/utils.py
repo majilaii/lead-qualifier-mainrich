@@ -12,6 +12,8 @@ Helpers used across the pipeline:
 
 import json
 import csv
+import fcntl
+import logging
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
@@ -26,6 +28,8 @@ from config import (
     SCORE_REVIEW,
     COST_PER_1K_TOKENS
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CheckpointManager:
@@ -43,9 +47,9 @@ class CheckpointManager:
                 with open(self.checkpoint_file, 'r') as f:
                     data = json.load(f)
                     self.processed_urls = set(data.get("processed_urls", []))
-                    print(f"Loaded checkpoint: {len(self.processed_urls)} already processed")
+                    logger.info("Loaded checkpoint: %d already processed", len(self.processed_urls))
             except Exception as e:
-                print(f"Warning: Could not load checkpoint: {e}")
+                logger.warning("Could not load checkpoint: %s", e)
     
     def save_checkpoint(self):
         """Save current progress."""
@@ -56,7 +60,7 @@ class CheckpointManager:
                     "last_updated": datetime.now().isoformat()
                 }, f)
         except Exception as e:
-            print(f"Warning: Could not save checkpoint: {e}")
+            logger.warning("Could not save checkpoint: %s", e)
     
     def mark_processed(self, url: str):
         """Mark a URL as processed."""
@@ -89,7 +93,7 @@ class OutputWriter:
             "industry_category", "reasoning", "key_signals",
             "red_flags", "email", "mobile_number",
             # Deep research fields
-            "products_found", "motor_types_used", "magnet_requirements",
+            "products_found", "technologies_used", "relevant_capabilities",
             "industries_served", "applications", "decision_maker_titles",
             "suggested_pitch_angle", "talking_points", "potential_volume",
             # Metadata
@@ -103,7 +107,7 @@ class OutputWriter:
         self.files_initialized = True
     
     def write_lead(self, lead: ProcessedLead):
-        """Write a processed lead to the appropriate file."""
+        """Write a processed lead to the appropriate file (with file locking)."""
         # Determine file based on tier
         if lead.qualification_tier == QualificationTier.HOT:
             file_path = QUALIFIED_FILE
@@ -112,10 +116,16 @@ class OutputWriter:
         else:
             file_path = REJECTED_FILE
         
-        # Append to file
+        row_data = lead.to_csv_dict()
+
+        # Append with an exclusive lock so concurrent workers don't interleave rows
         with open(file_path, 'a', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=lead.to_csv_dict().keys())
-            writer.writerow(lead.to_csv_dict())
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                writer = csv.DictWriter(f, fieldnames=row_data.keys())
+                writer.writerow(row_data)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
 def determine_tier(score: int) -> QualificationTier:
@@ -164,7 +174,7 @@ def dedupe_by_domain(leads: list) -> list:
     
     duplicates_removed = len(leads) - len(unique_leads)
     if duplicates_removed > 0:
-        print(f"Removed {duplicates_removed} duplicate domains")
+        logger.info("Removed %d duplicate domains", duplicates_removed)
     
     return unique_leads
 
@@ -179,13 +189,13 @@ def print_lead_summary(lead: ProcessedLead):
     
     emoji = tier_emoji.get(lead.qualification_tier, "•")
     
-    print(f"\n{emoji} {lead.company_name}")
-    print(f"   Score: {lead.confidence_score}/10 | {lead.qualification_tier.value.upper()}")
+    logger.info("%s %s", emoji, lead.company_name)
+    logger.info("   Score: %d/10 | %s", lead.confidence_score, lead.qualification_tier.value.upper())
     if lead.hardware_type:
-        print(f"   Hardware: {lead.hardware_type}")
+        logger.debug("   Hardware: %s", lead.hardware_type)
     if lead.industry_category:
-        print(f"   Industry: {lead.industry_category}")
-    print(f"   Reason: {lead.reasoning[:100]}...")
+        logger.debug("   Industry: %s", lead.industry_category)
+    logger.info("   Reason: %s...", lead.reasoning[:100])
 
 
 class CostTracker:

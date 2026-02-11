@@ -25,24 +25,24 @@ export default function HowItWorks() {
   const steps = [
     {
       num: "01",
-      title: "Feed It Leads",
+      title: "Describe Your Ideal Customer",
       description:
-        "Drop a CSV from LinkedIn Sales Navigator, or let Exa AI discover companies matching your ideal customer profile automatically.",
-      code: "python test_exa.py --export",
+        "Upload a CSV of prospects or simply describe your ideal customer in plain English. Our AI instantly understands your target market.",
+      detail: "CSV upload · Natural language · ICP builder",
     },
     {
       num: "02",
-      title: "Watch It Hunt",
+      title: "AI Finds & Qualifies",
       description:
-        "The pipeline crawls websites, reads them with AI vision, scores each company 1-10, and sorts results into Hot, Review, and Rejected buckets.",
-      code: "python main.py --input leads.csv --deep-research",
+        "Our engine scans the web, analyzes company websites with AI vision, scores each prospect 1-10, and sorts them into Hot, Review, and Rejected.",
+      detail: "Web scanning · AI scoring · Auto-categorization",
     },
     {
       num: "03",
       title: "Close the Deal",
       description:
-        "Get a ready-to-use sales brief for every hot lead: what they build, who to call, and exactly what to say. Export to Excel or Google Sheets.",
-      code: "python export.py excel",
+        "Get a ready-to-use sales brief for every hot lead: what they build, who to contact, and exactly what to say. Export or sync to your CRM.",
+      detail: "Sales briefs · Excel export · CRM sync",
     },
   ];
 
@@ -97,10 +97,16 @@ export default function HowItWorks() {
                 {step.description}
               </p>
 
-              {/* Code */}
-              <div className="bg-void border border-border-dim rounded-md px-3 py-2 font-mono text-[11px]">
-                <span className="text-text-dim">$ </span>
-                <span className="text-secondary/70">{step.code}</span>
+              {/* Detail */}
+              <div className="flex flex-wrap gap-1.5">
+                {step.detail.split(" · ").map((chip) => (
+                  <span
+                    key={chip}
+                    className="inline-block font-mono text-[9px] tracking-wider uppercase px-2 py-0.5 rounded border border-border-dim text-text-dim"
+                  >
+                    {chip}
+                  </span>
+                ))}
               </div>
             </div>
           ))}

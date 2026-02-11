@@ -4,15 +4,10 @@ Configuration & Constants for Lead Qualifier
 Everything configurable lives here:
   - API keys and model selection
   - Scoring thresholds (what counts as hot/review/rejected)
-  - Positive & negative keywords for your ICP (Ideal Customer Profile)
-  - LLM system prompts that drive qualification logic
   - Cost tracking rates
 
-To adapt this for a different industry, edit:
-  - POSITIVE_KEYWORDS / NEGATIVE_KEYWORDS
-  - SYSTEM_PROMPT_QUALIFIER
-  - INDUSTRY_CATEGORIES
-  - LEAD_QUERIES in test_exa.py
+The qualification logic is now fully dynamic — driven by each user's
+search context from the chat interface. No hardcoded industry prompts.
 """
 
 from pathlib import Path
@@ -52,8 +47,6 @@ KIMI_API_KEY = _get_valid_key("KIMI_API_KEY")
 ANTHROPIC_API_KEY = _get_valid_key("ANTHROPIC_API_KEY")
 
 # Enrichment (optional - skip for manual workflow)
-WATERFULL_API_KEY = os.getenv("WATERFULL_API_KEY", "")
-APOLLO_API_KEY = os.getenv("APOLLO_API_KEY", "")
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 
 # ===========================================
@@ -83,124 +76,16 @@ SCORE_REVIEW = 4        # Score 4-7 → Manual review needed
 # Score < 4 → Rejected
 
 # ===========================================
-# Industry Keywords for Mainrich Magnet Business
+# Minimal Universal B2B Negative Keywords
+# (Used only in legacy CLI fallback path)
 # ===========================================
-
-# POSITIVE SIGNALS - Companies that need magnets/motors
-POSITIVE_KEYWORDS = [
-    # Magnet/Motor Technical Terms
-    "halbach array", "halbach", "permanent magnet", "rare earth magnet",
-    "neodymium", "NdFeB", "samarium cobalt", "SmCo", "ferrite magnet",
-    "brushless DC", "BLDC", "PMSM", "servo motor", "stepper motor",
-    "linear motor", "voice coil", "torque motor", "direct drive",
-    "frameless motor", "slotless motor", "coreless motor",
-    "torque density", "cogging torque", "back-EMF", "magnetic circuit",
-    
-    # Hardware Categories (they need motors/magnets)
-    "robotics", "robot", "humanoid", "exoskeleton", "prosthetics",
-    "drone", "UAV", "quadcopter", "eVTOL", "propulsion",
-    "surgical robot", "medical device", "MRI", "imaging",
-    "haptic", "haptics", "force feedback", "gimbal", "stabilizer",
-    "reaction wheel", "momentum wheel", "satellite", "spacecraft",
-    "electric vehicle", "EV", "e-bike", "electric motor",
-    "actuator", "linear actuator", "rotary actuator",
-    "CNC", "spindle", "motion control", "servo drive",
-    "automation", "industrial automation", "factory automation",
-    "pick and place", "assembly robot", "cobot", "collaborative robot",
-    
-    # Motor Manufacturers (potential partners like Johnson Electric)
-    "motor manufacturer", "motor supplier", "motor design",
-    "Johnson Electric", "Maxon", "Faulhaber", "Allied Motion",
-    "Portescap", "Moog", "Kollmorgen", "Parker", "Nidec",
-    "motor winding", "stator", "rotor", "armature",
-]
-
-# NEGATIVE SIGNALS - Companies that won't need magnets
 NEGATIVE_KEYWORDS = [
-    # Pure Software
-    "SaaS", "software as a service", "cloud platform", "web app",
-    "mobile app", "iOS app", "Android app", "software development",
-    "digital transformation", "IT consulting", "tech consulting",
-    
-    # Marketing/Services
-    "SEO", "digital marketing", "marketing agency", "PR agency",
-    "content marketing", "social media marketing", "advertising agency",
-    "web design agency", "branding agency",
-    
-    # Distributors (not manufacturers)
-    "distributor", "wholesale", "reseller", "dropship",
-    "trading company", "import export", "sourcing agent",
-    
-    # Finance/Consulting
-    "investment", "venture capital", "private equity", "hedge fund",
-    "management consulting", "strategy consulting", "advisory",
-    "accounting", "legal services", "law firm",
-    
-    # Unrelated Industries
-    "real estate", "property management", "construction contractor",
-    "restaurant", "food service", "hospitality", "hotel",
-    "retail store", "fashion", "apparel", "clothing brand",
+    "restaurant", "law firm", "hair salon", "real estate",
+    "property management", "hotel", "hospitality", "food service",
 ]
 
-# ===========================================
-# Industry Classification
-# ===========================================
-INDUSTRY_CATEGORIES = {
-    "robotics": ["robot", "humanoid", "cobot", "automation", "exoskeleton"],
-    "aerospace": ["drone", "UAV", "satellite", "spacecraft", "eVTOL", "propulsion"],
-    "medical": ["surgical", "medical device", "prosthetic", "MRI", "imaging"],
-    "automotive": ["EV", "electric vehicle", "e-bike", "motor vehicle"],
-    "industrial": ["CNC", "spindle", "factory", "manufacturing", "motion control"],
-    "motor_manufacturer": ["motor manufacturer", "motor design", "motor supplier"],
-    "consumer_electronics": ["gimbal", "haptic", "consumer", "wearable"],
-}
-
-# ===========================================
-# LLM Prompts
-# ===========================================
-
-SYSTEM_PROMPT_QUALIFIER = """You are a specialized B2B lead qualification assistant for Mainrich International, a premium supplier of permanent magnets (Halbach arrays, NdFeB, SmCo) and custom motor components.
-
-YOUR MISSION: Identify companies that need high-performance magnets or motors.
-
-IDEAL CUSTOMERS (High Score 8-10):
-- Companies BUILDING robots, drones, medical devices, EVs, or industrial equipment
-- Motor manufacturers who need magnet supply (potential partners)
-- R&D teams developing new motor/actuator designs
-- Hardware startups in robotics, aerospace, or medical
-
-POTENTIAL CUSTOMERS (Medium Score 4-7):
-- Companies that might use motors but unclear from website
-- Large manufacturers with diverse product lines
-- Companies mentioning automation but unclear if they build or buy
-
-REJECT (Low Score 1-3):
-- Pure software companies (SaaS, apps, cloud platforms)
-- Marketing/consulting agencies
-- Distributors or trading companies (not manufacturers)
-- Finance, real estate, hospitality businesses
-
-IMPORTANT: Motor manufacturers (Maxon, Faulhaber, etc.) are PARTNERS not competitors - score them HIGH."""
-
-USER_PROMPT_TEMPLATE = """Analyze this company website to determine if they need permanent magnets or custom motors.
-
-COMPANY: {company_name}
-WEBSITE: {website_url}
-
-WEBSITE CONTENT (Markdown):
-{markdown_content}
-
-Based on this information, provide your qualification assessment."""
-
-VISION_PROMPT_TEMPLATE = """Look at this screenshot of the company's website landing page.
-
-VISUAL ANALYSIS INSTRUCTIONS:
-1. Does the page show physical hardware, machinery, or robots? (POSITIVE)
-2. Does it show software dashboards, apps, or generic business imagery? (NEGATIVE)
-3. Are there product images of motors, actuators, or mechanical components? (VERY POSITIVE)
-4. Is this clearly a manufacturing/engineering company or a services company?
-
-Consider this visual evidence alongside the text analysis."""
+# Legacy: kept for backward compatibility only. Not used in dynamic path.
+POSITIVE_KEYWORDS: list[str] = []
 
 # ===========================================
 # Cost Tracking (approximate USD)

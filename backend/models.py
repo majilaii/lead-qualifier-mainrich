@@ -62,6 +62,10 @@ class QualificationResult(BaseModel):
         default_factory=list,
         description="Red flags that lowered the score"
     )
+    headquarters_location: Optional[str] = Field(
+        default=None,
+        description="Company headquarters location (city, country) if found on the website"
+    )
 
 
 class CrawlResult(BaseModel):
@@ -136,8 +140,8 @@ class ProcessedLead(BaseModel):
             "mobile_number": self.mobile_number or "",
             # Deep research fields
             "products_found": "; ".join(dr.get("products_found", [])),
-            "motor_types_used": "; ".join(dr.get("motor_types_used", [])),
-            "magnet_requirements": "; ".join(dr.get("magnet_requirements", [])),
+            "technologies_used": "; ".join(dr.get("technologies_used", dr.get("motor_types_used", []))),
+            "relevant_capabilities": "; ".join(dr.get("relevant_capabilities", dr.get("magnet_requirements", []))),
             "industries_served": "; ".join(dr.get("industries_served", [])),
             "applications": "; ".join(dr.get("applications", [])),
             "decision_maker_titles": "; ".join(dr.get("decision_maker_titles", [])),

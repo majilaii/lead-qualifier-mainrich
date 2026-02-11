@@ -1,5 +1,5 @@
 # ============================================================
-# 🧲 Lead Qualifier — Backend Dockerfile
+# ◈ Hunt — Backend Dockerfile
 # Python 3.12 + Playwright (Chromium) for web scraping
 # ============================================================
 

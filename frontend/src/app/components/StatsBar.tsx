@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 
 const STATS = [
-  { value: "7.2B", label: "Data Points Scanned" },
-  { value: "<500ms", label: "Avg. Qualification Time" },
+  { value: "10K+", label: "Leads Qualified" },
+  { value: "<2min", label: "Setup Time" },
   { value: "94%", label: "Accuracy Rate" },
-  { value: "$0.002", label: "Cost Per Lead" },
+  { value: "50", label: "Free Leads / Month" },
 ];
 
 function useInView(ref: React.RefObject<HTMLElement | null>) {

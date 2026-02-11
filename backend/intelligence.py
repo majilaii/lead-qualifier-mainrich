@@ -2,7 +2,8 @@
 Intelligence Module — LLM-based Lead Qualification (Core Value)
 
 This is the brain of the pipeline. Given website content + optional screenshot,
-it uses an LLM to score the company 1-10 on how likely they need your product.
+it uses an LLM to score the company 1-10 on how likely they match the user's
+search criteria (fully dynamic, industry-agnostic).
 
 Model priority:
   1. Kimi K2.5 (vision + text) — cheapest, best value
@@ -17,6 +18,7 @@ Output: QualificationResult with confidence_score, hardware_type,
 import asyncio
 import json
 import base64
+import logging
 import random
 import time
 from typing import Optional
@@ -32,13 +34,12 @@ from config import (
     KIMI_API_BASE,
     TEXT_MODEL,
     VISION_MODEL,
-    SYSTEM_PROMPT_QUALIFIER,
-    USER_PROMPT_TEMPLATE,
-    VISION_PROMPT_TEMPLATE,
     POSITIVE_KEYWORDS,
     NEGATIVE_KEYWORDS,
     COST_PER_1K_TOKENS,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class KimiRateLimiter:
@@ -75,14 +76,46 @@ class KimiDailyLimitError(Exception):
     pass
 
 
-# Track whether Kimi TPD is exhausted for this run (skip future Kimi calls)
-_kimi_tpd_exhausted = False
+class KimiTPDTracker:
+    """Track Kimi daily token limit exhaustion with automatic 24-hour TTL reset.
+
+    Replaces the old module-level ``_kimi_tpd_exhausted`` boolean which:
+      - Was process-wide (one user hitting the limit broke ALL users)
+      - Never auto-reset (required a full process restart)
+
+    Now the flag auto-clears 24 hours after it was set so the next day's
+    quota is picked up without manual intervention.
+    """
+
+    def __init__(self, ttl_seconds: int = 86400):
+        self._exhausted_at: float = 0.0
+        self._ttl = ttl_seconds  # default 24 hours
+
+    @property
+    def is_exhausted(self) -> bool:
+        if self._exhausted_at == 0.0:
+            return False
+        if (time.monotonic() - self._exhausted_at) >= self._ttl:
+            # TTL expired — auto-reset
+            self._exhausted_at = 0.0
+            return False
+        return True
+
+    def mark_exhausted(self) -> None:
+        self._exhausted_at = time.monotonic()
+
+    def reset(self) -> None:
+        self._exhausted_at = 0.0
+
+
+# Shared TPD tracker — auto-resets after 24 hours
+_kimi_tpd_tracker = KimiTPDTracker(ttl_seconds=86400)
 
 
 class LeadQualifier:
     """Qualifies leads using LLM analysis of website content and screenshots."""
     
-    def __init__(self, search_context: dict | None = None):
+    def __init__(self, search_context: Optional[dict] = None):
         # Initialize OpenAI client
         self.openai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
         
@@ -99,16 +132,36 @@ class LeadQualifier:
         # Dynamic search context (from chat interface) — overrides hardcoded prompts
         self.search_context = search_context
         
-        # Build prompts: dynamic if context provided, else hardcoded Mainrich defaults
+        # Build prompts: dynamic if context provided, else generic B2B defaults
         if search_context:
             self._system_prompt = self._build_dynamic_system_prompt(search_context)
             self._user_prompt_template = self._build_dynamic_user_prompt(search_context)
             self._vision_prompt = self._build_dynamic_vision_prompt(search_context)
             self._json_schema = self._build_dynamic_json_schema(search_context)
         else:
-            self._system_prompt = SYSTEM_PROMPT_QUALIFIER
-            self._user_prompt_template = USER_PROMPT_TEMPLATE
-            self._vision_prompt = VISION_PROMPT_TEMPLATE
+            # Generic B2B fallback (no magnet/Mainrich assumptions)
+            self._system_prompt = (
+                "You are a B2B lead qualification assistant. Evaluate whether a company "
+                "is a legitimate business that could be a potential B2B customer or partner.\n\n"
+                "HIGH SCORE (8-10): Company clearly manufactures products or provides B2B services.\n"
+                "MEDIUM SCORE (4-7): Company might be relevant but evidence is unclear.\n"
+                "LOW SCORE (1-3): Pure software/SaaS, consulting, or unrelated services.\n\n"
+                "IMPORTANT: Be objective. Score based ONLY on website content."
+            )
+            self._user_prompt_template = (
+                "Analyze this company website to determine if they are a legitimate B2B company.\n\n"
+                "COMPANY: {company_name}\nWEBSITE: {website_url}\n\n"
+                "WEBSITE CONTENT (Markdown):\n{markdown_content}\n\n"
+                "Based on this information, provide your qualification assessment."
+            )
+            self._vision_prompt = (
+                "Look at this screenshot of the company's website.\n\n"
+                "VISUAL ANALYSIS:\n"
+                "1. Does the page show physical products, hardware, or manufacturing?\n"
+                "2. Is this a real B2B company or a services/consulting firm?\n"
+                "3. What visual evidence supports or contradicts a match?\n\n"
+                "Consider this visual evidence alongside the text analysis."
+            )
             self._json_schema = None  # use legacy _get_json_schema_instruction
         
         # Cost tracking
@@ -192,7 +245,8 @@ Respond with a JSON object in this exact format:
     "industry_category": string or null (their industry sector),
     "reasoning": string (2-3 sentences explaining how well they match the search for: {industry}),
     "key_signals": array of strings (positive signals found that match the search),
-    "red_flags": array of strings (signals that suggest they don't match)
+    "red_flags": array of strings (signals that suggest they don't match),
+    "headquarters_location": string or null (company HQ city/country if mentioned, e.g. "Charlotte, NC, USA", "Munich, Germany")
 }}"""
     
     async def qualify_lead(
@@ -229,9 +283,7 @@ Respond with a JSON object in this exact format:
             return quick_result
         
         # Choose model and client based on availability and vision needs
-        global _kimi_tpd_exhausted
-        
-        kimi_available = self.kimi_client and not _kimi_tpd_exhausted
+        kimi_available = self.kimi_client and not _kimi_tpd_tracker.is_exhausted
         use_kimi_vision = (
             use_vision 
             and kimi_available
@@ -242,34 +294,34 @@ Respond with a JSON object in this exact format:
             # ── Tier 1: Kimi Vision (cheapest + best) ──
             if use_kimi_vision:
                 try:
-                    print(f"  → Using Kimi vision for {company_name}")
+                    logger.info("Using Kimi vision for %s", company_name)
                     return await self._qualify_with_kimi_vision(
                         company_name, website_url, crawl_result
                     )
                 except KimiDailyLimitError:
-                    print(f"  ⚠️ Kimi daily limit hit — falling back to text-only")
+                    logger.warning("Kimi daily limit hit -- falling back to text-only")
                     # Fall through to text
             
             # ── Tier 2: Kimi Text-only (no screenshot tokens) ──
             if kimi_available:
                 try:
-                    print(f"  → Falling back to Kimi text-only for {company_name}")
+                    logger.info("Falling back to Kimi text-only for %s", company_name)
                     return await self._qualify_with_kimi_text(
                         company_name, website_url, crawl_result
                     )
                 except KimiDailyLimitError:
-                    print(f"  ⚠️ Kimi daily limit fully exhausted — switching to OpenAI")
+                    logger.warning("Kimi daily limit fully exhausted -- switching to OpenAI")
                     # Fall through to OpenAI
             
             # ── Tier 3: OpenAI ──
             if self.openai_client:
-                print(f"  → Using OpenAI for {company_name}")
+                logger.info("Using OpenAI for %s", company_name)
                 return await self._qualify_with_openai(
                     company_name, website_url, crawl_result, use_vision
                 )
             
             # ── Tier 4: Keyword-only ──
-            print(f"  → No LLM available, using keyword analysis for {company_name}")
+            logger.info("No LLM available, using keyword analysis for %s", company_name)
             return self._keyword_only_qualification(
                 company_name,
                 crawl_result.markdown_content,
@@ -277,7 +329,7 @@ Respond with a JSON object in this exact format:
             )
             
         except (asyncio.CancelledError, Exception) as e:
-            print(f"  ⚠️ LLM Error for {company_name}: {e}")
+            logger.warning("LLM Error for %s: %s", company_name, e)
             # Fallback to keyword-only analysis on LLM failure
             return self._keyword_only_qualification(
                 company_name, 
@@ -385,22 +437,21 @@ Respond with a JSON object in this exact format:
                 error_msg = str(e).lower()
                 # Daily token limit (TPD) — no point retrying, bail immediately
                 if 'tpd' in error_msg or 'tokens per day' in error_msg:
-                    global _kimi_tpd_exhausted
-                    _kimi_tpd_exhausted = True
-                    print(f"  🛑 Kimi daily token limit (TPD) exhausted!")
+                    _kimi_tpd_tracker.mark_exhausted()
+                    logger.error("Kimi daily token limit (TPD) exhausted -- will auto-reset in 24h")
                     raise KimiDailyLimitError(str(e))
                 # RPM limit — exponential backoff: 3-4s, 6-7s, 12-13s, 24-25s
                 backoff = (3 * (2 ** attempt)) + random.uniform(0, 1)
-                print(f"  ⚠️ Kimi vision rate-limited (attempt {attempt+1}/4), backing off {backoff:.1f}s...")
+                logger.warning("Kimi vision rate-limited (attempt %d/4), backing off %.1fs...", attempt+1, backoff)
                 await asyncio.sleep(backoff)
             except (asyncio.CancelledError, Exception) as e:
                 last_error = e
                 if attempt < 3:
-                    print(f"  ⚠️ Kimi vision attempt {attempt+1} failed: {type(e).__name__}: {str(e)[:80]}, retrying...")
+                    logger.warning("Kimi vision attempt %d failed: %s: %s, retrying...", attempt+1, type(e).__name__, str(e)[:80])
                     await asyncio.sleep(2)
         
         # All RPM retries failed - return low-confidence result
-        print(f"  ❌ Kimi vision failed after 4 attempts: {last_error}")
+        logger.error("Kimi vision failed after 4 attempts: %s", last_error)
         return QualificationResult(
             is_qualified=False,
             confidence_score=3,
@@ -452,22 +503,21 @@ Respond with a JSON object in this exact format:
                 error_msg = str(e).lower()
                 # Daily token limit (TPD) — no point retrying, bail immediately
                 if 'tpd' in error_msg or 'tokens per day' in error_msg:
-                    global _kimi_tpd_exhausted
-                    _kimi_tpd_exhausted = True
-                    print(f"  🛑 Kimi daily token limit (TPD) exhausted!")
+                    _kimi_tpd_tracker.mark_exhausted()
+                    logger.error("Kimi daily token limit (TPD) exhausted -- will auto-reset in 24h")
                     raise KimiDailyLimitError(str(e))
                 # RPM limit — exponential backoff: 3-4s, 6-7s, 12-13s, 24-25s
                 backoff = (3 * (2 ** attempt)) + random.uniform(0, 1)
-                print(f"  ⚠️ Kimi text rate-limited (attempt {attempt+1}/4), backing off {backoff:.1f}s...")
+                logger.warning("Kimi text rate-limited (attempt %d/4), backing off %.1fs...", attempt+1, backoff)
                 await asyncio.sleep(backoff)
             except (asyncio.CancelledError, Exception) as e:
                 last_error = e
                 if attempt < 3:
-                    print(f"  ⚠️ Kimi text attempt {attempt+1} failed: {type(e).__name__}: {str(e)[:80]}, retrying...")
+                    logger.warning("Kimi text attempt %d failed: %s: %s, retrying...", attempt+1, type(e).__name__, str(e)[:80])
                     await asyncio.sleep(2)
         
         # All RPM retries failed
-        print(f"  ❌ Kimi text failed after 4 attempts: {last_error}")
+        logger.error("Kimi text failed after 4 attempts: %s", last_error)
         return QualificationResult(
             is_qualified=False,
             confidence_score=3,
@@ -596,7 +646,8 @@ Respond with a JSON object in this exact format:
     "industry_category": string or null ("robotics", "aerospace", "medical", "automotive", "industrial", "motor_manufacturer", "consumer_electronics"),
     "reasoning": string (2-3 sentences explaining your decision),
     "key_signals": array of strings (positive signals found),
-    "red_flags": array of strings (negative signals found)
+    "red_flags": array of strings (negative signals found),
+    "headquarters_location": string or null (company HQ city/country if mentioned, e.g. "Charlotte, NC, USA", "Munich, Germany")
 }"""
     
     def _parse_llm_response(self, response_text: str) -> QualificationResult:
@@ -609,7 +660,7 @@ Respond with a JSON object in this exact format:
             # Debug: log what we're trying to parse
             preview = response_text[:120].replace('\n', ' ')
             if not response_text.startswith('{'):
-                print(f"  ⚠️ LLM response doesn't start with JSON: \"{preview}...\"")
+                logger.warning("LLM response doesn't start with JSON: \"%s...\"", preview)
             
             # Remove markdown code fences: ```json ... ```
             cleaned = re.sub(r'```(?:json)?\s*', '', response_text).strip()
@@ -701,7 +752,8 @@ Respond with a JSON object in this exact format:
             industry_category=data.get("industry_category") or data.get("industry"),
             reasoning=data.get("reasoning", "No reasoning provided"),
             key_signals=data.get("key_signals", []),
-            red_flags=data.get("red_flags", [])
+            red_flags=data.get("red_flags", []),
+            headquarters_location=data.get("headquarters_location"),
         )
 
     def _keyword_only_qualification(

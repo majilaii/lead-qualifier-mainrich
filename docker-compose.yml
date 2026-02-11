@@ -1,5 +1,5 @@
 # ============================================================
-# 🧲 Lead Qualifier — Docker Compose
+# ◈ Hunt — Docker Compose
 #
 # Usage:
 #   docker compose up              # Start both services
@@ -18,7 +18,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: lead-qualifier-api
+    container_name: hunt-api
     ports:
       - "8000:8000"
     env_file:
@@ -40,7 +40,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: lead-qualifier-web
+    container_name: hunt-web
     ports:
       - "3000:3000"
     environment:
@@ -48,6 +48,11 @@ services:
       - CHAT_BACKEND_URL=http://backend:8000
       # Client-side code (runs in user's browser) → reach backend via host port mapping
       - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      # Supabase — set these or mount an .env.local
+      - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL:-}
+      - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY:-}
+      - NEXT_PUBLIC_MAPBOX_TOKEN=${NEXT_PUBLIC_MAPBOX_TOKEN:-}
     depends_on:
       backend:
         condition: service_healthy

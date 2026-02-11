@@ -1,14 +1,10 @@
-# ===========================
-# Backend (Python)
-# ===========================
-
-# Virtual environments
+# Virtual environments (DON'T COMMIT - 10k+ files)
 venv/
 .venv/
 env/
-
-# Environment secrets (NEVER commit)
 .env
+.env.local
+.env*.local
 
 # Python cache
 __pycache__/
@@ -18,43 +14,10 @@ __pycache__/
 .Python
 
 # Output files (regenerated each run)
-backend/output/*.csv
-backend/output/*.xlsx
-backend/output/.checkpoint.json
-
-# Playwright browsers (downloaded via `playwright install`)
-.playwright/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# ===========================
-# Frontend (Next.js)
-# ===========================
-
-# dependencies
-frontend/node_modules/
-
-# next.js
-frontend/.next/
-frontend/out/
-
-# production
-frontend/build/
-
-# env files
-frontend/.env*
-
-# vercel
-frontend/.vercel
-
-# typescript
-*.tsbuildinfo
-next-env.d.ts
-
-# ===========================
-# General
-# ===========================
+backend/output/
+output/*.csv
+output/.checkpoint.json
+output/*.xlsx
 
 # IDE
 .vscode/
@@ -68,3 +31,11 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Playwright browsers (downloaded separately)
+.playwright/
+
+# Node.js / Next.js
+node_modules/
+.next/
+out/

@@ -2,52 +2,91 @@
 Deep Research Module — Sales Intelligence for Hot Leads
 
 For leads scoring 8+, this module crawls multiple pages on their site
-(/products, /solutions, /technology, /about) and generates a sales brief:
+and generates a sales brief dynamically based on the user's search context:
 
   - Products they manufacture
-  - Motor types they use (BLDC, stepper, servo)
-  - Magnet requirements (NdFeB, SmCo, Halbach)
+  - Technologies they use (relevant to the user's industry)
   - Company size & production volume estimates
   - Decision-maker titles to target
   - Suggested pitch angle & talking points
+
+The module is industry-agnostic: it takes ``search_context`` from the chat
+engine so it works for magnets, software, medical devices, or any vertical.
 
 Usage:
   python deep_research.py "Maxon Group" "https://www.maxongroup.com"
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
+import logging
 import re
 from typing import Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from openai import AsyncOpenAI
 
 from scraper import crawl_company, truncate_to_tokens
 from config import KIMI_API_KEY, KIMI_API_BASE
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class DeepResearchResult:
     """Detailed research output for a hot lead."""
     company_name: str
-    products_found: list[str]
-    motor_types_used: list[str]
-    magnet_requirements: list[str]
-    industries_served: list[str]
-    applications: list[str]
-    technical_specs_mentioned: list[str]
-    company_size_estimate: str
-    potential_volume: str
-    decision_maker_titles: list[str]
-    suggested_pitch_angle: str
-    talking_points: list[str]
-    pages_analyzed: int
-    confidence: str
+    products_found: list[str] = field(default_factory=list)
+    technologies_used: list[str] = field(default_factory=list)
+    relevant_capabilities: list[str] = field(default_factory=list)
+    industries_served: list[str] = field(default_factory=list)
+    applications: list[str] = field(default_factory=list)
+    technical_specs_mentioned: list[str] = field(default_factory=list)
+    company_size_estimate: str = "Unknown"
+    potential_volume: str = "Unknown"
+    decision_maker_titles: list[str] = field(default_factory=list)
+    suggested_pitch_angle: str = ""
+    talking_points: list[str] = field(default_factory=list)
+    pages_analyzed: int = 0
+    confidence: str = "None"
 
 
-ANALYSIS_PROMPT = """You are a technical sales researcher for a magnet supplier (NdFeB, SmCo, Halbach arrays).
-Analyze this company and suggest how to sell magnets to them.
+# ── Legacy alias so existing code referencing old fields still works ──
+# ``motor_types_used`` and ``magnet_requirements`` map to the new generic fields
+DeepResearchResult.motor_types_used = property(lambda self: self.technologies_used)  # type: ignore[attr-defined]
+DeepResearchResult.magnet_requirements = property(lambda self: self.relevant_capabilities)  # type: ignore[attr-defined]
+
+
+def _build_analysis_prompt(search_context: Optional[dict] = None) -> str:
+    """Build an analysis prompt dynamically from the user's search context.
+
+    If *search_context* is ``None`` the prompt falls back to a generic
+    B2B sales-research template (no hardcoded magnet references).
+    """
+    if search_context:
+        industry = search_context.get("industry") or "the target industry"
+        tech = search_context.get("technology_focus") or ""
+        criteria = search_context.get("qualifying_criteria") or ""
+        profile = search_context.get("company_profile") or ""
+
+        role_line = f"You are a B2B sales researcher helping a client in: {industry}."
+        if tech:
+            role_line += f" The client's products/technology focus: {tech}."
+        if criteria:
+            role_line += f" Key qualifying signals: {criteria}."
+        if profile:
+            role_line += f" Target company profile: {profile}."
+    else:
+        role_line = (
+            "You are a B2B sales researcher. "
+            "Analyze this company and suggest how to approach them as a potential customer or partner."
+        )
+
+    return role_line + """
+
+Analyze the company below and produce a sales intelligence brief.
 
 COMPANY: {company_name}
 WEBSITE: {website_url}
@@ -57,40 +96,60 @@ WEBSITE CONTENT:
 
 Return ONLY valid JSON (no markdown, no explanation):
 {{
-    "products_found": ["specific products they make"],
-    "motor_types_used": ["BLDC", "stepper", "servo", "etc"],
-    "magnet_requirements": ["NdFeB", "SmCo", "Halbach", "ferrite"],
-    "industries_served": ["robotics", "medical", "automotive"],
-    "applications": ["surgical robots", "drones", "EVs"],
-    "technical_specs_mentioned": ["torque requirements", "size specs"],
+    "products_found": ["specific products they make or sell"],
+    "technologies_used": ["key technologies, components, or methods they use"],
+    "relevant_capabilities": ["capabilities relevant to your client's offering"],
+    "industries_served": ["industry verticals they operate in"],
+    "applications": ["specific applications or use-cases"],
+    "technical_specs_mentioned": ["notable technical details on their site"],
     "company_size_estimate": "startup/mid-size/enterprise",
     "potential_volume": "prototype/small batch/mass production",
-    "decision_maker_titles": ["VP Engineering", "CTO"],
+    "decision_maker_titles": ["VP Engineering", "CTO", "Head of Procurement"],
     "suggested_pitch_angle": "one sentence sales approach",
     "talking_points": ["point 1", "point 2", "point 3"],
     "confidence": "High/Medium/Low"
 }}"""
 
 
+# Default target page paths to crawl (generic, not magnet-specific)
+_DEFAULT_TARGET_PATHS = [
+    "",              # homepage
+    "/products",
+    "/solutions",
+    "/services",
+    "/technology",
+    "/about",
+]
+
+
 class DeepResearcher:
-    """Performs deep research on high-potential leads."""
-    
-    def __init__(self):
+    """Performs deep research on high-potential leads.
+
+    Args:
+        search_context: Optional dict with keys ``industry``,
+            ``technology_focus``, ``qualifying_criteria``, ``company_profile``.
+            When provided the analysis prompt is built dynamically.
+        target_paths: Optional list of URL path suffixes to crawl (e.g.
+            ``["/products", "/about"]``).  Defaults to a generic set.
+    """
+
+    def __init__(
+        self,
+        search_context: Optional[dict] = None,
+        target_paths: Optional[list[str]] = None,
+    ):
         self.client = AsyncOpenAI(
             api_key=KIMI_API_KEY,
             base_url=KIMI_API_BASE
         ) if KIMI_API_KEY else None
-    
+        self.search_context = search_context
+        self._analysis_prompt = _build_analysis_prompt(search_context)
+        self._target_paths = target_paths or _DEFAULT_TARGET_PATHS
+
     def _get_target_pages(self, base_url: str) -> list[str]:
         """Generate list of important pages to crawl."""
         base = base_url.rstrip('/')
-        return [
-            base,
-            f"{base}/products",
-            f"{base}/solutions",
-            f"{base}/technology",
-            f"{base}/about",
-        ]
+        return [f"{base}{p}" for p in self._target_paths]
     
     async def research_company(
         self, 
@@ -99,15 +158,20 @@ class DeepResearcher:
         max_pages: int = 3
     ) -> DeepResearchResult:
         """Perform deep research on a company."""
-        print(f"\n🔬 Deep Research: {company_name}")
-        print(f"   Crawling up to {max_pages} pages...")
+        logger.info("Deep Research: %s", company_name)
+        
+        if not self.client:
+            logger.error("No Kimi API key configured -- cannot run deep research")
+            return self._empty_result(company_name)
+        
+        logger.debug("Crawling up to %d pages...", max_pages)
         
         # Crawl pages
         pages = self._get_target_pages(website_url)[:max_pages]
         all_content = []
         
         for url in pages:
-            print(f"   📄 {url}")
+            logger.debug("Crawling page: %s", url)
             result = await crawl_company(url, take_screenshot=False)
             if result.success and result.markdown_content:
                 # Keep only important content, truncate aggressively
@@ -116,21 +180,21 @@ class DeepResearcher:
             await asyncio.sleep(0.5)
         
         if not all_content:
-            print("   ❌ Could not crawl any pages")
+            logger.error("Could not crawl any pages")
             return self._empty_result(company_name)
         
         # Combine content - keep it short
         combined = "\n\n".join(all_content)
         combined = truncate_to_tokens(combined, 5000)  # ~5k tokens max
         
-        print(f"   🧠 Analyzing {len(all_content)} pages...")
+        logger.info("Analyzing %d pages...", len(all_content))
         
         try:
             response = await self.client.chat.completions.create(
                 model="moonshot-v1-32k",
                 messages=[{
                     "role": "user", 
-                    "content": ANALYSIS_PROMPT.format(
+                    "content": self._analysis_prompt.format(
                         company_name=company_name,
                         website_url=website_url,
                         content=combined
@@ -143,10 +207,10 @@ class DeepResearcher:
             result_text = response.choices[0].message.content
             
             if not result_text:
-                print("   ⚠️ Empty response")
+                logger.warning("Empty response")
                 return self._empty_result(company_name)
             
-            print(f"   ✅ Got response ({len(result_text)} chars)")
+            logger.info("Got response (%d chars)", len(result_text))
             
             # Parse JSON
             data = self._parse_json(result_text)
@@ -154,8 +218,8 @@ class DeepResearcher:
             return DeepResearchResult(
                 company_name=company_name,
                 products_found=data.get("products_found", []),
-                motor_types_used=data.get("motor_types_used", []),
-                magnet_requirements=data.get("magnet_requirements", []),
+                technologies_used=data.get("technologies_used", data.get("motor_types_used", [])),
+                relevant_capabilities=data.get("relevant_capabilities", data.get("magnet_requirements", [])),
                 industries_served=data.get("industries_served", []),
                 applications=data.get("applications", []),
                 technical_specs_mentioned=data.get("technical_specs_mentioned", []),
@@ -169,7 +233,7 @@ class DeepResearcher:
             )
             
         except Exception as e:
-            print(f"   ❌ Error: {e}")
+            logger.error("Deep research error: %s", e)
             return self._empty_result(company_name)
     
     def _parse_json(self, text: str) -> dict:
@@ -205,56 +269,41 @@ class DeepResearcher:
     
     def _empty_result(self, company_name: str) -> DeepResearchResult:
         """Return empty result."""
-        return DeepResearchResult(
-            company_name=company_name,
-            products_found=[],
-            motor_types_used=[],
-            magnet_requirements=[],
-            industries_served=[],
-            applications=[],
-            technical_specs_mentioned=[],
-            company_size_estimate="Unknown",
-            potential_volume="Unknown",
-            decision_maker_titles=[],
-            suggested_pitch_angle="",
-            talking_points=[],
-            pages_analyzed=0,
-            confidence="None"
-        )
+        return DeepResearchResult(company_name=company_name)
 
 
 def print_report(result: DeepResearchResult):
-    """Print a nice formatted report."""
-    print("\n" + "="*70)
-    print(f"  DEEP RESEARCH REPORT: {result.company_name}")
-    print(f"  Pages: {result.pages_analyzed} | Confidence: {result.confidence}")
-    print("="*70)
+    """Log a formatted deep research report."""
+    logger.info("=" * 70)
+    logger.info("DEEP RESEARCH REPORT: %s", result.company_name)
+    logger.info("Pages: %d | Confidence: %s", result.pages_analyzed, result.confidence)
+    logger.info("=" * 70)
     
     sections = [
-        ("📦 PRODUCTS", result.products_found),
-        ("⚡ MOTOR TYPES", result.motor_types_used),
-        ("🧲 MAGNET NEEDS", result.magnet_requirements),
-        ("🏭 INDUSTRIES", result.industries_served),
-        ("🎯 APPLICATIONS", result.applications),
-        ("📐 TECH SPECS", result.technical_specs_mentioned),
-        ("👔 TARGET TITLES", result.decision_maker_titles),
-        ("💬 TALKING POINTS", result.talking_points),
+        ("PRODUCTS", result.products_found),
+        ("TECHNOLOGIES", result.technologies_used),
+        ("KEY CAPABILITIES", result.relevant_capabilities),
+        ("INDUSTRIES", result.industries_served),
+        ("APPLICATIONS", result.applications),
+        ("TECH SPECS", result.technical_specs_mentioned),
+        ("TARGET TITLES", result.decision_maker_titles),
+        ("TALKING POINTS", result.talking_points),
     ]
     
     for title, items in sections:
         if items:
-            print(f"\n{title}:")
+            logger.info("%s:", title)
             for item in items[:5]:  # Limit to 5 items
-                print(f"   • {item}")
+                logger.info("   - %s", item)
     
-    print(f"\n📊 BUSINESS INTEL:")
-    print(f"   Company Size: {result.company_size_estimate}")
-    print(f"   Volume Potential: {result.potential_volume}")
+    logger.info("BUSINESS INTEL:")
+    logger.info("   Company Size: %s", result.company_size_estimate)
+    logger.info("   Volume Potential: %s", result.potential_volume)
     
     if result.suggested_pitch_angle:
-        print(f"\n💡 PITCH: {result.suggested_pitch_angle}")
+        logger.info("PITCH: %s", result.suggested_pitch_angle)
     
-    print("\n" + "="*70)
+    logger.info("=" * 70)
 
 
 async def main():

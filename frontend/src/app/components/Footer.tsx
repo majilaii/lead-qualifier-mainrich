@@ -10,38 +10,36 @@ export default function Footer() {
                 &#x25C8;
               </span>
               <span className="text-text-primary text-sm font-semibold tracking-[0.15em] uppercase">
-                The Magnet Hunter
+                Hunt
               </span>
             </div>
             <p className="text-text-muted text-xs leading-relaxed max-w-sm font-sans">
               AI-Powered B2B Lead Discovery & Qualification Pipeline. Built for
-              hardware companies. Designed to scale.
+              any B2B seller. Designed to scale.
             </p>
             <div className="mt-4 font-mono text-[10px] tracking-[0.2em] text-text-dim uppercase">
-              A Mainrich International Tool
+              Powered by Hunt AI
             </div>
           </div>
 
           {/* Links */}
           <div>
             <h4 className="text-[10px] uppercase tracking-[0.3em] text-secondary/50 mb-4">
-              Pipeline
+              Product
             </h4>
             <ul className="space-y-2">
               {[
-                "Discovery",
-                "Crawling",
-                "Qualification",
-                "Deep Research",
-                "Enrichment",
-                "Export",
+                { label: "How It Works", href: "#how-it-works" },
+                { label: "Pipeline", href: "#pipeline" },
+                { label: "Features", href: "#features" },
+                { label: "Pricing", href: "#pricing" },
               ].map((item) => (
-                <li key={item}>
+                <li key={item.label}>
                   <a
-                    href="#pipeline"
+                    href={item.href}
                     className="text-text-muted text-xs hover:text-text-primary transition-colors"
                   >
-                    {item}
+                    {item.label}
                   </a>
                 </li>
               ))}
@@ -51,21 +49,25 @@ export default function Footer() {
           {/* More */}
           <div>
             <h4 className="text-[10px] uppercase tracking-[0.3em] text-secondary/50 mb-4">
-              Resources
+              Company
             </h4>
             <ul className="space-y-2">
-              {["Documentation", "API Reference", "GitHub", "Support"].map(
-                (item) => (
-                  <li key={item}>
-                    <a
-                      href="#"
-                      className="text-text-muted text-xs hover:text-text-primary transition-colors"
-                    >
-                      {item}
-                    </a>
-                  </li>
-                )
-              )}
+              {[
+                { label: "Sign Up Free", href: "/signup" },
+                { label: "Log In", href: "/login" },
+                { label: "Contact", href: "#" },
+                { label: "Privacy Policy", href: "#" },
+                { label: "Terms of Service", href: "#" },
+              ].map((item) => (
+                <li key={item.label}>
+                  <a
+                    href={item.href}
+                    className="text-text-muted text-xs hover:text-text-primary transition-colors"
+                  >
+                    {item.label}
+                  </a>
+                </li>
+              ))}
             </ul>
           </div>
         </div>
@@ -73,7 +75,7 @@ export default function Footer() {
         {/* Bottom */}
         <div className="border-t border-border-dim pt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="font-mono text-[10px] tracking-[0.2em] text-text-dim uppercase">
-            &copy; {new Date().getFullYear()} Mainrich International. All rights
+            &copy; {new Date().getFullYear()} Hunt. All rights
             reserved.
           </p>
           <div className="flex items-center gap-1.5">
