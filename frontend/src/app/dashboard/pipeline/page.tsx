@@ -1,129 +1,85 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "../../components/auth/SessionProvider";
-import LeadDrawer from "./LeadDrawer";
+import { useHunt } from "../../components/hunt/HuntContext";
 
-interface Lead {
+interface PipelineRun {
   id: string;
-  search_id: string;
-  company_name: string;
-  domain: string;
-  website_url: string | null;
-  score: number;
-  tier: string;
-  industry_category: string | null;
-  country: string | null;
-  status: string | null;
-  notes: string | null;
-  deal_value: number | null;
-  status_changed_at: string | null;
+  industry: string | null;
+  company_profile: string | null;
+  technology_focus: string | null;
+  qualifying_criteria: string | null;
+  disqualifiers: string | null;
+  total_found: number;
+  hot: number;
+  review: number;
+  rejected: number;
   created_at: string | null;
 }
 
-type TierFilter = "all" | "hot" | "review" | "rejected";
-type SortField = "score" | "company_name" | "created_at";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
-const TIER_BADGE: Record<string, { bg: string; label: string }> = {
-  hot: { bg: "bg-hot/10 text-hot border-hot/20", label: "Hot" },
-  review: {
-    bg: "bg-review/10 text-review border-review/20",
-    label: "Review",
-  },
-  rejected: {
-    bg: "bg-text-dim/10 text-text-dim border-text-dim/20",
-    label: "Rejected",
-  },
-};
-
-const STATUS_DOT: Record<string, string> = {
-  new: "bg-text-muted",
-  contacted: "bg-blue-400",
-  in_progress: "bg-amber-400",
-  won: "bg-green-400",
-  lost: "bg-red-400",
-  archived: "bg-text-dim",
-};
-
 export default function PipelinePage() {
   const { session } = useAuth();
-  const searchParams = useSearchParams();
-  const searchIdFilter = searchParams.get("search_id");
+  const router = useRouter();
+  const { phase, searchCompanies, qualifiedCompanies, pipelineProgress, resetHunt } = useHunt();
 
-  const [leads, setLeads] = useState<Lead[]>([]);
+  const [runs, setRuns] = useState<PipelineRun[]>([]);
   const [loading, setLoading] = useState(true);
-  const [tierFilter, setTierFilter] = useState<TierFilter>("all");
-  const [sortField, setSortField] = useState<SortField>("score");
-  const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
-  const fetchLeads = useCallback(async () => {
+  // Active pipeline state
+  const isLiveRunning = phase === "searching" || phase === "qualifying";
+  const isLiveComplete = phase === "complete" || phase === "search-complete";
+
+  const fetchRuns = useCallback(async () => {
     if (!session?.access_token) return;
     try {
-      const params = new URLSearchParams({
-        sort: sortField,
-        order: sortOrder,
-      });
-      if (tierFilter !== "all") params.set("tier", tierFilter);
-      if (searchIdFilter) params.set("search_id", searchIdFilter);
-
-      const res = await fetch(`${API}/api/leads?${params}`, {
+      const res = await fetch("/api/proxy/searches", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
-      if (res.ok) setLeads(await res.json());
+      if (res.ok) setRuns(await res.json());
     } finally {
       setLoading(false);
     }
-  }, [session, sortField, sortOrder, tierFilter, searchIdFilter]);
+  }, [session]);
 
   useEffect(() => {
-    fetchLeads();
-  }, [fetchLeads]);
+    fetchRuns();
+  }, [fetchRuns]);
 
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortOrder((o) => (o === "desc" ? "asc" : "desc"));
-    } else {
-      setSortField(field);
-      setSortOrder("desc");
+  // Refresh list when a live run completes
+  useEffect(() => {
+    if (phase === "complete") {
+      fetchRuns();
+    }
+  }, [phase, fetchRuns]);
+
+  const handleDelete = async (id: string) => {
+    if (!session?.access_token) return;
+    setDeletingId(id);
+    try {
+      const res = await fetch(`/api/proxy/searches/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        setRuns((prev) => prev.filter((r) => r.id !== id));
+      }
+    } finally {
+      setDeletingId(null);
+      setConfirmDeleteId(null);
     }
   };
 
-  const handleStatusChange = (leadId: string, newStatus: string) => {
-    setLeads((prev) =>
-      prev.map((l) => (l.id === leadId ? { ...l, status: newStatus } : l))
-    );
+  const handleResume = (run: PipelineRun) => {
+    router.push(`/chat?resume=${run.id}`);
   };
 
-  // Client-side text filter
-  const filtered = leads.filter((l) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      l.company_name.toLowerCase().includes(q) ||
-      l.domain.toLowerCase().includes(q) ||
-      (l.country || "").toLowerCase().includes(q) ||
-      (l.industry_category || "").toLowerCase().includes(q)
-    );
-  });
-
-  const tierCounts = {
-    all: leads.length,
-    hot: leads.filter((l) => l.tier === "hot").length,
-    review: leads.filter((l) => l.tier === "review").length,
-    rejected: leads.filter((l) => l.tier === "rejected").length,
-  };
-
-  const SortArrow = ({ field }: { field: SortField }) =>
-    sortField === field ? (
-      <span className="ml-1 text-secondary">
-        {sortOrder === "desc" ? "↓" : "↑"}
-      </span>
-    ) : null;
+  const totalLeads = runs.reduce((s, r) => s + r.hot + r.review + r.rejected, 0);
+  const totalHot = runs.reduce((s, r) => s + r.hot, 0);
 
   if (loading) {
     return (
@@ -134,183 +90,254 @@ export default function PipelinePage() {
   }
 
   return (
-    <div className="p-6 md:p-8 max-w-7xl mx-auto space-y-6">
+    <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="font-mono text-xl font-bold text-text-primary tracking-tight">
-          Pipeline
-        </h1>
-        <p className="font-sans text-sm text-text-muted mt-1">
-          {leads.length} lead{leads.length !== 1 && "s"} across all hunts
-          {searchIdFilter && (
-            <span className="text-secondary ml-2">(filtered by hunt)</span>
-          )}
-        </p>
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        {/* Tier tabs */}
-        <div className="flex gap-1 bg-surface-2 border border-border rounded-lg p-1">
-          {(["all", "hot", "review", "rejected"] as TierFilter[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTierFilter(t)}
-              className={`font-mono text-[10px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                tierFilter === t
-                  ? "bg-secondary/10 text-secondary"
-                  : "text-text-muted hover:text-text-primary"
-              }`}
-            >
-              {t === "all" ? "All" : t === "hot" ? "Hot" : t === "review" ? "Review" : "Rejected"}{" "}
-              {tierCounts[t]}
-            </button>
-          ))}
-        </div>
-
-        {/* Search */}
-        <div className="relative flex-1 max-w-xs">
-          <input
-            type="text"
-            placeholder="Search companies..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors"
-          />
-        </div>
-      </div>
-
-      {/* Table */}
-      {filtered.length === 0 ? (
-        <div className="bg-surface-2 border border-border rounded-xl px-6 py-16 text-center">
-          <p className="font-mono text-xs text-text-dim">
-            No leads found matching your filters
+      <div className="flex items-start sm:items-center justify-between gap-3 flex-col sm:flex-row">
+        <div>
+          <h1 className="font-mono text-xl font-bold text-text-primary tracking-tight">
+            Pipeline
+          </h1>
+          <p className="font-sans text-sm text-text-muted mt-1">
+            {runs.length} run{runs.length !== 1 && "s"} · {totalLeads} leads ({totalHot} hot)
           </p>
         </div>
-      ) : (
-        <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border-dim">
-                  <th
-                    onClick={() => handleSort("company_name")}
-                    className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
-                  >
-                    Company
-                    <SortArrow field="company_name" />
-                  </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3">
-                    Tier
-                  </th>
-                  <th
-                    onClick={() => handleSort("score")}
-                    className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
-                  >
-                    Score
-                    <SortArrow field="score" />
-                  </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden md:table-cell">
-                    Industry
-                  </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
-                    Country
-                  </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
-                    Status
-                  </th>
-                  <th
-                    onClick={() => handleSort("created_at")}
-                    className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors hidden sm:table-cell"
-                  >
-                    Date
-                    <SortArrow field="created_at" />
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border-dim">
-                {filtered.map((lead) => {
-                  const badge = TIER_BADGE[lead.tier] || TIER_BADGE.rejected;
-                  const statusDot =
-                    STATUS_DOT[lead.status || "new"] || STATUS_DOT.new;
-                  return (
-                    <tr
-                      key={lead.id}
-                      onClick={() => setSelectedLeadId(lead.id)}
-                      className="hover:bg-surface-3/50 transition-colors cursor-pointer"
-                    >
-                      <td className="px-5 py-3.5">
-                        <div>
-                          <p className="font-mono text-xs text-text-primary font-medium truncate max-w-[200px]">
-                            {lead.company_name}
-                          </p>
-                          <p className="font-mono text-[10px] text-text-dim truncate max-w-[200px]">
-                            {lead.domain}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono border ${badge.bg}`}
-                        >
-                          {badge.label}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5">
-                        <span className="font-mono text-sm font-bold text-text-primary">
-                          {lead.score}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 hidden md:table-cell">
-                        <span className="font-mono text-[10px] text-text-muted truncate max-w-[140px] block">
-                          {lead.industry_category || "—"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 hidden lg:table-cell">
-                        <span className="font-mono text-[10px] text-text-muted">
-                          {lead.country || "—"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 hidden lg:table-cell">
-                        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-text-muted capitalize">
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${statusDot}`}
-                          />
-                          {(lead.status || "new").replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="px-5 py-3.5 hidden sm:table-cell">
-                        <span className="font-mono text-[10px] text-text-dim">
-                          {lead.created_at
-                            ? new Date(lead.created_at).toLocaleDateString()
-                            : "—"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <button
+          onClick={() => { resetHunt(); router.push("/chat"); }}
+          className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg hover:bg-white/85 transition-colors cursor-pointer"
+        >
+          + New Run
+        </button>
+      </div>
+
+      {/* Live Run Card */}
+      {(isLiveRunning || isLiveComplete) && (
+        <div className="bg-surface-2 border border-secondary/30 rounded-xl p-5 space-y-3">
+          <div className="flex items-center gap-3">
+            {isLiveRunning ? (
+              <div className="w-3 h-3 border-2 border-secondary/40 border-t-secondary rounded-full animate-spin flex-shrink-0" />
+            ) : (
+              <div className="w-3 h-3 rounded-full bg-green-400 flex-shrink-0" />
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="font-mono text-xs text-text-primary font-medium">
+                {phase === "searching" && "Searching the web…"}
+                {phase === "search-complete" && `${searchCompanies.length} companies found — ready to qualify`}
+                {phase === "qualifying" && "Qualifying leads…"}
+                {phase === "complete" && "Run complete"}
+              </p>
+              {pipelineProgress && (
+                <p className="font-mono text-[10px] text-text-dim mt-0.5">
+                  {pipelineProgress.phase === "crawling" ? "Crawling" : "Analyzing"}{" "}
+                  {pipelineProgress.company}
+                </p>
+              )}
+            </div>
+            <Link
+              href="/chat"
+              className="font-mono text-[10px] uppercase tracking-[0.15em] text-secondary hover:text-secondary/80 transition-colors"
+            >
+              View →
+            </Link>
           </div>
+
+          {/* Progress bar for qualifying */}
+          {phase === "qualifying" && searchCompanies.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="h-1.5 bg-surface-3 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-secondary rounded-full transition-all duration-300"
+                  style={{ width: `${(qualifiedCompanies.length / searchCompanies.length) * 100}%` }}
+                />
+              </div>
+              <div className="flex justify-between">
+                <span className="font-mono text-[9px] text-text-dim">
+                  {qualifiedCompanies.length} / {searchCompanies.length} companies
+                </span>
+                <span className="font-mono text-[9px] text-text-dim">
+                  {Math.round((qualifiedCompanies.length / searchCompanies.length) * 100)}%
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Result preview when complete */}
+          {phase === "complete" && qualifiedCompanies.length > 0 && (
+            <div className="flex gap-3 pt-1">
+              <span className="font-mono text-[10px] text-hot">
+                {qualifiedCompanies.filter((c) => c.tier === "hot").length} hot
+              </span>
+              <span className="font-mono text-[10px] text-review">
+                {qualifiedCompanies.filter((c) => c.tier === "review").length} review
+              </span>
+              <span className="font-mono text-[10px] text-text-dim">
+                {qualifiedCompanies.filter((c) => c.tier === "rejected").length} rejected
+              </span>
+            </div>
+          )}
         </div>
       )}
 
-      {/* Lead Drawer */}
-      {selectedLeadId && (
-        <LeadDrawer
-          leadId={selectedLeadId}
-          onClose={() => setSelectedLeadId(null)}
-          onStatusChange={handleStatusChange}
-          onLeadUpdate={(leadId, updates) => {
-            setLeads((prev) =>
-              prev.map((l) =>
-                l.id === leadId
-                  ? { ...l, ...(updates.notes !== undefined && { notes: updates.notes ?? null }), ...(updates.deal_value !== undefined && { deal_value: updates.deal_value ?? null }) }
-                  : l
-              )
+      {/* Runs List */}
+      {runs.length === 0 && !isLiveRunning && !isLiveComplete ? (
+        <div className="bg-surface-2 border border-border rounded-xl px-6 py-16 text-center space-y-4">
+          <div className="w-12 h-12 mx-auto bg-surface-3 rounded-full flex items-center justify-center">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-dim">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+          </div>
+          <p className="font-mono text-xs text-text-dim">
+            No pipeline runs yet
+          </p>
+          <button
+            onClick={() => { resetHunt(); router.push("/chat"); }}
+            className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-secondary/20 transition-colors cursor-pointer"
+          >
+            Start Your First Hunt
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {runs.map((run) => {
+            const total = run.hot + run.review + run.rejected;
+            const hotPct = total > 0 ? (run.hot / total) * 100 : 0;
+            const reviewPct = total > 0 ? (run.review / total) * 100 : 0;
+            const rejectedPct = total > 0 ? (run.rejected / total) * 100 : 0;
+            const isConfirming = confirmDeleteId === run.id;
+            const isDeleting = deletingId === run.id;
+
+            return (
+              <div
+                key={run.id}
+                className="bg-surface-2 border border-border rounded-xl hover:border-border-bright transition-colors group"
+              >
+                {/* Main row */}
+                <div className="p-5 flex items-start gap-4">
+                  {/* Status dot */}
+                  <div className="mt-1 flex-shrink-0">
+                    <div className="w-2.5 h-2.5 rounded-full bg-green-400/80" title="Complete" />
+                  </div>
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0 space-y-2">
+                    <div>
+                      <p className="font-mono text-sm text-text-primary font-medium truncate">
+                        {run.industry || run.company_profile || "Untitled Search"}
+                      </p>
+                      {run.technology_focus && (
+                        <p className="font-mono text-[10px] text-text-dim truncate mt-0.5">
+                          {run.technology_focus}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Tier bar */}
+                    {total > 0 && (
+                      <div className="space-y-1">
+                        <div className="h-1.5 bg-surface-3 rounded-full overflow-hidden flex">
+                          {run.hot > 0 && (
+                            <div
+                              className="h-full bg-hot rounded-l-full"
+                              style={{ width: `${hotPct}%` }}
+                            />
+                          )}
+                          {run.review > 0 && (
+                            <div
+                              className="h-full bg-review"
+                              style={{ width: `${reviewPct}%` }}
+                            />
+                          )}
+                          {run.rejected > 0 && (
+                            <div
+                              className="h-full bg-text-dim/40 rounded-r-full"
+                              style={{ width: `${rejectedPct}%` }}
+                            />
+                          )}
+                        </div>
+                        <div className="flex gap-3">
+                          <span className="font-mono text-[10px] text-hot">
+                            {run.hot} hot
+                          </span>
+                          <span className="font-mono text-[10px] text-review">
+                            {run.review} review
+                          </span>
+                          <span className="font-mono text-[10px] text-text-dim">
+                            {run.rejected} rejected
+                          </span>
+                          <span className="font-mono text-[10px] text-text-dim ml-auto">
+                            {run.total_found} found
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right side: date + actions */}
+                  <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                    {run.created_at && (
+                      <span className="font-mono text-[10px] text-text-dim">
+                        {new Date(run.created_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      {/* View leads */}
+                      <Link
+                        href={`/dashboard/leads?search_id=${run.id}`}
+                        className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Leads →
+                      </Link>
+
+                      {/* Resume */}
+                      <button
+                        onClick={() => handleResume(run)}
+                        className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-border text-text-muted hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer"
+                        title="Resume in chat"
+                      >
+                        Resume
+                      </button>
+
+                      {/* Delete */}
+                      {isConfirming ? (
+                        <span className="flex items-center gap-1">
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => handleDelete(run.id)}
+                            onKeyDown={(e) => { if (e.key === "Enter") handleDelete(run.id); }}
+                            className="font-mono text-[10px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
+                          >
+                            {isDeleting ? "…" : "Confirm"}
+                          </span>
+                          <span
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setConfirmDeleteId(null)}
+                            onKeyDown={(e) => { if (e.key === "Enter") setConfirmDeleteId(null); }}
+                            className="font-mono text-[10px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
+                          >
+                            Cancel
+                          </span>
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDeleteId(run.id)}
+                          className="opacity-0 group-hover:opacity-100 text-text-dim hover:text-red-400 transition-all cursor-pointer p-1"
+                          title="Delete run"
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             );
-          }}
-        />
+          })}
+        </div>
       )}
     </div>
   );

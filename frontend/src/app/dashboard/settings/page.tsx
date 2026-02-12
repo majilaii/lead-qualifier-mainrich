@@ -28,7 +28,7 @@ interface BillingData {
   };
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// All backend calls go through /api/proxy/* (Next.js server proxy)
 
 export default function SettingsPage() {
   const { session, user } = useAuth();
@@ -47,7 +47,7 @@ export default function SettingsPage() {
 
     Promise.all([
       // Health/usage check
-      fetch(`${API}/api/usage`, { headers })
+      fetch("/api/proxy/usage", { headers })
         .then((r) => {
           setApiStatus({ backend: r.ok, checked: true });
           return r.ok ? r.json() : null;

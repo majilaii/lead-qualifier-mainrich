@@ -41,7 +41,7 @@ interface HuntGroup {
   visible: boolean;
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// All backend calls go through /api/proxy/* (Next.js server proxy)
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
 const DOT_COLORS: Record<string, string> = {
@@ -89,7 +89,7 @@ export default function MapPage() {
   const fetchLeads = useCallback(async () => {
     if (!session?.access_token) return;
     try {
-      const res = await fetch(`${API}/api/leads/geo`, {
+      const res = await fetch("/api/proxy/leads/geo", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (res.ok) setDbLeads(await res.json());
@@ -197,7 +197,7 @@ export default function MapPage() {
   const deleteHunt = async (searchId: string) => {
     if (!session?.access_token || searchId === "live") return;
     try {
-      const res = await fetch(`${API}/api/searches/${searchId}`, { method: "DELETE", headers: { Authorization: `Bearer ${session.access_token}` } });
+      const res = await fetch(`/api/proxy/searches/${searchId}`, { method: "DELETE", headers: { Authorization: `Bearer ${session.access_token}` } });
       if (res.ok) { setDbLeads((prev) => prev.filter((l) => l.search_id !== searchId)); setConfirmDelete(null); }
     } catch (e) { console.error("Failed to delete hunt:", e); }
   };
@@ -207,7 +207,7 @@ export default function MapPage() {
     if (!session?.access_token || leadId.startsWith("live-")) return;
     setDeletingLead(leadId);
     try {
-      const res = await fetch(`${API}/api/leads/${leadId}`, { method: "DELETE", headers: { Authorization: `Bearer ${session.access_token}` } });
+      const res = await fetch(`/api/proxy/leads/${leadId}`, { method: "DELETE", headers: { Authorization: `Bearer ${session.access_token}` } });
       if (res.ok) {
         setDbLeads((prev) => prev.filter((l) => l.id !== leadId));
         if (selectedLead?.id === leadId) setSelectedLead(null);

@@ -14,6 +14,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import UsageMeter from "../UsageMeter";
 import { useHunt } from "../hunt/HuntContext";
+import { useAuth } from "../auth/SessionProvider";
 import { useBilling } from "../billing/BillingProvider";
 import OnboardingOverlay, { useFirstVisit } from "../onboarding/OnboardingOverlay";
 import type {
@@ -328,7 +329,17 @@ function MessageBubble({ message }: { message: Message }) {
   );
 }
 
-function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string) => void }) {
+interface SavedTemplate {
+  id: string;
+  name: string;
+  search_context: Record<string, string | null>;
+}
+
+function WelcomeScreen({ onSuggestionClick, templates, onSelectTemplate }: {
+  onSuggestionClick: (text: string) => void;
+  templates?: SavedTemplate[];
+  onSelectTemplate?: (t: SavedTemplate) => void;
+}) {
   return (
     <div className="flex flex-col items-center justify-center h-full px-4 py-12">
       <div className="animate-slide-up flex flex-col items-center">
@@ -337,6 +348,28 @@ function WelcomeScreen({ onSuggestionClick }: { onSuggestionClick: (text: string
         <p className="font-sans text-sm text-text-muted mb-10 text-center max-w-md leading-relaxed">
           Describe your ideal customer. I&apos;ll ask a few follow-up questions to sharpen the search, then find matching companies across the web.
         </p>
+
+        {/* Saved ICP Templates */}
+        {templates && templates.length > 0 && onSelectTemplate && (
+          <div className="w-full max-w-lg mb-6">
+            <p className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2.5">Saved ICP Templates</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {templates.map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => onSelectTemplate(t)}
+                  className="text-left bg-secondary/5 border border-secondary/15 hover:border-secondary/30 hover:bg-secondary/10 rounded-xl px-4 py-3 transition-all duration-200 group cursor-pointer"
+                >
+                  <p className="font-mono text-xs text-secondary font-medium truncate">{t.name}</p>
+                  <p className="font-sans text-[10px] text-text-dim mt-0.5 truncate">
+                    {[t.search_context.industry, t.search_context.technologyFocus || t.search_context.technology_focus].filter(Boolean).join(" · ") || "Custom template"}
+                  </p>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full max-w-lg">
           {SUGGESTIONS.map((s) => (
             <button key={s.text} onClick={() => onSuggestionClick(s.text)} className="text-left bg-surface-2 border border-border hover:border-secondary/30 hover:bg-surface-3 rounded-xl px-4 py-3.5 transition-all duration-200 group cursor-pointer">
@@ -395,7 +428,7 @@ function ChatInput({ onSend, isLoading }: { onSend: (text: string) => void; isLo
    Pipeline Phase Components
    ══════════════════════════════════════════════ */
 
-function SearchActionCard({ onLaunch }: { onLaunch: () => void }) {
+function SearchActionCard({ onLaunch, onSaveTemplate }: { onLaunch: () => void; onSaveTemplate?: () => void }) {
   return (
     <div className="animate-slide-up max-w-3xl mx-auto">
       <div className="bg-surface-2 border border-secondary/20 rounded-2xl p-5 mt-4">
@@ -406,10 +439,18 @@ function SearchActionCard({ onLaunch }: { onLaunch: () => void }) {
         <p className="font-sans text-sm text-text-secondary mb-4">
           I have enough context to find matching companies. Click below to generate search queries and scan the web.
         </p>
-        <button onClick={onLaunch} className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-6 py-3 rounded-xl hover:bg-white/85 transition-colors cursor-pointer">
-          Launch Search
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={onLaunch} className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-6 py-3 rounded-xl hover:bg-white/85 transition-colors cursor-pointer">
+            Launch Search
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
+          </button>
+          {onSaveTemplate && (
+            <button onClick={onSaveTemplate} className="inline-flex items-center gap-1.5 border border-border-dim hover:border-secondary/30 text-text-muted hover:text-secondary font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-3 rounded-xl transition-colors cursor-pointer">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
+              Save as ICP Template
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -1041,6 +1082,113 @@ export default function ChatInterface() {
   const [quotaError, setQuotaError] = useState<{ action: string; used: number; limit: number; plan: string } | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
+  // ── Template state ──
+  const { session } = useAuth();
+  const [savedTemplates, setSavedTemplates] = useState<SavedTemplate[]>([]);
+  const [templatesLoaded, setTemplatesLoaded] = useState(false);
+  const [showSaveTemplateDialog, setShowSaveTemplateDialog] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [templateSaving, setTemplateSaving] = useState(false);
+
+  // Load templates on mount
+  useEffect(() => {
+    if (templatesLoaded || !session?.access_token) return;
+    setTemplatesLoaded(true);
+    fetch("/api/proxy/templates", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((r) => (r.ok ? r.json() : []))
+      .then(setSavedTemplates)
+      .catch(() => {});
+  }, [session, templatesLoaded]);
+
+  const saveTemplate = useCallback(async () => {
+    if (!session?.access_token || !extractedContext || !templateName.trim()) return;
+    setTemplateSaving(true);
+    try {
+      const res = await fetch("/api/proxy/templates", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: templateName.trim(),
+          search_context: extractedContext,
+        }),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setSavedTemplates((prev) => [...prev, saved]);
+        setShowSaveTemplateDialog(false);
+        setTemplateName("");
+      }
+    } finally {
+      setTemplateSaving(false);
+    }
+  }, [session, extractedContext, templateName]);
+
+  const selectTemplate = useCallback((t: SavedTemplate) => {
+    const ctx: ExtractedContext = {
+      industry: t.search_context.industry || null,
+      companyProfile: t.search_context.companyProfile || null,
+      technologyFocus: t.search_context.technologyFocus || t.search_context.technology_focus || null,
+      qualifyingCriteria: t.search_context.qualifyingCriteria || t.search_context.qualifying_criteria || null,
+      disqualifiers: t.search_context.disqualifiers || null,
+      geographicRegion: t.search_context.geographicRegion || t.search_context.geographic_region || null,
+      countryCode: t.search_context.countryCode || t.search_context.country_code || null,
+    };
+    setExtractedContext(ctx);
+    setReadiness({ industry: true, companyProfile: true, technologyFocus: true, qualifyingCriteria: true, isReady: true });
+    setMessages([
+      {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: `Loaded template **${t.name}**:\n- Industry: ${ctx.industry || "—"}\n- Technology: ${ctx.technologyFocus || "—"}\n- Criteria: ${ctx.qualifyingCriteria || "—"}\n\nReady to search — click **Launch Search** below.`,
+        timestamp: Date.now(),
+      },
+    ]);
+  }, [setExtractedContext, setReadiness, setMessages]);
+
+  // ── Resizable split state ──
+  const [splitPercent, setSplitPercent] = useState(40); // chat panel width %
+  const isDraggingRef = useRef(false);
+  const splitContainerRef = useRef<HTMLDivElement>(null);
+
+  // Drag handlers for the resize divider
+  const onDragStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault();
+    isDraggingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const move = (clientX: number) => {
+      if (!isDraggingRef.current || !splitContainerRef.current) return;
+      const rect = splitContainerRef.current.getBoundingClientRect();
+      const pct = ((clientX - rect.left) / rect.width) * 100;
+      // Clamp between 20% and 80%
+      setSplitPercent(Math.min(80, Math.max(20, pct)));
+    };
+
+    const onMouseMove = (ev: MouseEvent) => move(ev.clientX);
+    const onTouchMove = (ev: TouchEvent) => move(ev.touches[0].clientX);
+
+    const stop = () => {
+      isDraggingRef.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", stop);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("touchend", stop);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", stop);
+    window.addEventListener("touchmove", onTouchMove);
+    window.addEventListener("touchend", stop);
+  }, []);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom
@@ -1202,7 +1350,7 @@ export default function ChatInterface() {
   const chatContent = (
     <>
       {messages.length === 0 ? (
-        <WelcomeScreen onSuggestionClick={sendMessage} />
+        <WelcomeScreen onSuggestionClick={sendMessage} templates={savedTemplates} onSelectTemplate={selectTemplate} />
       ) : (
         <div className={`${splitMode ? "" : "max-w-3xl mx-auto"} py-6 px-4 space-y-5`}>
           {/* Chat messages */}
@@ -1224,7 +1372,7 @@ export default function ChatInterface() {
           )}
 
           {/* Search action card */}
-          {showSearchAction && <SearchActionCard onLaunch={launchSearch} />}
+          {showSearchAction && <SearchActionCard onLaunch={launchSearch} onSaveTemplate={() => setShowSaveTemplateDialog(true)} />}
 
           {/* Searching indicator */}
           {phase === "searching" && <SearchingCard />}
@@ -1269,6 +1417,39 @@ export default function ChatInterface() {
       {/* ─── Onboarding Overlay (first visit only) ─── */}
       {onboardingChecked && isFirstVisit && (
         <OnboardingOverlay onComplete={completeOnboarding} />
+      )}
+
+      {/* ─── Save Template Dialog ─── */}
+      {showSaveTemplateDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-void/80 backdrop-blur-sm">
+          <div className="bg-surface-2 border border-border rounded-2xl p-6 w-full max-w-sm mx-4 animate-slide-up">
+            <h3 className="font-mono text-sm font-bold text-text-primary mb-1">Save ICP Template</h3>
+            <p className="font-sans text-xs text-text-muted mb-4">Save this search profile so you can re-use it later.</p>
+            <input
+              value={templateName}
+              onChange={(e) => setTemplateName(e.target.value)}
+              placeholder="e.g. US CNC Manufacturers"
+              className="w-full bg-surface-3 border border-border rounded-lg px-3 py-2.5 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/40 mb-4"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter" && templateName.trim()) saveTemplate(); }}
+            />
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => { setShowSaveTemplateDialog(false); setTemplateName(""); }}
+                className="font-mono text-[10px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border hover:border-border-bright transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveTemplate}
+                disabled={!templateName.trim() || templateSaving}
+                className="font-mono text-[10px] text-void bg-text-primary hover:bg-white/85 font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                {templateSaving ? "Saving…" : "Save Template"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ─── Header ─── */}
@@ -1330,9 +1511,12 @@ export default function ChatInterface() {
       {/* ─── Body: split or full ─── */}
       {splitMode ? (
         /* ═══ Split Layout: Chat (left) + Map (right) ═══ */
-        <div className="flex-1 flex overflow-hidden relative">
-          {/* Chat sidebar — left 40% */}
-          <div className="flex-1 md:w-[40%] flex flex-col min-w-0 animate-slide-left">
+        <div ref={splitContainerRef} className="flex-1 flex overflow-hidden relative">
+          {/* Chat sidebar — left (resizable) */}
+          <div
+            className="flex-shrink-0 flex flex-col min-w-0 animate-slide-left md:block"
+            style={{ width: `${splitPercent}%` }}
+          >
             {/* Scrollable content */}
             <div className="flex-1 overflow-y-auto">
               {chatContent}
@@ -1355,8 +1539,20 @@ export default function ChatInterface() {
             </div>
           </div>
 
-          {/* Map panel — right 60% (desktop), slides in from right */}
-          <div className="hidden md:block w-[60%] border-l border-border-dim animate-slide-in-right">
+          {/* ── Drag handle ── */}
+          <div
+            onMouseDown={onDragStart}
+            onTouchStart={onDragStart}
+            className="hidden md:flex items-center justify-center w-1.5 cursor-col-resize group hover:bg-secondary/10 active:bg-secondary/15 transition-colors flex-shrink-0 relative z-10"
+            title="Drag to resize"
+          >
+            <div className="w-px h-full bg-border-dim group-hover:bg-secondary/40 group-active:bg-secondary/60 transition-colors" />
+          </div>
+
+          {/* Map panel — right (resizable, desktop) */}
+          <div
+            className="hidden md:block flex-1 min-w-0 animate-slide-in-right"
+          >
             <LiveMapPanel />
           </div>
 

@@ -206,6 +206,7 @@ class LeadQualifier:
 
         parts.append("")
         parts.append("IMPORTANT: Be objective. Score based ONLY on what the website content shows, not assumptions.")
+        parts.append("If the website content is empty, just a loading screen, or has very little information, score 4-5 (review). Do NOT reject (score 1-3) just because the site couldn't be read — rejection means you found POSITIVE evidence the company does NOT match.")
         parts.append("If the website is in a foreign language, still analyze the content — look for relevant products, services, and signals.")
 
         return "\n".join(parts)
@@ -250,7 +251,7 @@ Respond with a JSON object in this exact format:
     "reasoning": string (2-3 sentences explaining how well they match the search for: {industry}),
     "key_signals": array of strings (positive signals found that match the search),
     "red_flags": array of strings (signals that suggest they don't match),
-    "headquarters_location": string or null (the company's ACTUAL headquarters city/country — look for 'About Us', 'Contact', or footer address. Ignore the language or origin of the page itself. e.g. "Charlotte, NC, USA", "Munich, Germany")
+    "headquarters_location": string or null (the company's ACTUAL headquarters address — as specific as possible. Look for 'About Us', 'Contact', footer, or imprint/impressum pages for a full street address. Include street number, street name, postal code, city, state/region, and country when available. e.g. "401 N Tryon St, Charlotte, NC 28202, USA", "Luisenstr. 14, 80333 Munich, Germany", "Level 3, 45 Bourke St, Melbourne VIC 3000, Australia". If only a city is found, return city + country e.g. "Munich, Germany")
 }}"""
     
     async def qualify_lead(
@@ -272,13 +273,26 @@ Respond with a JSON object in this exact format:
         Returns:
             QualificationResult with score and reasoning
         """
-        # If crawl failed, return low-confidence rejection
+        # If crawl failed or returned no content, send to REVIEW — not rejected.
+        # "Rejected" means we positively determined the company doesn't match.
+        # Empty content just means we couldn't determine either way.
         if not crawl_result.success or not crawl_result.markdown_content:
             return QualificationResult(
                 is_qualified=False,
-                confidence_score=1,
-                reasoning=f"Could not access website: {crawl_result.error_message}",
-                red_flags=["Website inaccessible"]
+                confidence_score=5,
+                reasoning="Website content could not be loaded — needs manual review. The company may still be a match.",
+                red_flags=["Website content unavailable — manual review needed"]
+            )
+
+        # If the crawl "succeeded" but content is too thin (e.g. JS loading screen),
+        # route to review instead of wasting LLM tokens on garbage input.
+        stripped = crawl_result.markdown_content.strip()
+        if len(stripped) < 100:
+            return QualificationResult(
+                is_qualified=False,
+                confidence_score=5,
+                reasoning="Website returned very little content (likely a JavaScript app or loading screen). Needs manual review.",
+                red_flags=["Minimal website content — manual review needed"]
             )
         
         # Quick keyword pre-check for obvious rejections
@@ -651,7 +665,7 @@ Respond with a JSON object in this exact format:
     "reasoning": string (2-3 sentences explaining your decision),
     "key_signals": array of strings (positive signals found),
     "red_flags": array of strings (negative signals found),
-    "headquarters_location": string or null (the company's ACTUAL headquarters city/country — look for 'About Us', 'Contact', or footer address. Ignore the language or origin of the page itself. e.g. "Charlotte, NC, USA", "Munich, Germany")
+    "headquarters_location": string or null (the company's ACTUAL headquarters address — as specific as possible. Look for 'About Us', 'Contact', footer, or imprint/impressum pages for a full street address. Include street number, street name, postal code, city, state/region, and country when available. e.g. "401 N Tryon St, Charlotte, NC 28202, USA", "Luisenstr. 14, 80333 Munich, Germany", "Level 3, 45 Bourke St, Melbourne VIC 3000, Australia". If only a city is found, return city + country e.g. "Munich, Germany")
 }"""
     
     def _parse_llm_response(self, response_text: str) -> QualificationResult:

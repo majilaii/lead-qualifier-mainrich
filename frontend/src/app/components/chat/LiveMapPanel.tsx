@@ -93,7 +93,7 @@ export default function LiveMapPanel() {
     }
   }, [leads, phase]);
 
-  const dotSize = (score: number) => Math.max(6, Math.min(16, score / 6));
+  const dotSize = (score: number) => Math.max(10, Math.min(18, score * 1.6));
 
   const tierCounts = {
     hot: leads.filter((l) => l.tier === "hot").length,
@@ -148,15 +148,24 @@ export default function LiveMapPanel() {
                 setSelectedLead(lead);
               }}
             >
+              {/* 44px hover zone — dot enlarges when cursor is anywhere nearby */}
               <div
-                className={`rounded-full cursor-pointer transition-transform hover:scale-150 ${lead.isLive ? "animate-ping-once" : ""}`}
+                className="group cursor-pointer flex items-center justify-center"
                 style={{
-                  width: size,
-                  height: size,
-                  backgroundColor: color,
-                  boxShadow: `0 0 ${size}px ${size / 2}px ${glow}`,
+                  width: 44,
+                  height: 44,
                 }}
-              />
+              >
+                <div
+                  className={`rounded-full transition-all duration-150 ease-out group-hover:scale-[2.5] ${lead.isLive ? "animate-ping-once" : ""}`}
+                  style={{
+                    width: size,
+                    height: size,
+                    backgroundColor: color,
+                    boxShadow: `0 0 ${size}px ${size / 2}px ${glow}`,
+                  }}
+                />
+              </div>
             </Marker>
           );
         })}

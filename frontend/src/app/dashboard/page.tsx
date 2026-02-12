@@ -34,8 +34,6 @@ interface SearchSummary {
   created_at: string | null;
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
 export default function DashboardPage() {
   const { session } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -49,13 +47,13 @@ export default function DashboardPage() {
     const headers = { Authorization: `Bearer ${session.access_token}` };
 
     Promise.all([
-      fetch(`${API}/api/dashboard/stats`, { headers }).then((r) =>
+      fetch("/api/proxy/dashboard/stats", { headers }).then((r) =>
         r.ok ? r.json() : null
       ),
-      fetch(`${API}/api/searches`, { headers }).then((r) =>
+      fetch("/api/proxy/searches", { headers }).then((r) =>
         r.ok ? r.json() : []
       ),
-      fetch(`${API}/api/dashboard/funnel`, { headers }).then((r) =>
+      fetch("/api/proxy/dashboard/funnel", { headers }).then((r) =>
         r.ok ? r.json() : null
       ),
     ])
@@ -73,14 +71,14 @@ export default function DashboardPage() {
     if (!session?.access_token) return;
     setDeleting(id);
     try {
-      const res = await fetch(`${API}/api/searches/${id}`, {
+      const res = await fetch(`/api/proxy/searches/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (res.ok) {
         setRecentSearches((prev) => prev.filter((s) => s.id !== id));
         // Refresh stats
-        const statsRes = await fetch(`${API}/api/dashboard/stats`, {
+        const statsRes = await fetch("/api/proxy/dashboard/stats", {
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
         if (statsRes.ok) setStats(await statsRes.json());
@@ -101,6 +99,7 @@ export default function DashboardPage() {
   const statCards = [
     { label: "Total Leads", value: stats?.total_leads ?? 0 },
     { label: "Hot Leads", value: stats?.hot_leads ?? 0 },
+    { label: "This Month", value: stats?.leads_this_month ?? 0 },
     { label: "Searches Run", value: stats?.total_searches ?? 0 },
     {
       label: "Contacts Enriched",
@@ -120,16 +119,25 @@ export default function DashboardPage() {
             Overview of your lead discovery pipeline
           </p>
         </div>
-        <Link
-          href="/chat"
-          className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-white/85 transition-colors"
-        >
-          + New Hunt
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/dashboard/bulk"
+            className="inline-flex items-center gap-2 border border-border text-text-muted hover:text-secondary hover:border-secondary/30 font-mono text-xs uppercase tracking-[0.15em] px-4 py-3 rounded-lg transition-colors"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+            Bulk Import
+          </Link>
+          <Link
+            href="/chat"
+            className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-white/85 transition-colors"
+          >
+            + New Hunt
+          </Link>
+        </div>
       </div>
 
       {/* Stats cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         {statCards.map((card) => (
           <div
             key={card.label}
@@ -251,10 +259,10 @@ export default function DashboardPage() {
       <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-border-dim flex items-center justify-between">
           <h2 className="font-mono text-sm font-semibold text-text-primary uppercase tracking-[0.1em]">
-            Recent Hunts
+            Recent Pipeline Runs
           </h2>
           <Link
-            href="/dashboard/hunts"
+            href="/dashboard/pipeline"
             className="font-mono text-[10px] text-secondary/60 hover:text-secondary uppercase tracking-[0.15em] transition-colors"
           >
             View All →
@@ -281,7 +289,7 @@ export default function DashboardPage() {
                 className="flex items-center justify-between px-5 py-4 hover:bg-surface-3/50 transition-colors group"
               >
                 <Link
-                  href="/dashboard/hunts"
+                  href={`/dashboard/leads?search_id=${s.id}`}
                   className="flex-1 min-w-0"
                 >
                   <p className="font-mono text-xs text-text-primary truncate">

@@ -152,9 +152,8 @@ export function useFirstVisit() {
     }
 
     // Check backend for 0 searches
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
     if (session?.access_token) {
-      fetch(`${API}/api/dashboard/stats`, {
+      fetch("/api/proxy/dashboard/stats", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
         .then((r) => (r.ok ? r.json() : null))

@@ -49,6 +49,10 @@ ANTHROPIC_API_KEY = _get_valid_key("ANTHROPIC_API_KEY")
 # Enrichment (optional - skip for manual workflow)
 HUNTER_API_KEY = os.getenv("HUNTER_API_KEY", "")
 
+# LinkedIn Enrichment (hot leads only)
+PDL_API_KEY = os.getenv("PDL_API_KEY", "")  # People Data Labs
+ROCKETREACH_API_KEY = os.getenv("ROCKETREACH_API_KEY", "")  # RocketReach
+
 # ===========================================
 # Stripe Billing
 # ===========================================

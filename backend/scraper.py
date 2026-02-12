@@ -113,6 +113,141 @@ class CrawlerPool:
         else:
             return await _do_crawl_httpx(url, self._httpx_client)
 
+    async def crawl_contact_pages(self, base_url: str) -> Optional[str]:
+        """
+        Try to find and crawl contact/about/impressum pages to extract address info.
+        
+        Returns a small markdown snippet with address-relevant content from
+        secondary pages, or None if nothing useful was found.
+        
+        This is intentionally lightweight — text-only, no screenshots, small output.
+        We only keep lines that look like they contain address/location data.
+        """
+        if not base_url.startswith(('http://', 'https://')):
+            base_url = f"https://{base_url}"
+
+        # Strip trailing slashes / paths to get the root domain
+        from urllib.parse import urlparse
+        parsed = urlparse(base_url)
+        root = f"{parsed.scheme}://{parsed.netloc}"
+
+        # Common paths where addresses live, ordered by likelihood
+        _CONTACT_PATHS = [
+            "/contact", "/contact-us", "/contactus",
+            "/about", "/about-us", "/aboutus",
+            "/impressum", "/imprint",
+            "/locations", "/our-offices",
+            "/company", "/company/profile",
+            "/legal-notice", "/legal",
+        ]
+
+        snippets: list[str] = []
+
+        for path in _CONTACT_PATHS:
+            if len(snippets) >= 2:
+                break  # Got enough — don't waste time on more pages
+            try:
+                page_url = root + path
+                if _HAS_CRAWL4AI and self._crawler:
+                    result = await _do_crawl(page_url, False, self._crawler, max_retries=1, base_delay=0.5)
+                else:
+                    result = await _do_crawl_httpx(page_url, self._httpx_client, max_retries=1, base_delay=0.5)
+
+                if not result.success or not result.markdown_content:
+                    continue
+
+                # Extract only address-relevant lines (keep it small)
+                relevant = _extract_address_lines(result.markdown_content, path)
+                if relevant:
+                    snippets.append(f"--- Content from {path} page ---\n{relevant}")
+                    logger.debug("Found address content on %s%s (%d chars)", root, path, len(relevant))
+
+            except Exception as e:
+                logger.debug("Contact page crawl failed for %s%s: %s", root, path, e)
+                continue
+
+        if not snippets:
+            return None
+        return "\n\n".join(snippets)
+
+
+def _extract_address_lines(markdown: str, page_path: str) -> Optional[str]:
+    """
+    Extract lines from a contact/about page that likely contain address info.
+    
+    We cast a wide net with keyword matching, then return the surrounding
+    context (±3 lines) so the LLM gets enough signal.
+    Returns None if nothing useful found.
+    """
+    import re as _re
+
+    # Keywords that signal address/location content
+    _ADDRESS_PATTERNS = [
+        # Postal codes (strong signal)
+        r'\b\d{5}(?:[-\s]\d{4})?\b',               # US: 12345 or 12345-6789
+        r'\b[A-Z]{1,2}\d{1,2}\s?\d[A-Z]{2}\b',     # UK: TW8 8DL, SW1A 1AA
+        r'\b\d{4,5}\s+[A-Z]',                       # EU: 80333 Munich, 71254 Ditzingen
+        # Street address words
+        r'\b(?:street|str\.|straße|strasse|road|rd\.|avenue|ave\.|boulevard|blvd|lane|drive|way|place|platz|allee)\b',
+        r'\b(?:suite|floor|level|unit|building|bldg|ste)\s*\.?\s*\d',
+        # Location labels (must have a colon or line with data nearby)
+        r'(?:address|our\s+address|head\s*quarters?|hauptsitz|registered\s+office)\s*[:\-]',
+        # Phone/email patterns (often near addresses)
+        r'(?:tel|phone|fax|telephone|telefon)\s*[:\.]?\s*[\+\(0-9]',
+        r'(?:email|e-mail)\s*[:\.]?\s*[a-zA-Z0-9._%+-]+@',
+    ]
+
+    # Lines to skip: nav links, menu items, generic footer links
+    _SKIP_PATTERNS = [
+        r'^\s*-?\s*\[.*\]\(https?://.*\)\s*$',   # Markdown links: - [text](url)
+        r'^\s*(?:NAVIGATION|MENU|RESOURCES|QUICK LINKS|PRODUCTS|SOLUTIONS|SERVICES)\s*$',
+        r'^\s*©\d{4}',                             # Copyright lines
+        r'^#{1,3}\s+(?:We\s+value|Cookie)',         # Cookie banners
+        r'Read\s*More\s*\]',                        # "Read More" links
+    ]
+
+    lines = markdown.split('\n')
+    matched_indices: set[int] = set()
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Skip very short, very long, or nav-like lines
+        if len(stripped) < 5 or len(stripped) > 400:
+            continue
+        # Skip lines that are clearly navigation/links
+        if any(_re.search(pat, stripped, _re.IGNORECASE) for pat in _SKIP_PATTERNS):
+            continue
+        # Check for address patterns
+        for pattern in _ADDRESS_PATTERNS:
+            if _re.search(pattern, stripped, _re.IGNORECASE):
+                # Add this line and ±3 lines of context
+                for j in range(max(0, i - 3), min(len(lines), i + 4)):
+                    matched_indices.add(j)
+                break
+
+    if not matched_indices:
+        return None
+
+    # Build output from matched line ranges, filtering out junk
+    sorted_indices = sorted(matched_indices)
+    result_lines: list[str] = []
+    for idx in sorted_indices:
+        line = lines[idx].strip()
+        if not line:
+            continue
+        # Skip nav-like lines in the output too
+        if any(_re.search(pat, line, _re.IGNORECASE) for pat in _SKIP_PATTERNS):
+            continue
+        if line:
+            result_lines.append(line)
+
+    result = '\n'.join(result_lines)
+    # Cap at ~2000 chars to avoid bloating the LLM prompt
+    if len(result) > 2000:
+        result = result[:2000] + "\n[truncated]"
+
+    return result if len(result) > 20 else None
+
 
 async def _do_crawl(
     url: str, 

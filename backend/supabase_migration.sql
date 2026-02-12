@@ -8,24 +8,34 @@
 
 -- 1. Profiles (linked to auth.users)
 CREATE TABLE IF NOT EXISTS profiles (
-    id          UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email       TEXT UNIQUE,
-    display_name TEXT,
-    plan_tier   TEXT NOT NULL DEFAULT 'free',
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    id                     UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    email                  TEXT UNIQUE,
+    display_name           TEXT,
+    plan_tier              TEXT NOT NULL DEFAULT 'free',
+    -- Stripe billing
+    stripe_customer_id     TEXT UNIQUE,
+    stripe_subscription_id TEXT,
+    plan                   TEXT NOT NULL DEFAULT 'free',  -- free | pro | enterprise
+    plan_period_start      TIMESTAMPTZ,
+    plan_period_end        TIMESTAMPTZ,
+    created_at             TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at             TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE INDEX IF NOT EXISTS ix_profiles_stripe ON profiles(stripe_customer_id);
 
 -- Auto-create a profile when a new user signs up
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.profiles (id, email, display_name)
+    INSERT INTO public.profiles (id, email, display_name, plan_tier, plan)
     VALUES (
         NEW.id,
         NEW.email,
-        COALESCE(NEW.raw_user_meta_data ->> 'full_name', NEW.raw_user_meta_data ->> 'name', split_part(NEW.email, '@', 1))
-    );
+        COALESCE(NEW.raw_user_meta_data ->> 'full_name', NEW.raw_user_meta_data ->> 'name', split_part(NEW.email, '@', 1)),
+        'free',
+        'free'
+    )
+    ON CONFLICT (id) DO NOTHING;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -49,6 +59,7 @@ CREATE TABLE IF NOT EXISTS searches (
     disqualifiers       TEXT,
     queries_used        JSONB,
     total_found         INTEGER NOT NULL DEFAULT 0,
+    messages            JSONB,               -- chat history [{role, content}]
     created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_searches_user ON searches(user_id);
@@ -97,8 +108,9 @@ CREATE TABLE IF NOT EXISTS usage_tracking (
     id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id          UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
     year_month       TEXT NOT NULL,             -- "2026-02"
-    leads_qualified  INTEGER NOT NULL DEFAULT 0,
+    leads_qualified   INTEGER NOT NULL DEFAULT 0,
     searches_run     INTEGER NOT NULL DEFAULT 0,
+    enrichments_used INTEGER NOT NULL DEFAULT 0,
     updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ix_usage_user_month ON usage_tracking(user_id, year_month);

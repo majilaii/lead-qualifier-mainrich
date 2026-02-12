@@ -19,19 +19,23 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import UsageTracking
+from db.models import UsageTracking, Profile
+
+logger = logging.getLogger(__name__)
 
 # ──────────────────────────────────────────────
 # Plan limits (aligned with SAAS_PLAN.md)
 # ──────────────────────────────────────────────
 
 PLAN_LIMITS: dict[str, dict[str, int | None]] = {
-    "free":       {"searches_run": 3,    "leads_qualified": 75,    "enrichments_used": 10},
-    "pro":        {"searches_run": 20,   "leads_qualified": 2000,  "enrichments_used": 200},
-    "enterprise": {"searches_run": None, "leads_qualified": None,  "enrichments_used": 1000},
+    "free":       {"searches_run": 3,    "leads_qualified": 75,    "enrichments_used": 10,  "linkedin_lookups": 0},
+    "pro":        {"searches_run": 20,   "leads_qualified": 2000,  "enrichments_used": 200, "linkedin_lookups": 50},
+    "enterprise": {"searches_run": None, "leads_qualified": None,  "enrichments_used": 1000, "linkedin_lookups": 500},
 }
 
 # Leads per hunt cap (not stored in usage, enforced at pipeline time)
@@ -55,6 +59,17 @@ async def _get_or_create_row(
 ) -> UsageTracking:
     """Get the usage row for this user+month, creating if absent."""
     ym = _current_month()
+    
+    # Ensure the user has a profile row (FK requirement for usage_tracking)
+    profile = (await db.execute(
+        select(Profile).where(Profile.id == user_id)
+    )).scalar_one_or_none()
+    if profile is None:
+        logger.info("Auto-creating missing profile for user %s (from usage tracking)", user_id)
+        profile = Profile(id=user_id, plan_tier="free", plan="free")
+        db.add(profile)
+        await db.flush()
+    
     stmt = select(UsageTracking).where(
         UsageTracking.user_id == user_id,
         UsageTracking.year_month == ym,
@@ -69,6 +84,7 @@ async def _get_or_create_row(
             leads_qualified=0,
             searches_run=0,
             enrichments_used=0,
+            linkedin_lookups=0,
         )
         db.add(row)
         await db.flush()
@@ -106,6 +122,8 @@ async def get_usage(db: AsyncSession, user_id: str, plan_tier: str = "free") -> 
         "searches_limit": limits["searches_run"],
         "enrichments_used": row.enrichments_used,
         "enrichments_limit": limits["enrichments_used"],
+        "linkedin_lookups": row.linkedin_lookups,
+        "linkedin_limit": limits["linkedin_lookups"],
         "leads_per_hunt": LEADS_PER_HUNT.get(plan_tier, 25),
         "deep_research": plan_tier in DEEP_RESEARCH_PLANS,
     }

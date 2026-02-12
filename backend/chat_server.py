@@ -41,6 +41,8 @@ from auth import require_auth
 from chat_engine import ChatEngine, ExtractedContext
 from logging_config import setup_logging
 from stripe_billing import is_stripe_configured
+from contact_extraction import extract_contacts_from_content
+from linkedin_enrichment import enrich_linkedin, get_linkedin_status
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -93,6 +95,114 @@ class RateLimiter:
 
 
 # ──────────────────────────────────────────────
+# Pipeline Manager — background tasks + reconnectable streams
+# ──────────────────────────────────────────────
+
+class PipelineRun:
+    """State for a single background pipeline run."""
+
+    def __init__(self, search_id: str, total: int):
+        self.search_id = search_id
+        self.total = total
+        self.status: str = "running"  # running | complete | error
+        self.events: list[dict] = []  # all SSE events (for replay)
+        self.processed: int = 0
+        self.summary: Optional[dict] = None
+        self._subscribers: list[asyncio.Queue] = []
+        self._lock = asyncio.Lock()
+        self.created_at = time.time()
+
+    async def emit(self, event: dict):
+        """Record an event and push to all live subscribers."""
+        async with self._lock:
+            self.events.append(event)
+            if event.get("type") == "result" or (event.get("type") == "error" and not event.get("fatal")):
+                self.processed += 1
+            if event.get("type") == "complete":
+                self.status = "complete"
+                self.summary = event.get("summary")
+            if event.get("type") == "error" and event.get("fatal"):
+                self.status = "error"
+            dead: list[asyncio.Queue] = []
+            for q in self._subscribers:
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    dead.append(q)
+            for q in dead:
+                self._subscribers.remove(q)
+
+    async def subscribe(self, after: int = 0):
+        """
+        Yield all events starting from index `after`, then live events.
+        This is the core of reconnectable SSE.
+        """
+        q: asyncio.Queue = asyncio.Queue(maxsize=256)
+        async with self._lock:
+            # Replay past events
+            for ev in self.events[after:]:
+                yield ev
+            # If already done, nothing more to wait for
+            if self.status in ("complete", "error"):
+                return
+            self._subscribers.append(q)
+        try:
+            while True:
+                event = await q.get()
+                yield event
+                if event.get("type") == "complete" or (event.get("type") == "error" and event.get("fatal")):
+                    return
+        finally:
+            async with self._lock:
+                if q in self._subscribers:
+                    self._subscribers.remove(q)
+
+    def snapshot(self) -> dict:
+        """Quick JSON status for polling."""
+        return {
+            "search_id": self.search_id,
+            "status": self.status,
+            "total": self.total,
+            "processed": self.processed,
+            "summary": self.summary,
+        }
+
+
+class PipelineManager:
+    """Manages background pipeline tasks.  Singleton, lives for the process."""
+
+    def __init__(self):
+        self._runs: dict[str, PipelineRun] = {}
+        self._tasks: dict[str, asyncio.Task] = {}
+
+    def get(self, search_id: str) -> Optional[PipelineRun]:
+        return self._runs.get(search_id)
+
+    def register(self, search_id: str, total: int) -> PipelineRun:
+        run = PipelineRun(search_id, total)
+        self._runs[search_id] = run
+        return run
+
+    def set_task(self, search_id: str, task: asyncio.Task):
+        self._tasks[search_id] = task
+        task.add_done_callback(lambda _t: self._tasks.pop(search_id, None))
+
+    def cleanup_old(self, max_age_seconds: int = 3600):
+        """Remove completed runs older than max_age_seconds to prevent memory leak."""
+        now = time.time()
+        stale = [
+            sid for sid, run in self._runs.items()
+            if run.status != "running" and (now - run.created_at) > max_age_seconds
+        ]
+        for sid in stale:
+            del self._runs[sid]
+            self._tasks.pop(sid, None)
+
+
+pipeline_manager = PipelineManager()
+
+
+# ──────────────────────────────────────────────
 # Request/Response Models
 # ──────────────────────────────────────────────
 
@@ -137,7 +247,23 @@ class SearchResponseModel(BaseModel):
 
 # Global instances
 engine: Optional[ChatEngine] = None
-rate_limiter = RateLimiter(max_requests=30, window_seconds=60)
+rate_limiter = RateLimiter(max_requests=120, window_seconds=60)
+
+
+# ── Read-only routes exempt from rate limiting ──
+_RATE_LIMIT_EXEMPT = {
+    "/api/health",
+    "/api/searches",
+    "/api/usage",
+    "/api/dashboard/stats",
+    "/api/dashboard/funnel",
+    "/api/billing/status",
+}
+
+# Prefix-based exemptions (pipeline stream/status are high-frequency)
+_RATE_LIMIT_EXEMPT_PREFIXES = (
+    "/api/pipeline/",  # covers /{id}/stream and /{id}/status
+)
 
 
 @asynccontextmanager
@@ -187,17 +313,19 @@ app.add_middleware(
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    """Apply rate limiting to API routes (skip CORS preflight & health)."""
+    """Apply rate limiting to API routes (skip CORS preflight, health & read-only dashboard GETs)."""
+    path = request.url.path.rstrip("/")
     if (
         request.url.path.startswith("/api/")
         and request.method != "OPTIONS"
-        and request.url.path != "/api/health"
+        and path not in _RATE_LIMIT_EXEMPT
+        and not any(path.startswith(p) for p in _RATE_LIMIT_EXEMPT_PREFIXES)
     ):
         client_ip = request.client.host if request.client else "unknown"
         if not rate_limiter.check(client_ip):
-            raise HTTPException(
+            return JSONResponse(
                 status_code=429,
-                detail="Too many requests. Please wait a moment and try again.",
+                content={"detail": "Too many requests. Please wait a moment and try again."},
             )
     return await call_next(request)
 
@@ -211,6 +339,7 @@ async def health():
     """Health check."""
     from enrichment import get_enrichment_status
     enrich = get_enrichment_status()
+    li_status = get_linkedin_status()
     return {
         "status": "ok",
         "llm_available": engine is not None
@@ -218,6 +347,8 @@ async def health():
         "exa_available": engine is not None and engine.exa_client is not None,
         "enrichment_available": bool(enrich["providers"]),
         "enrichment_providers": enrich["providers"],
+        "linkedin_available": li_status["available"],
+        "linkedin_providers": li_status["providers"],
     }
 
 
@@ -566,6 +697,33 @@ class PipelineRequest(BaseModel):
     messages: Optional[list[dict]] = None  # chat history [{role, content}]
 
 
+class BulkImportRequest(BaseModel):
+    """Bulk domain import — paste domains or upload CSV, skip chat flow."""
+    domains: list[str] = Field(..., max_length=200)
+    search_context: Optional[SearchContext] = None
+    use_vision: bool = True
+
+
+class TemplateCreate(BaseModel):
+    name: str = Field(..., max_length=255)
+    search_context: dict
+
+
+class TemplateUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=255)
+    search_context: Optional[dict] = None
+
+
+class LinkedInEnrichRequest(BaseModel):
+    domain: str = Field(..., max_length=200)
+    lead_id: str = Field(..., max_length=100)
+
+
+class LeadSearchRequest(BaseModel):
+    query: str = Field(..., max_length=500)
+    tier: Optional[str] = None
+
+
 def sse_event(data: dict) -> str:
     """Format a dict as an SSE data line."""
     return f"data: {json.dumps(data)}\n\n"
@@ -574,15 +732,9 @@ def sse_event(data: dict) -> str:
 @app.post("/api/pipeline/run")
 async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
     """
-    Run the full crawl → qualify pipeline on search results.
-    Streams Server-Sent Events (SSE) with live progress for each company.
-
-    Event types:
-      init     — { total: N }
-      progress — { index, total, phase: "crawling"|"qualifying", company: {...} }
-      result   — { index, total, company: { score, tier, reasoning, ... } }
-      error    — { index, company, error }
-      complete — { summary: { hot, review, rejected, failed } }
+    Start the crawl → qualify pipeline as a **background task**.
+    Returns immediately with ``{ search_id }`` — the frontend then
+    connects to ``GET /api/pipeline/{search_id}/stream`` for live SSE.
     """
     # ── Quota check: leads ──
     from usage import check_quota, increment_usage, LEADS_PER_HUNT
@@ -610,18 +762,40 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
     companies = [c.model_dump() for c in companies_list]
     use_vision = request.use_vision
     search_ctx = request.search_context.model_dump() if request.search_context else None
+    pipeline_messages = request.messages
 
-    # ── Smart prioritization: sort by Exa score (descending) so highest-signal
-    # companies get processed first → user sees hot leads early ──
+    # Smart prioritization: sort by Exa score (descending)
     companies.sort(key=lambda c: c.get("score") or 0, reverse=True)
 
-    async def generate():
+    # Save search to DB upfront so we have a search_id
+    search_id = None
+    try:
+        search_id = await _save_search_to_db(
+            user_id=user.id,
+            context=search_ctx or {},
+            queries=[],
+            total_found=len(companies),
+            messages=pipeline_messages,
+        )
+        logger.info("Saved search %s to DB for user %s", search_id, user.id)
+    except Exception as e:
+        logger.error("Failed to save search to DB: %s (type: %s)", e, type(e).__name__, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create search record")
+
+    # Clean up old completed pipeline runs
+    pipeline_manager.cleanup_old()
+
+    # Register the run and spawn background task
+    total = len(companies)
+    run = pipeline_manager.register(search_id, total)
+
+    async def _run_pipeline_bg():
+        """Background task — processes companies and emits events."""
         from scraper import CrawlerPool, crawl_company
         from intelligence import LeadQualifier
         from utils import determine_tier
 
-        total = len(companies)
-        yield sse_event({"type": "init", "total": total})
+        await run.emit({"type": "init", "total": total})
 
         qualifier = LeadQualifier(search_context=search_ctx)
         stats = {"hot": 0, "review": 0, "rejected": 0, "failed": 0}
@@ -632,41 +806,23 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
         def _spread_co_located(
             lat: Optional[float], lng: Optional[float]
         ) -> tuple[Optional[float], Optional[float]]:
-            """Apply a small deterministic spiral offset when multiple leads
-            share the exact same geocoded point (e.g. city centroid).
-            ~0.0012° per step ≈ 130 m — enough to separate pins at
-            city zoom without moving them to a wrong neighbourhood."""
             if lat is None or lng is None:
                 return lat, lng
             key = (round(lat, 6), round(lng, 6))
             n = _geo_hit_count.get(key, 0)
             _geo_hit_count[key] = n + 1
             if n == 0:
-                return lat, lng  # first hit keeps exact position
-            # Archimedean spiral: r grows with sqrt(n) so density stays even
-            angle = n * 2.399_963  # golden angle in radians
+                return lat, lng
+            angle = n * 2.399_963
             r = 0.0012 * math.sqrt(n)
             return lat + r * math.cos(angle), lng + r * math.sin(angle)
-
-        # Save search to DB
-        search_id = None
-        try:
-            search_id = await _save_search_to_db(
-                user_id=user.id,
-                context=search_ctx or {},
-                queries=[],
-                total_found=total,
-                messages=request.messages,
-            )
-        except Exception as e:
-            logger.warning("Failed to save search to DB: %s", e)
 
         try:
             async with CrawlerPool() as pool:
                 for i, company in enumerate(companies):
                     try:
                         # Phase: Crawling
-                        yield sse_event({
+                        await run.emit({
                             "type": "progress",
                             "index": i,
                             "total": total,
@@ -683,8 +839,25 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                             crawler_pool=pool,
                         )
 
+                        if crawl_result.success and crawl_result.markdown_content:
+                            try:
+                                contact_snippet = await pool.crawl_contact_pages(company["url"])
+                                if contact_snippet:
+                                    crawl_result = crawl_result.model_copy(update={
+                                        "markdown_content": (
+                                            crawl_result.markdown_content
+                                            + "\n\n=== ADDRESS & CONTACT INFO FROM OTHER PAGES ===\n"
+                                            + contact_snippet
+                                        )
+                                    })
+                                    logger.debug(
+                                        "Appended contact page content for %s (+%d chars)",
+                                        company.get("domain"), len(contact_snippet),
+                                    )
+                            except Exception as e:
+                                logger.debug("Contact page sniff failed for %s: %s", company.get("domain"), e)
+
                         if not crawl_result.success:
-                            # Still try to geocode from domain TLD
                             fail_country = _guess_country_from_domain(company.get("domain", ""))
                             fail_lat = None
                             fail_lng = None
@@ -700,7 +873,7 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                                 "url": company["url"],
                                 "score": 5,
                                 "tier": "review",
-                                "reasoning": f"Website could not be crawled: {crawl_result.error_message or 'Unknown'}",
+                                "reasoning": f"Website could not be crawled — {_sanitize_crawl_error(crawl_result.error_message)}. This company may still be relevant; visit the site manually to verify.",
                                 "hardware_type": None,
                                 "key_signals": [],
                                 "red_flags": ["Crawl failed — needs manual review"],
@@ -709,16 +882,21 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                                 "longitude": fail_lng,
                             }
                             stats["review"] += 1
-                            yield sse_event({
+                            await run.emit({
                                 "type": "result",
                                 "index": i,
                                 "total": total,
                                 "company": result_data,
                             })
+                            if search_id:
+                                try:
+                                    await _save_lead_to_db(search_id, result_data, user_id=user.id)
+                                except Exception as e:
+                                    logger.error("Failed to save crawl-failed lead %s to DB: %s", company.get('title'), e, exc_info=True)
                             continue
 
                         # Phase: Qualifying
-                        yield sse_event({
+                        await run.emit({
                             "type": "progress",
                             "index": i,
                             "total": total,
@@ -738,8 +916,7 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
 
                         tier = determine_tier(qual_result.confidence_score)
 
-                        # Geocode: try LLM-extracted location, fall back to domain TLD
-                        # Validate against user's search region to catch SEO-mislocated pages
+                        # Geocode
                         hq_location = qual_result.headquarters_location
                         search_region = (search_ctx or {}).get("geographic_region")
                         domain_country = _guess_country_from_domain(company.get("domain", ""))
@@ -748,35 +925,31 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                         longitude = None
 
                         if hq_location:
-                            # Cross-check: does the LLM location match the user's search region?
-                            if _location_matches_region(hq_location, search_region):
-                                geo = await _geocode_location(hq_location)
-                                if geo:
-                                    country, latitude, longitude = geo
-                            else:
-                                # LLM location conflicts with search region — likely an SEO mirror
-                                # Prefer domain TLD if available, otherwise use search region
-                                logger.info(
-                                    "Geo mismatch for %s: LLM said '%s' but search region is '%s' — using domain/region fallback",
-                                    company.get("domain"), hq_location, search_region,
+                            geo = await _geocode_location(hq_location)
+                            if geo:
+                                resolved_country, resolved_lat, resolved_lng = geo
+                                country_matches = _location_matches_region(
+                                    resolved_country or hq_location, search_region
                                 )
-                                if domain_country:
-                                    geo = await _geocode_location(domain_country)
-                                    if geo:
-                                        country, latitude, longitude = geo
-                                elif search_region:
-                                    geo = await _geocode_location(search_region)
-                                    if geo:
-                                        country, latitude, longitude = geo
+                                if country_matches:
+                                    country, latitude, longitude = resolved_country, resolved_lat, resolved_lng
+                                else:
+                                    logger.info(
+                                        "Geo mismatch for %s: LLM said '%s' (resolved: %s) but search region is '%s' — using domain/region fallback",
+                                        company.get("domain"), hq_location, resolved_country, search_region,
+                                    )
+                                    if domain_country:
+                                        geo2 = await _geocode_location(domain_country)
+                                        if geo2:
+                                            country, latitude, longitude = geo2
+                                    elif search_region:
+                                        geo2 = await _geocode_location(search_region)
+                                        if geo2:
+                                            country, latitude, longitude = geo2
 
                         if not country:
                             if domain_country:
                                 country = domain_country
-                                # If we have a search region and the domain country
-                                # matches the region's country, use the search region
-                                # for geocoding (much more precise than country centroid).
-                                # E.g. user wants "Paddington, London, UK" + domain is .co.uk
-                                # → place at Paddington, not the UK centroid (which is in Scotland).
                                 if search_region and _location_matches_region(domain_country, search_region):
                                     geo = await _geocode_location(search_region)
                                     if geo:
@@ -786,12 +959,34 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                                     if geo:
                                         _, latitude, longitude = geo
                             elif search_region:
-                                # Last resort: use the user's search region centroid
                                 geo = await _geocode_location(search_region)
                                 if geo:
                                     country, latitude, longitude = geo
 
                         latitude, longitude = _spread_co_located(latitude, longitude)
+
+                        # Extract contacts
+                        extracted_contacts = []
+                        try:
+                            from contact_extraction import extract_contacts_from_content
+                            people = await extract_contacts_from_content(
+                                company_name=company["title"],
+                                domain=company["domain"],
+                                page_content=crawl_result.markdown_content or "",
+                            )
+                            extracted_contacts = [
+                                {
+                                    "full_name": p.full_name,
+                                    "job_title": p.job_title,
+                                    "email": p.email,
+                                    "phone": p.phone,
+                                    "linkedin_url": p.linkedin_url,
+                                    "source": "website",
+                                }
+                                for p in people
+                            ]
+                        except Exception as ce:
+                            logger.debug("Contact extraction failed for %s: %s", company.get("domain"), ce)
 
                         result_data = {
                             "title": company["title"],
@@ -807,28 +1002,28 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
                             "country": country,
                             "latitude": latitude,
                             "longitude": longitude,
+                            "contacts": extracted_contacts,
                         }
 
                         stats[tier.value] += 1
 
-                        yield sse_event({
+                        await run.emit({
                             "type": "result",
                             "index": i,
                             "total": total,
                             "company": result_data,
                         })
 
-                        # Save to DB
                         if search_id:
                             try:
-                                await _save_lead_to_db(search_id, result_data)
+                                await _save_lead_to_db(search_id, result_data, user_id=user.id, contacts=extracted_contacts)
                             except Exception as e:
-                                logger.warning("Failed to save lead %s to DB: %s", company.get('title'), e)
+                                logger.error("Failed to save lead %s to DB: %s (type: %s)", company.get('title'), e, type(e).__name__, exc_info=True)
 
                     except Exception as e:
                         logger.error("Pipeline error for %s: %s", company.get('title', '?'), e)
                         stats["failed"] += 1
-                        yield sse_event({
+                        await run.emit({
                             "type": "error",
                             "index": i,
                             "total": total,
@@ -841,18 +1036,38 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
 
         except Exception as e:
             logger.error("Fatal pipeline error: %s", e)
-            yield sse_event({
+            await run.emit({
                 "type": "error",
                 "error": str(e)[:200],
                 "fatal": True,
             })
             return
 
-        yield sse_event({
+        await run.emit({
             "type": "complete",
             "summary": stats,
             "search_id": search_id,
         })
+
+    task = asyncio.create_task(_run_pipeline_bg())
+    pipeline_manager.set_task(search_id, task)
+
+    return {"search_id": search_id}
+
+
+@app.get("/api/pipeline/{search_id}/stream")
+async def pipeline_stream(search_id: str, after: int = 0, user=Depends(require_auth)):
+    """
+    Reconnectable SSE stream for a running (or completed) pipeline.
+    Pass ``?after=N`` to skip the first N events (for reconnection).
+    """
+    run = pipeline_manager.get(search_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Pipeline not found — it may have already finished. Check /api/searches for results.")
+
+    async def generate():
+        async for event in run.subscribe(after=after):
+            yield sse_event(event)
 
     return StreamingResponse(
         generate(),
@@ -863,6 +1078,15 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/api/pipeline/{search_id}/status")
+async def pipeline_status(search_id: str, user=Depends(require_auth)):
+    """Quick JSON snapshot of pipeline progress (no SSE)."""
+    run = pipeline_manager.get(search_id)
+    if not run:
+        return {"search_id": search_id, "status": "not_found"}
+    return run.snapshot()
 
 
 # ──────────────────────────────────────────────
@@ -1224,7 +1448,7 @@ async def leads_geo(user=Depends(require_auth)):
 async def get_lead(lead_id: str, user=Depends(require_auth)):
     """Single lead with full detail."""
     from db import get_db as _get_db
-    from db.models import Search, QualifiedLead, EnrichmentResult_
+    from db.models import Search, QualifiedLead, EnrichmentResult_, LeadContact
 
     async for db in _get_db():
         lead = (await db.execute(
@@ -1240,6 +1464,12 @@ async def get_lead(lead_id: str, user=Depends(require_auth)):
         enrichment = (await db.execute(
             select(EnrichmentResult_).where(EnrichmentResult_.lead_id == lead_id)
         )).scalar_one_or_none()
+
+        # Get contacts
+        contacts = (await db.execute(
+            select(LeadContact).where(LeadContact.lead_id == lead_id)
+            .order_by(LeadContact.created_at)
+        )).scalars().all()
 
         result = {
             "id": lead.id,
@@ -1263,6 +1493,7 @@ async def get_lead(lead_id: str, user=Depends(require_auth)):
             "deal_value": lead.deal_value,
             "status_changed_at": lead.status_changed_at.isoformat() if lead.status_changed_at else None,
             "created_at": lead.created_at.isoformat() if lead.created_at else None,
+            "last_seen_at": lead.last_seen_at.isoformat() if lead.last_seen_at else None,
         }
 
         if enrichment:
@@ -1272,6 +1503,20 @@ async def get_lead(lead_id: str, user=Depends(require_auth)):
                 "job_title": enrichment.job_title,
                 "source": enrichment.source,
             }
+
+        if contacts:
+            result["contacts"] = [
+                {
+                    "id": c.id,
+                    "full_name": c.full_name,
+                    "job_title": c.job_title,
+                    "email": c.email,
+                    "phone": c.phone,
+                    "linkedin_url": c.linkedin_url,
+                    "source": c.source,
+                }
+                for c in contacts
+            ]
 
         return result
 
@@ -1337,8 +1582,594 @@ async def delete_lead(lead_id: str, user=Depends(require_auth)):
 
 
 # ──────────────────────────────────────────────
-# Save Pipeline Results to DB
+# Lead Contacts Endpoints
 # ──────────────────────────────────────────────
+
+@app.get("/api/leads/{lead_id}/contacts")
+async def get_lead_contacts(lead_id: str, user=Depends(require_auth)):
+    """Get all contacts (people) for a lead."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact
+
+    async for db in _get_db():
+        # Verify lead belongs to user
+        lead = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id == lead_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        contacts = (await db.execute(
+            select(LeadContact).where(LeadContact.lead_id == lead_id)
+            .order_by(LeadContact.created_at)
+        )).scalars().all()
+
+        return [
+            {
+                "id": c.id,
+                "full_name": c.full_name,
+                "job_title": c.job_title,
+                "email": c.email,
+                "phone": c.phone,
+                "linkedin_url": c.linkedin_url,
+                "source": c.source,
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+            }
+            for c in contacts
+        ]
+
+
+# ──────────────────────────────────────────────
+# LinkedIn Enrichment Endpoint
+# ──────────────────────────────────────────────
+
+@app.post("/api/leads/{lead_id}/linkedin")
+async def linkedin_enrich_lead(lead_id: str, user=Depends(require_auth)):
+    """Find decision-makers for a lead via People Data Labs / RocketReach."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact, Profile
+    from usage import check_quota, increment_usage
+
+    li_status = get_linkedin_status()
+    if not li_status["available"]:
+        raise HTTPException(status_code=400, detail="No LinkedIn enrichment API configured. Add PDL_API_KEY or ROCKETREACH_API_KEY.")
+
+    async for db in _get_db():
+        # Verify lead belongs to user
+        lead = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id == lead_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        # Check quota
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        if plan == "free":
+            raise HTTPException(status_code=403, detail="LinkedIn enrichment requires Pro or Enterprise plan")
+
+        # Check linkedin_lookups limit
+        from usage import PLAN_LIMITS
+        linkedin_limits = {"free": 0, "pro": 50, "enterprise": 500}
+        from usage import _get_or_create_row
+        usage_row = await _get_or_create_row(db, user.id)
+        limit = linkedin_limits.get(plan, 0)
+        if limit and usage_row.linkedin_lookups >= limit:
+            raise HTTPException(status_code=429, detail=f"LinkedIn lookup limit reached ({limit}/month)")
+
+        # Perform lookup
+        contacts = await enrich_linkedin(lead.domain, max_results=5)
+
+        if not contacts:
+            return {"contacts": [], "message": "No decision-makers found"}
+
+        # Save to DB (dedup by email)
+        existing_emails = set()
+        existing_contacts = (await db.execute(
+            select(LeadContact).where(LeadContact.lead_id == lead_id)
+        )).scalars().all()
+        for ec in existing_contacts:
+            if ec.email:
+                existing_emails.add(ec.email.lower())
+
+        saved = []
+        for c in contacts:
+            if c.email and c.email.lower() in existing_emails:
+                continue
+            lc = LeadContact(
+                lead_id=lead_id,
+                full_name=c.full_name,
+                job_title=c.job_title,
+                email=c.email,
+                phone=c.phone,
+                linkedin_url=c.linkedin_url,
+                source=c.source,
+            )
+            db.add(lc)
+            saved.append({
+                "full_name": c.full_name,
+                "job_title": c.job_title,
+                "email": c.email,
+                "phone": c.phone,
+                "linkedin_url": c.linkedin_url,
+                "source": c.source,
+            })
+
+        # Increment usage
+        usage_row.linkedin_lookups += 1
+        await db.commit()
+
+        return {"contacts": saved, "total_found": len(contacts), "new_saved": len(saved)}
+
+
+# ──────────────────────────────────────────────
+# Search Templates CRUD
+# ──────────────────────────────────────────────
+
+@app.get("/api/templates")
+async def list_templates(user=Depends(require_auth)):
+    """List user's saved search templates."""
+    from db import get_db as _get_db
+    from db.models import SearchTemplate
+
+    async for db in _get_db():
+        templates = (await db.execute(
+            select(SearchTemplate)
+            .where(SearchTemplate.user_id == user.id)
+            .order_by(SearchTemplate.updated_at.desc())
+        )).scalars().all()
+
+        return [
+            {
+                "id": t.id,
+                "name": t.name,
+                "search_context": t.search_context,
+                "is_builtin": t.is_builtin,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "updated_at": t.updated_at.isoformat() if t.updated_at else None,
+            }
+            for t in templates
+        ]
+
+
+@app.post("/api/templates")
+async def create_template(request: TemplateCreate, user=Depends(require_auth)):
+    """Save current search context as a named template."""
+    from db import get_db as _get_db
+    from db.models import SearchTemplate
+
+    async for db in _get_db():
+        await _ensure_profile_exists(db, user.id)
+
+        template = SearchTemplate(
+            user_id=user.id,
+            name=request.name,
+            search_context=request.search_context,
+        )
+        db.add(template)
+        await db.commit()
+
+        return {
+            "id": template.id,
+            "name": template.name,
+            "search_context": template.search_context,
+            "created_at": template.created_at.isoformat() if template.created_at else None,
+        }
+
+
+@app.delete("/api/templates/{template_id}")
+async def delete_template(template_id: str, user=Depends(require_auth)):
+    """Delete a search template."""
+    from db import get_db as _get_db
+    from db.models import SearchTemplate
+
+    async for db in _get_db():
+        template = (await db.execute(
+            select(SearchTemplate)
+            .where(SearchTemplate.id == template_id, SearchTemplate.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not template:
+            raise HTTPException(status_code=404, detail="Template not found")
+
+        await db.delete(template)
+        await db.commit()
+        return {"ok": True}
+
+
+# ──────────────────────────────────────────────
+# Bulk Domain Import
+# ──────────────────────────────────────────────
+
+@app.post("/api/pipeline/bulk")
+async def bulk_import(request: BulkImportRequest, user=Depends(require_auth)):
+    """
+    Bulk domain import — paste domains → qualify all.
+    Skips the chat flow. Streams SSE like the regular pipeline.
+    """
+    from usage import check_quota, increment_usage, LEADS_PER_HUNT
+    from db import get_db as _get_db
+    from db.models import Profile
+
+    # Clean and deduplicate domains
+    domains = []
+    seen = set()
+    for d in request.domains:
+        d = d.strip().lower().replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+        if d and d not in seen and "." in d:
+            seen.add(d)
+            domains.append(d)
+
+    if not domains:
+        raise HTTPException(status_code=400, detail="No valid domains provided")
+
+    # Quota check
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        max_leads = LEADS_PER_HUNT.get(plan, 25)
+        domains = domains[:max_leads]
+
+        exceeded = await check_quota(db, user.id, plan_tier=plan, action="leads", count=len(domains))
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        exceeded = await check_quota(db, user.id, plan_tier=plan, action="search")
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        await increment_usage(db, user.id, leads_qualified=len(domains), searches_run=1)
+
+    search_ctx = request.search_context.model_dump() if request.search_context else None
+    use_vision = request.use_vision
+
+    async def generate():
+        from scraper import CrawlerPool, crawl_company
+        from intelligence import LeadQualifier
+        from utils import determine_tier, extract_domain
+
+        total = len(domains)
+        yield sse_event({"type": "init", "total": total})
+
+        qualifier = LeadQualifier(search_context=search_ctx)
+        stats = {"hot": 0, "review": 0, "rejected": 0, "failed": 0}
+        _geo_hit_count: dict[tuple[float, float], int] = {}
+
+        def _spread_co_located(lat, lng):
+            if lat is None or lng is None:
+                return lat, lng
+            key = (round(lat, 6), round(lng, 6))
+            n = _geo_hit_count.get(key, 0)
+            _geo_hit_count[key] = n + 1
+            if n == 0:
+                return lat, lng
+            angle = n * 2.399_963
+            r = 0.0012 * math.sqrt(n)
+            return lat + r * math.cos(angle), lng + r * math.sin(angle)
+
+        # Save search
+        search_id = None
+        try:
+            ctx = search_ctx or {}
+            ctx["_bulk_import"] = True
+            search_id = await _save_search_to_db(
+                user_id=user.id,
+                context=ctx,
+                queries=[],
+                total_found=total,
+                messages=[{"role": "system", "content": f"Bulk import of {total} domains"}],
+            )
+        except Exception as e:
+            logger.error("Failed to save bulk search: %s", e, exc_info=True)
+
+        try:
+            async with CrawlerPool() as pool:
+                for i, domain in enumerate(domains):
+                    title = domain.split(".")[0].replace("-", " ").title()
+                    url = f"https://{domain}"
+
+                    try:
+                        yield sse_event({
+                            "type": "progress",
+                            "index": i, "total": total,
+                            "phase": "crawling",
+                            "company": {"title": title, "domain": domain},
+                        })
+
+                        crawl_result = await crawl_company(url, take_screenshot=use_vision, crawler_pool=pool)
+
+                        if crawl_result.success and crawl_result.markdown_content:
+                            try:
+                                contact_snippet = await pool.crawl_contact_pages(url)
+                                if contact_snippet:
+                                    crawl_result = crawl_result.model_copy(update={
+                                        "markdown_content": crawl_result.markdown_content
+                                        + "\n\n=== ADDRESS & CONTACT INFO FROM OTHER PAGES ===\n"
+                                        + contact_snippet
+                                    })
+                            except Exception:
+                                pass
+
+                            # Extract title from crawl
+                            if crawl_result.title:
+                                title = crawl_result.title.split("|")[0].split("-")[0].strip()[:80] or title
+
+                        if not crawl_result.success:
+                            c = _guess_country_from_domain(domain)
+                            lat, lng = None, None
+                            if c:
+                                geo = await _geocode_location(c)
+                                if geo:
+                                    _, lat, lng = geo
+                            lat, lng = _spread_co_located(lat, lng)
+                            result_data = {
+                                "title": title, "domain": domain, "url": url,
+                                "score": 5, "tier": "review",
+                                "reasoning": f"Website could not be crawled — {_sanitize_crawl_error(crawl_result.error_message)}. Visit the site manually to verify.",
+                                "key_signals": [], "red_flags": ["Crawl failed — needs manual review"],
+                                "country": c, "latitude": lat, "longitude": lng,
+                            }
+                            stats["review"] += 1
+                            yield sse_event({"type": "result", "index": i, "total": total, "company": result_data})
+                            if search_id:
+                                try:
+                                    await _save_lead_to_db(search_id, result_data, user_id=user.id)
+                                except Exception:
+                                    pass
+                            continue
+
+                        yield sse_event({
+                            "type": "progress",
+                            "index": i, "total": total,
+                            "phase": "qualifying",
+                            "company": {"title": title, "domain": domain},
+                        })
+
+                        qual_result = await qualifier.qualify_lead(
+                            company_name=title, website_url=url,
+                            crawl_result=crawl_result, use_vision=use_vision,
+                        )
+                        tier = determine_tier(qual_result.confidence_score)
+
+                        # Geocode
+                        hq = qual_result.headquarters_location
+                        country, latitude, longitude = None, None, None
+                        if hq:
+                            geo = await _geocode_location(hq)
+                            if geo:
+                                country, latitude, longitude = geo
+                        if not country:
+                            dc = _guess_country_from_domain(domain)
+                            if dc:
+                                country = dc
+                                geo = await _geocode_location(dc)
+                                if geo:
+                                    _, latitude, longitude = geo
+                        latitude, longitude = _spread_co_located(latitude, longitude)
+
+                        # Extract contacts
+                        extracted_contacts = []
+                        try:
+                            people = await extract_contacts_from_content(title, domain, crawl_result.markdown_content or "")
+                            extracted_contacts = [
+                                {"full_name": p.full_name, "job_title": p.job_title, "email": p.email,
+                                 "phone": p.phone, "linkedin_url": p.linkedin_url, "source": "website"}
+                                for p in people
+                            ]
+                        except Exception:
+                            pass
+
+                        result_data = {
+                            "title": title, "domain": domain, "url": url,
+                            "score": qual_result.confidence_score, "tier": tier.value,
+                            "hardware_type": qual_result.hardware_type,
+                            "industry_category": qual_result.industry_category,
+                            "reasoning": qual_result.reasoning,
+                            "key_signals": qual_result.key_signals,
+                            "red_flags": qual_result.red_flags,
+                            "country": country, "latitude": latitude, "longitude": longitude,
+                            "contacts": extracted_contacts,
+                        }
+                        stats[tier.value] += 1
+
+                        yield sse_event({"type": "result", "index": i, "total": total, "company": result_data})
+
+                        if search_id:
+                            try:
+                                await _save_lead_to_db(search_id, result_data, user_id=user.id, contacts=extracted_contacts)
+                            except Exception:
+                                pass
+
+                    except Exception as e:
+                        stats["failed"] += 1
+                        yield sse_event({
+                            "type": "error", "index": i, "total": total,
+                            "company": {"title": title, "domain": domain},
+                            "error": str(e)[:200],
+                        })
+
+        except Exception as e:
+            yield sse_event({"type": "error", "error": str(e)[:200], "fatal": True})
+            return
+
+        yield sse_event({"type": "complete", "summary": stats, "search_id": search_id})
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+# ──────────────────────────────────────────────
+# Search Within Database
+# ──────────────────────────────────────────────
+
+@app.get("/api/leads/search")
+async def search_leads(
+    q: str,
+    tier: Optional[str] = None,
+    user=Depends(require_auth),
+):
+    """Search across stored leads by company name, domain, industry, signals."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead
+    from sqlalchemy import or_
+
+    async for db in _get_db():
+        query = (
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user.id)
+        )
+
+        # Text search across multiple columns
+        search_term = f"%{q}%"
+        query = query.where(
+            or_(
+                QualifiedLead.company_name.ilike(search_term),
+                QualifiedLead.domain.ilike(search_term),
+                QualifiedLead.industry_category.ilike(search_term),
+                QualifiedLead.hardware_type.ilike(search_term),
+                QualifiedLead.reasoning.ilike(search_term),
+                QualifiedLead.country.ilike(search_term),
+            )
+        )
+
+        if tier:
+            query = query.where(QualifiedLead.tier == tier)
+
+        query = query.order_by(QualifiedLead.score.desc()).limit(100)
+        leads = (await db.execute(query)).scalars().all()
+
+        return [
+            {
+                "id": l.id,
+                "company_name": l.company_name,
+                "domain": l.domain,
+                "website_url": l.website_url,
+                "score": l.score,
+                "tier": l.tier,
+                "hardware_type": l.hardware_type,
+                "industry_category": l.industry_category,
+                "reasoning": l.reasoning,
+                "country": l.country,
+                "status": l.status,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in leads
+        ]
+
+
+# ──────────────────────────────────────────────
+# Export All Leads
+# ──────────────────────────────────────────────
+
+@app.get("/api/leads/export")
+async def export_all_leads(user=Depends(require_auth)):
+    """Export all user's leads as CSV."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact
+    import csv
+    import io
+
+    async for db in _get_db():
+        leads = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user.id)
+            .order_by(QualifiedLead.score.desc())
+        )).scalars().all()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Header
+        writer.writerow([
+            "Company Name", "Domain", "Website", "Score", "Tier",
+            "Industry", "Product Type", "Reasoning", "Key Signals", "Red Flags",
+            "Country", "Status", "Notes", "Deal Value",
+            "Contact Names", "Contact Emails", "Contact Titles",
+            "Created At", "Last Seen At",
+        ])
+
+        for lead in leads:
+            # Get contacts for this lead
+            contacts = (await db.execute(
+                select(LeadContact).where(LeadContact.lead_id == lead.id)
+            )).scalars().all()
+
+            names = "; ".join(c.full_name for c in contacts if c.full_name)
+            emails = "; ".join(c.email for c in contacts if c.email)
+            titles = "; ".join(c.job_title for c in contacts if c.job_title)
+
+            signals = "; ".join(lead.key_signals) if lead.key_signals else ""
+            flags = "; ".join(lead.red_flags) if lead.red_flags else ""
+
+            writer.writerow([
+                lead.company_name, lead.domain, lead.website_url,
+                lead.score, lead.tier,
+                lead.industry_category or "", lead.hardware_type or "",
+                lead.reasoning, signals, flags,
+                lead.country or "", lead.status or "new",
+                lead.notes or "", lead.deal_value or "",
+                names, emails, titles,
+                lead.created_at.isoformat() if lead.created_at else "",
+                lead.last_seen_at.isoformat() if lead.last_seen_at else "",
+            ])
+
+        csv_content = output.getvalue()
+
+    from fastapi.responses import Response
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=hunt_leads_export.csv"},
+    )
+
+
+# ──────────────────────────────────────────────
+# LinkedIn enrichment status (health)
+# ──────────────────────────────────────────────
+
+@app.get("/api/linkedin/status")
+async def linkedin_status():
+    """Check if LinkedIn enrichment APIs are configured."""
+    return get_linkedin_status()
+
+async def _ensure_profile_exists(db, user_id: str, email: str = None) -> None:
+    """Ensure a profile row exists for this user. Creates one if missing.
+    
+    This is a safety net for cases where the Supabase trigger didn't fire
+    (e.g. user signed up before the trigger was created, or the trigger failed).
+    """
+    from db.models import Profile
+    profile = (await db.execute(
+        select(Profile).where(Profile.id == user_id)
+    )).scalar_one_or_none()
+    if profile is None:
+        logger.info("Auto-creating missing profile for user %s", user_id)
+        profile = Profile(
+            id=user_id,
+            email=email,
+            plan_tier="free",
+            plan="free",
+        )
+        db.add(profile)
+        await db.flush()
+
 
 async def _save_search_to_db(user_id: str, context: dict, queries: list, total_found: int, messages: Optional[list] = None) -> str:
     """Save a search session to the database. Returns the search ID."""
@@ -1347,6 +2178,9 @@ async def _save_search_to_db(user_id: str, context: dict, queries: list, total_f
 
     search_id = str(uuid.uuid4())
     async for db in _get_db():
+        # Ensure the user has a profile row (FK requirement)
+        await _ensure_profile_exists(db, user_id)
+        
         search = Search(
             id=search_id,
             user_id=user_id,
@@ -1364,24 +2198,103 @@ async def _save_search_to_db(user_id: str, context: dict, queries: list, total_f
     return search_id
 
 
-async def _save_lead_to_db(search_id: str, company: dict) -> str:
-    """Save a qualified lead to the database. Returns the lead ID."""
+async def _save_lead_to_db(search_id: str, company: dict, user_id: str = None, contacts: list = None) -> str:
+    """Save a qualified lead to the database with dedup. Returns the lead ID.
+    
+    If a lead with the same domain already exists for this user, merges data
+    instead of creating a duplicate (updates score if higher, merges contacts).
+    """
     from db import get_db as _get_db
-    from db.models import QualifiedLead
+    from db.models import QualifiedLead, LeadContact, LeadSnapshot
 
-    lead_id = str(uuid.uuid4())
-
-    # Use pre-computed geo data from pipeline, fallback to TLD guess
-    country = company.get("country") or _guess_country_from_domain(company.get("domain", ""))
+    domain = company.get("domain", "")
+    country = company.get("country") or _guess_country_from_domain(domain)
     latitude = company.get("latitude")
     longitude = company.get("longitude")
 
     async for db in _get_db():
+        existing_lead = None
+
+        # Global dedup: check if we already have this domain for this user
+        if user_id and domain:
+            existing_lead = (await db.execute(
+                select(QualifiedLead).where(
+                    QualifiedLead.user_id == user_id,
+                    QualifiedLead.domain == domain,
+                )
+            )).scalar_one_or_none()
+
+        if existing_lead:
+            # Merge: update if re-encountered
+            new_score = company.get("score", 5)
+
+            # Save snapshot of current state before updating
+            snapshot = LeadSnapshot(
+                lead_id=existing_lead.id,
+                score=existing_lead.score,
+                tier=existing_lead.tier,
+                reasoning=existing_lead.reasoning or "",
+                key_signals=existing_lead.key_signals,
+            )
+            db.add(snapshot)
+
+            # Update with better data
+            if new_score > existing_lead.score:
+                existing_lead.score = new_score
+                existing_lead.tier = company.get("tier", existing_lead.tier)
+                existing_lead.reasoning = company.get("reasoning", existing_lead.reasoning)
+                existing_lead.key_signals = company.get("key_signals", existing_lead.key_signals)
+                existing_lead.red_flags = company.get("red_flags", existing_lead.red_flags)
+
+            # Always update search_id to latest hunt
+            existing_lead.search_id = search_id
+            existing_lead.last_seen_at = datetime.now(timezone.utc)
+
+            if company.get("hardware_type"):
+                existing_lead.hardware_type = company["hardware_type"]
+            if company.get("industry_category"):
+                existing_lead.industry_category = company["industry_category"]
+            if latitude:
+                existing_lead.latitude = latitude
+                existing_lead.longitude = longitude
+            if country:
+                existing_lead.country = country
+
+            # Merge contacts (dedup by email)
+            if contacts:
+                existing_emails = set()
+                for c in existing_lead.contacts:
+                    if c.email:
+                        existing_emails.add(c.email.lower())
+
+                for contact in contacts:
+                    email = contact.get("email", "")
+                    if email and email.lower() in existing_emails:
+                        continue  # Skip duplicate
+                    lc = LeadContact(
+                        lead_id=existing_lead.id,
+                        full_name=contact.get("full_name"),
+                        job_title=contact.get("job_title"),
+                        email=email or None,
+                        phone=contact.get("phone"),
+                        linkedin_url=contact.get("linkedin_url"),
+                        source=contact.get("source", "website"),
+                    )
+                    db.add(lc)
+
+            await db.commit()
+            logger.info("Merged lead %s (domain: %s) — score %d→%d",
+                       existing_lead.id, domain, snapshot.score, existing_lead.score)
+            return existing_lead.id
+
+        # New lead — create fresh
+        lead_id = str(uuid.uuid4())
         lead = QualifiedLead(
             id=lead_id,
             search_id=search_id,
+            user_id=user_id,
             company_name=company.get("title", ""),
-            domain=company.get("domain", ""),
+            domain=domain,
             website_url=company.get("url", ""),
             score=company.get("score", 5),
             tier=company.get("tier", "review"),
@@ -1394,8 +2307,24 @@ async def _save_lead_to_db(search_id: str, company: dict) -> str:
             latitude=latitude,
             longitude=longitude,
             status="new",
+            last_seen_at=datetime.now(timezone.utc),
         )
         db.add(lead)
+
+        # Save extracted contacts
+        if contacts:
+            for contact in contacts:
+                lc = LeadContact(
+                    lead_id=lead_id,
+                    full_name=contact.get("full_name"),
+                    job_title=contact.get("job_title"),
+                    email=contact.get("email"),
+                    phone=contact.get("phone"),
+                    linkedin_url=contact.get("linkedin_url"),
+                    source=contact.get("source", "website"),
+                )
+                db.add(lc)
+
         await db.commit()
     return lead_id
 
@@ -1435,6 +2364,10 @@ async def _geocode_location(location_str: str) -> Optional[tuple]:
     """
     Geocode a location string to (country, lat, lng) using OpenStreetMap Nominatim.
     Results are cached in-memory. Returns None if no match found.
+
+    Handles full street addresses by progressively stripping detail if
+    the full query doesn't match (e.g. "Luisenstr. 14, 80333 Munich, Germany"
+    → "80333 Munich, Germany" → "Munich, Germany").
     """
     if not location_str or not location_str.strip():
         return None
@@ -1452,41 +2385,66 @@ async def _geocode_location(location_str: str) -> Optional[tuple]:
             return None
         return cached
 
-    # Query Nominatim
+    # Build progressively less specific queries
+    # e.g. "401 N Tryon St, Charlotte, NC 28202, USA"
+    #  → "Charlotte, NC 28202, USA"
+    #  → "NC 28202, USA"
+    #  → "USA"
+    parts = [p.strip() for p in loc.split(",") if p.strip()]
+    queries = []
+    for i in range(len(parts)):
+        queries.append(", ".join(parts[i:]))
+    # Deduplicate while preserving order
+    seen = set()
+    unique_queries = []
+    for q in queries:
+        if q not in seen:
+            seen.add(q)
+            unique_queries.append(q)
+
+    # Query Nominatim with progressive fallback
     try:
         async with _nominatim_lock:  # Nominatim rate limit: 1 req/sec
-            await asyncio.sleep(0.15)  # Be polite to the free API
+            for query in unique_queries:
+                await asyncio.sleep(0.15)  # Be polite to the free API
 
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={
-                        "q": loc,
-                        "format": "jsonv2",
-                        "limit": 1,
-                        "addressdetails": 1,
-                        "accept-language": "en",
-                    },
-                    headers=_NOMINATIM_HEADERS,
-                )
-                resp.raise_for_status()
-                results = resp.json()
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.get(
+                        "https://nominatim.openstreetmap.org/search",
+                        params={
+                            "q": query,
+                            "format": "jsonv2",
+                            "limit": 1,
+                            "addressdetails": 1,
+                            "accept-language": "en",
+                        },
+                        headers=_NOMINATIM_HEADERS,
+                    )
+                    resp.raise_for_status()
+                    results = resp.json()
 
-        if not results:
-            _nominatim_cache[loc] = None
-            return None
+                if results:
+                    hit = results[0]
+                    lat = float(hit["lat"])
+                    lng = float(hit["lon"])
 
-        hit = results[0]
-        lat = float(hit["lat"])
-        lng = float(hit["lon"])
+                    # Extract country from address details
+                    addr = hit.get("address", {})
+                    country = addr.get("country", None)
 
-        # Extract country from address details
-        addr = hit.get("address", {})
-        country = addr.get("country", None)
+                    result = (country, lat, lng)
+                    _nominatim_cache[loc] = result
 
-        _nominatim_cache[loc] = (country, lat, lng)
+                    if query != unique_queries[0]:
+                        logger.info(
+                            "Nominatim: full address '%s' missed, fell back to '%s'",
+                            unique_queries[0], query,
+                        )
+                    return result
 
-        return (country, lat, lng)
+        # None of the queries matched
+        _nominatim_cache[loc] = None
+        return None
 
     except Exception as e:
         logger.warning("Nominatim geocode failed for '%s': %s", loc, e)
@@ -1499,6 +2457,43 @@ async def _geocode_with_fallback(location_str: str) -> Optional[tuple]:
     if not location_str:
         return None
     return await _geocode_location(location_str)
+
+
+def _sanitize_crawl_error(raw: str | None) -> str:
+    """Turn raw crawl4ai error messages into short, user-friendly strings."""
+    if not raw:
+        return "Website unreachable"
+    msg = str(raw)
+    low = msg.lower()
+    if "connection_refused" in low or "err_connection_refused" in low:
+        return "Website refused the connection"
+    if "timeout" in low or "timed out" in low or "err_timed_out" in low:
+        return "Website took too long to respond"
+    if "ssl" in low or "certificate" in low or "err_cert" in low:
+        return "Website has an SSL/certificate issue"
+    if "name_not_resolved" in low or "dns" in low or "err_name_not_resolved" in low:
+        return "Domain could not be resolved (DNS error)"
+    if "403" in msg or "forbidden" in low:
+        return "Website blocked automated access (403)"
+    if "404" in msg or "not found" in low:
+        return "Page not found (404)"
+    if "cloudflare" in low or "captcha" in low or "challenge" in low:
+        return "Website is behind bot protection"
+    if "err_connection_reset" in low or "connection_reset" in low:
+        return "Connection was reset by the server"
+    if "err_empty_response" in low:
+        return "Website returned an empty response"
+    if "429" in msg or "too many" in low:
+        return "Website rate-limited the request"
+    # Fallback: take first meaningful line, strip stack traces
+    first_line = msg.split("\n")[0].strip()
+    # Remove file paths and code context
+    if "at line" in first_line or "File \"" in first_line:
+        return "Website could not be accessed"
+    # Cap length to avoid leaking internals
+    if len(first_line) > 120:
+        return first_line[:117] + "…"
+    return first_line
 
 
 def _guess_country_from_domain(domain: str) -> Optional[str]:
@@ -1545,11 +2540,14 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
     Check whether a geocoded location is plausible given the user's search region.
     Returns True if the location seems consistent, False if it's a likely mismatch.
 
+    The caller should pass the Nominatim-resolved country name as location_str
+    when available (e.g. "United Kingdom") for most reliable matching.
+
     Handles cases like:
+      - location="United Kingdom"  region="Paddington, London, UK"  → True
       - location="Marylebone, London" region="Paddington, London, UK" → True (both in London)
-      - location="United Kingdom" region="Paddington, London, UK" → True (UK contains Paddington)
-      - location="Edinburgh" region="Paddington, London, UK" → True (both in UK, close enough)
-      - location="New York" region="Paddington, London, UK" → False
+      - location="Germany" region="Europe" → True
+      - location="United States" region="Paddington, London, UK" → False
     """
     if not location_str or not search_region:
         return True  # No region constraint → anything is fine
@@ -1559,10 +2557,13 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
 
     # Country alias map: canonical names and abbreviations
     _COUNTRY_ALIASES = {
-        "united states": ["usa", "america"],
-        "usa": ["united states", "america"],
-        "united kingdom": ["uk", "britain"],
-        "uk": ["united kingdom", "britain"],
+        "united states": ["usa", "america", "us"],
+        "usa": ["united states", "america", "us"],
+        "united kingdom": ["uk", "britain", "england", "scotland", "wales"],
+        "uk": ["united kingdom", "britain", "england", "scotland", "wales"],
+        "england": ["uk", "united kingdom", "britain"],
+        "scotland": ["uk", "united kingdom", "britain"],
+        "wales": ["uk", "united kingdom", "britain"],
         "uae": ["united arab emirates", "emirates"],
         "united arab emirates": ["uae", "emirates"],
         "hong kong": ["hk"],
@@ -1572,12 +2573,10 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
         "new zealand": ["nz"],
     }
 
-    # Expand both loc and region with aliases for matching
-    # Use word-boundary matching to avoid substring issues
+    # Build full alias sets for both loc and region
     loc_expanded = loc
     region_expanded = region
     for canon, aliases in _COUNTRY_ALIASES.items():
-        # Use word boundary to check: "uk" should match standalone, not inside "duke"
         pattern = r'(?:^|[\s,;/\-()])' + re.escape(canon) + r'(?:$|[\s,;/\-()])'  
         if re.search(pattern, loc):
             loc_expanded += " " + " ".join(aliases)
@@ -1589,19 +2588,14 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
         return True
 
     # Check if they share a common city or country token
-    # E.g. loc="Marylebone, London" region="Paddington, London, UK"
-    # Both contain "london" → match
-    # Exclude common geographic prefix words that appear in multiple country names
-    _GEO_STOPWORDS = {"the", "and", "of", "in", "near", "united", "new", "south", "north", "east", "west", "central", "arab"}
+    _GEO_STOPWORDS = {"the", "and", "of", "in", "near", "new", "south", "north", "east", "west", "central", "arab"}
     loc_tokens = {t.strip().strip(",") for t in loc_expanded.replace(",", " ").split() if len(t.strip()) > 2}
     region_tokens = {t.strip().strip(",") for t in region_expanded.replace(",", " ").split() if len(t.strip()) > 2}
     shared = loc_tokens & region_tokens
-    # If they share a meaningful geographic token (city/country name), consider it a match
     if shared - _GEO_STOPWORDS:
         return True
 
     # Determine if the search_region is a broad region name (e.g. "Europe", "Asia")
-    # vs a specific location (e.g. "Paddington, London, UK", "Central, Hong Kong")
     region_is_broad = False
     for region_key in _REGION_COUNTRIES:
         if region_key in region or region in region_key:
@@ -1618,15 +2612,20 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
                 return False
 
     # For specific location-based search regions (cities, neighborhoods):
-    # Only match via shared tokens (already checked above) or country match.
-    # Do NOT match just because both are in the same continent.
-    # E.g. "Singapore" vs "Hong Kong" → both in Asia but should NOT match.
+    # Check if the location and region share the same country.
+    # Build a set of all country names that appear in each string.
+    all_country_names: set[str] = set()
+    for countries in _REGION_COUNTRIES.values():
+        all_country_names.update(countries)
 
-    # Check if the location's country matches a country in the search region
-    for region_key, countries in _REGION_COUNTRIES.items():
-        for country in countries:
-            if country in region_expanded:
-                # User's region contains this country — check if location also contains it
-                return country in loc_expanded
+    loc_countries = {c for c in all_country_names if c in loc_expanded}
+    region_countries = {c for c in all_country_names if c in region_expanded}
+
+    if loc_countries and region_countries:
+        # Both contain country references — do they overlap?
+        if loc_countries & region_countries:
+            return True  # Same country → trust the LLM location
+        else:
+            return False  # Different countries → genuine mismatch
 
     return True  # Can't determine → don't block
