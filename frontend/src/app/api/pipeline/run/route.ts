@@ -12,8 +12,7 @@ export async function POST(request: Request) {
         ...(authHeader ? { Authorization: authHeader } : {}),
       },
       body: JSON.stringify(body),
-      // Long timeout — pipeline can take minutes for large batches
-      signal: AbortSignal.timeout(600000), // 10 min
+      signal: AbortSignal.timeout(30000), // 30s — POST now returns immediately
     });
 
     if (!backendResponse.ok) {
@@ -29,14 +28,11 @@ export async function POST(request: Request) {
       return new Response(err, { status: backendResponse.status });
     }
 
-    // Forward the SSE stream through
-    return new Response(backendResponse.body, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      },
+    // POST now returns JSON { search_id } — forward it
+    const data = await backendResponse.json();
+    return new Response(JSON.stringify(data), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Pipeline proxy error:", error);

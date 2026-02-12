@@ -64,7 +64,7 @@ class QualificationResult(BaseModel):
     )
     headquarters_location: Optional[str] = Field(
         default=None,
-        description="Company headquarters location (city, country) if found on the website"
+        description="Company headquarters full address if found on the website (street, city, country)"
     )
 
 

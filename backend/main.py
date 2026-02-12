@@ -139,8 +139,8 @@ async def process_lead(
             qualification_tier=QualificationTier.REVIEW,
             confidence_score=score,
             is_qualified=False,
-            reasoning=f"Website could not be crawled — manual review needed. Error: {crawl_result.error_message}",
-            red_flags=["Crawl failed - needs manual website visit"],
+            reasoning="Website could not be crawled — manual review needed.",
+            red_flags=["Crawl failed — needs manual website visit"],
             crawl_success=False,
             error_message=crawl_result.error_message
         )

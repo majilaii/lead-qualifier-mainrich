@@ -62,6 +62,7 @@ class Profile(Base):
     # Relationships
     searches: Mapped[list["Search"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     usage: Mapped[list["UsageTracking"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    templates: Mapped[list["SearchTemplate"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
 
 
 class Search(Base):
@@ -91,6 +92,7 @@ class QualifiedLead(Base):
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
     search_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("searches.id"), index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), nullable=True, index=True)  # For global dedup across hunts
     # Company info
     company_name: Mapped[str] = mapped_column(String(500))
     domain: Mapped[str] = mapped_column(String(255), index=True)
@@ -114,12 +116,19 @@ class QualifiedLead(Base):
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     deal_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     status_changed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
 
     # Relationships
     search: Mapped["Search"] = relationship(back_populates="leads")
     enrichment: Mapped[Optional["EnrichmentResult_"]] = relationship(
         back_populates="lead", uselist=False, cascade="all, delete-orphan"
+    )
+    contacts: Mapped[list["LeadContact"]] = relationship(
+        back_populates="lead", cascade="all, delete-orphan"
+    )
+    snapshots: Mapped[list["LeadSnapshot"]] = relationship(
+        back_populates="lead", cascade="all, delete-orphan"
     )
 
     __table_args__ = (
@@ -155,6 +164,7 @@ class UsageTracking(Base):
     leads_qualified: Mapped[int] = mapped_column(Integer, default=0)
     searches_run: Mapped[int] = mapped_column(Integer, default=0)
     enrichments_used: Mapped[int] = mapped_column(Integer, default=0)
+    linkedin_lookups: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
@@ -165,3 +175,53 @@ class UsageTracking(Base):
     __table_args__ = (
         Index("ix_usage_user_month", "user_id", "year_month", unique=True),
     )
+
+
+class LeadContact(Base):
+    """Structured people data extracted from company websites or enrichment APIs."""
+    __tablename__ = "lead_contacts"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    lead_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("qualified_leads.id", ondelete="CASCADE"), index=True)
+    full_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    job_title: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    linkedin_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    source: Mapped[str] = mapped_column(String(50), default="website")  # website | hunter | pdl | rocketreach
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    # Relationships
+    lead: Mapped["QualifiedLead"] = relationship(back_populates="contacts")
+
+
+class SearchTemplate(Base):
+    """Saved ICP presets for re-running searches without re-explaining context."""
+    __tablename__ = "search_templates"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255))
+    search_context: Mapped[dict] = mapped_column(JSON)  # Full ICP context
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship(back_populates="templates")
+
+
+class LeadSnapshot(Base):
+    """Historical snapshots of lead scores for re-qualification tracking."""
+    __tablename__ = "lead_snapshots"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    lead_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("qualified_leads.id", ondelete="CASCADE"), index=True)
+    score: Mapped[int] = mapped_column(Integer)
+    tier: Mapped[str] = mapped_column(String(20))
+    reasoning: Mapped[str] = mapped_column(Text, default="")
+    key_signals: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    snapshot_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    # Relationships
+    lead: Mapped["QualifiedLead"] = relationship(back_populates="snapshots")

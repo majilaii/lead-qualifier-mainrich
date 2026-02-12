@@ -19,8 +19,6 @@ interface SearchItem {
   created_at: string | null;
 }
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-
 export default function HuntsPage() {
   const { session } = useAuth();
   const router = useRouter();
@@ -28,12 +26,13 @@ export default function HuntsPage() {
   const [searches, setSearches] = useState<SearchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [resuming, setResuming] = useState<string | null>(null);
 
   const fetchSearches = useCallback(async () => {
     if (!session?.access_token) return;
     try {
-      const res = await fetch(`${API}/api/searches`, {
+      const res = await fetch("/api/proxy/searches", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (res.ok) setSearches(await res.json());
@@ -47,16 +46,16 @@ export default function HuntsPage() {
   }, [fetchSearches]);
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Delete this hunt and all its leads?")) return;
     setDeleting(id);
     try {
-      await fetch(`${API}/api/searches/${id}`, {
+      await fetch(`/api/proxy/searches/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${session!.access_token}` },
       });
       setSearches((prev) => prev.filter((s) => s.id !== id));
     } finally {
       setDeleting(null);
+      setConfirmDelete(null);
     }
   };
 
@@ -123,21 +122,26 @@ export default function HuntsPage() {
                 <h3 className="font-mono text-xs font-semibold text-text-primary uppercase tracking-[0.1em] truncate flex-1">
                   {s.industry || "Untitled Search"}
                 </h3>
-                <span
-                  onClick={(e) => { e.stopPropagation(); handleDelete(s.id); }}
-                  role="button"
-                  className="text-text-dim hover:text-red-400 transition-colors ml-2 opacity-0 group-hover:opacity-100 cursor-pointer"
-                  title="Delete hunt"
-                >
-                  {deleting === s.id ? (
-                    <span className="w-3 h-3 border border-text-dim border-t-transparent rounded-full animate-spin inline-block" />
-                  ) : (
+                {confirmDelete === s.id ? (
+                  <span className="flex items-center gap-1.5 ml-2" onClick={(e) => e.stopPropagation()}>
+                    <span role="button" onClick={() => handleDelete(s.id)} className={`font-mono text-[9px] text-red-400 hover:text-red-300 transition-colors cursor-pointer ${deleting === s.id ? "opacity-50 pointer-events-none" : ""}`}>
+                      {deleting === s.id ? "…" : "Confirm"}
+                    </span>
+                    <span role="button" onClick={() => setConfirmDelete(null)} className="font-mono text-[9px] text-text-dim hover:text-text-muted transition-colors cursor-pointer">Cancel</span>
+                  </span>
+                ) : (
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete(s.id); }}
+                    role="button"
+                    className="text-text-dim hover:text-red-400 transition-colors ml-2 opacity-0 group-hover:opacity-100 cursor-pointer"
+                    title="Delete hunt"
+                  >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="3 6 5 6 21 6" />
                       <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
                     </svg>
-                  )}
-                </span>
+                  </span>
+                )}
               </div>
 
               {s.technology_focus && (
