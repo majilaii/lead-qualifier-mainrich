@@ -9,7 +9,7 @@ import {
 } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import UsageMeter from "../UsageMeter";
@@ -1090,6 +1090,20 @@ export default function ChatInterface() {
   const [templateName, setTemplateName] = useState("");
   const [templateSaving, setTemplateSaving] = useState(false);
 
+  // Check for ?session= URL param to resume a saved chat
+  const searchParams = useSearchParams();
+  const resumeSessionId = searchParams.get("session");
+  const resumeAttempted = useRef(false);
+
+  useEffect(() => {
+    if (!resumeSessionId || resumeAttempted.current) return;
+    if (!session?.access_token) return;
+    resumeAttempted.current = true;
+    hunt.resumeChat(resumeSessionId).catch((err) =>
+      console.error("Failed to resume chat session:", err)
+    );
+  }, [resumeSessionId, session, hunt]);
+
   // Load templates on mount
   useEffect(() => {
     if (templatesLoaded || !session?.access_token) return;
@@ -1339,7 +1353,8 @@ export default function ChatInterface() {
   const showSearchAction = readiness.isReady && phase === "chat" && !isLoading;
   // Show "skip & search" when we have at least 1 user message, AI has responded, but isReady is still false
   const showSkipSearch = !readiness.isReady && phase === "chat" && !isLoading && messages.length >= 2;
-  const showChatInput = phase === "chat";
+  // Always show chat input except when actively searching (brief loading state)
+  const showChatInput = phase !== "searching";
 
   // Split layout: map + chat sidebar from search-complete onwards
   const splitMode = (phase === "search-complete" || phase === "qualifying" || phase === "complete") && showMap;
@@ -1461,7 +1476,7 @@ export default function ChatInterface() {
           </Link>
           {/* Back to dashboard — always visible */}
           <button
-            onClick={() => router.push("/dashboard")}
+            onClick={() => router.push(localStorage.getItem("lastDashboardTab") || "/dashboard")}
             className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-secondary/30 rounded-lg px-2.5 py-1.5 cursor-pointer ml-1"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
@@ -1522,8 +1537,11 @@ export default function ChatInterface() {
               {chatContent}
             </div>
 
+            {/* Chat input in split mode */}
+            {showChatInput && <ChatInput onSend={sendMessage} isLoading={isLoading} />}
+
             {/* Status bar */}
-            <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-3 flex-shrink-0">
+            <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-2 flex-shrink-0">
               <div className="flex items-center justify-between">
                 <p className="font-mono text-[10px] text-text-dim">
                   {phase === "search-complete" && `${searchCompanies.length} companies found — qualify them`}
@@ -1599,11 +1617,10 @@ export default function ChatInterface() {
           {showChatInput && <ChatInput onSend={sendMessage} isLoading={isLoading} />}
 
           {/* Status bar for pipeline phases */}
-          {!showChatInput && (
-            <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-3 flex-shrink-0">
+          {phase !== "chat" && phase !== "searching" && (
+            <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-2 flex-shrink-0">
               <div className="max-w-3xl mx-auto flex items-center justify-between">
                 <p className="font-mono text-[10px] text-text-dim">
-                  {phase === "searching" && "Generating queries and searching the web..."}
                   {phase === "search-complete" && "Review the results above, then qualify them"}
                   {phase === "qualifying" && `Qualifying ${searchCompanies.length} companies — browse results above while you wait`}
                   {phase === "complete" && `Done — ${pipelineSummary?.hot || 0} hot leads found`}

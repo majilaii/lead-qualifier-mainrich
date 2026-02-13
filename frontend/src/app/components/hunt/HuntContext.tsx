@@ -98,8 +98,35 @@ export const INITIAL_READINESS: Readiness = {
   isReady: false,
 };
 
+export interface PipelineCreateConfig {
+  mode: "discover" | "qualify_only";
+  searchContext?: {
+    industry?: string;
+    company_profile?: string;
+    technology_focus?: string;
+    qualifying_criteria?: string;
+    disqualifiers?: string;
+    geographic_region?: string;
+  };
+  domains?: string[];
+  templateId?: string;
+  name?: string;
+  countryCode?: string;
+  options?: {
+    use_vision?: boolean;
+    max_leads?: number;
+  };
+}
+
+export interface DiscoveryProgress {
+  stage: string;
+  status: "running" | "done";
+  count?: number;
+}
+
 export type Phase =
   | "chat"
+  | "discovering"
   | "searching"
   | "search-complete"
   | "qualifying"
@@ -143,15 +170,22 @@ interface HuntContextValue {
   /* ── Actions ── */
   launchSearch: (ctx: ExtractedContext) => Promise<void>;
   launchPipeline: (batch: SearchCompany[], previousResults: QualifiedCompany[], ctx: ExtractedContext | null) => Promise<void>;
+  /** Unified pipeline creation — primary entry point (bypasses chat) */
+  createPipeline: (config: PipelineCreateConfig) => Promise<void>;
   resetHunt: () => void;
   /** Load a saved search (with messages + leads) back into context */
   resumeHunt: (searchId: string) => Promise<void>;
+  /** Resume a saved chat session — loads messages but stays in chat phase */
+  resumeChat: (sessionId: string) => Promise<void>;
 
   /** The DB search ID (set after pipeline saves to DB) */
   searchId: string | null;
 
   /** True while an SSE pipeline stream is active */
   isPipelineRunning: boolean;
+
+  /** Discovery stage progress (for discover mode pipelines) */
+  discoveryProgress: DiscoveryProgress | null;
 }
 
 const HuntContext = createContext<HuntContextValue | null>(null);
@@ -196,6 +230,11 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   const [enrichDone, setEnrichDone] = useState(false);
   const [isPipelineRunning, setIsPipelineRunning] = useState(false);
   const [searchId, setSearchId] = useState<string | null>(null);
+  const [discoveryProgress, setDiscoveryProgress] = useState<DiscoveryProgress | null>(null);
+
+  // Chat session ID — assigned on first message, used to persist chat to DB
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
+  const chatSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Abort controller for in-flight SSE so we can cancel on reset
   const abortRef = useRef<AbortController | null>(null);
@@ -223,6 +262,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         if (s.pipelineSummary) setPipelineSummary(s.pipelineSummary);
         if (s.extractedContext) setExtractedContext(s.extractedContext);
         if (s.searchId) setSearchId(s.searchId);
+        if (s.chatSessionId) setChatSessionId(s.chatSessionId);
         if (s.pipelineStartTime) setPipelineStartTime(s.pipelineStartTime);
       }
     } catch { /* ignore */ }
@@ -254,6 +294,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         pipelineSummary,
         extractedContext,
         searchId,
+        chatSessionId,
         pipelineStartTime: isPipelineRunning ? pipelineStartTime : 0,
       };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
@@ -263,8 +304,60 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   }, [
     isHydrated, messages, readiness, phase, searchCompanies, allSearchCompanies,
     qualifiedCompanies, pipelineSummary, extractedContext, searchId,
-    isPipelineRunning, pipelineStartTime,
+    chatSessionId, isPipelineRunning, pipelineStartTime,
   ]);
+
+  /* ══════════════════════════════════════════════
+     Auto-save chat session to DB (debounced)
+     Creates/updates a Search record so the chat appears on the dashboard.
+     Only fires when there are messages and the user is authenticated.
+     ══════════════════════════════════════════════ */
+  useEffect(() => {
+    // Only save when we have at least one user message and one assistant reply
+    if (!session?.access_token) return;
+    if (messages.length < 2) return;
+    // Don't save if a pipeline/search already owns this session (searchId is set)
+    if (searchId) return;
+
+    // Debounce — wait 1.5s after last message update
+    if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
+    chatSaveTimerRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/proxy/chat/session", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({
+            session_id: chatSessionId,
+            messages: messages.map((m) => ({ role: m.role, content: m.content })),
+            extracted_context: extractedContext
+              ? {
+                  industry: extractedContext.industry,
+                  companyProfile: extractedContext.companyProfile,
+                  technologyFocus: extractedContext.technologyFocus,
+                  qualifyingCriteria: extractedContext.qualifyingCriteria,
+                  disqualifiers: extractedContext.disqualifiers,
+                }
+              : undefined,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.session_id && !chatSessionId) {
+            setChatSessionId(data.session_id);
+          }
+        }
+      } catch {
+        /* non-critical — best-effort save */
+      }
+    }, 1500);
+
+    return () => {
+      if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
+    };
+  }, [messages, session, chatSessionId, extractedContext, searchId]);
 
   /* ══════════════════════════════════════════════
      Shared SSE stream consumer — used by both launchPipeline and recovery.
@@ -436,7 +529,21 @@ export function HuntProvider({ children }: { children: ReactNode }) {
                 const event = JSON.parse(match[1]);
                 eventCountRef.current += 1;
 
-                if (event.type === "progress") {
+                if (event.type === "stage") {
+                  // Discovery stage events from pipeline/create
+                  setDiscoveryProgress({
+                    stage: event.stage,
+                    status: event.status,
+                    count: event.count,
+                  });
+                  if (event.status === "done") {
+                    // Discovery complete — transition to qualifying phase
+                    setPhase("qualifying");
+                  }
+                } else if (event.type === "init") {
+                  // Pipeline init — total companies to process
+                  // Update searchCompanies count for progress display
+                } else if (event.type === "progress") {
                   setPipelineProgress({
                     index: event.index,
                     total: event.total,
@@ -660,6 +767,9 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     setEnrichDone(false);
     setIsPipelineRunning(false);
     setSearchId(null);
+    setChatSessionId(null);
+    setDiscoveryProgress(null);
+    if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
     try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
   }, []);
 
@@ -732,6 +842,8 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       setIsPipelineRunning(true);
       eventCountRef.current = 0;
 
+      // If we had a chat session, we'll stop auto-saving once searchId is set
+
       // Step 1: POST to start the background pipeline — returns { search_id }
       const response = await fetch("/api/pipeline/run", {
         method: "POST",
@@ -795,6 +907,94 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     [session, connectToStream],
   );
 
+  /* ── Create pipeline (unified entry point — no chat required) ── */
+  const createPipeline = useCallback(
+    async (config: PipelineCreateConfig) => {
+      // Abort any prior stream
+      abortRef.current?.abort();
+
+      // Reset state for new pipeline
+      setQualifiedCompanies([]);
+      setPipelineProgress(null);
+      setPipelineSummary(null);
+      setDiscoveryProgress(null);
+      setPipelineStartTime(Date.now());
+      setIsPipelineRunning(true);
+      eventCountRef.current = 0;
+
+      // Set appropriate initial phase
+      if (config.mode === "discover") {
+        setPhase("discovering");
+      } else {
+        setPhase("qualifying");
+      }
+
+      // Set extracted context if provided
+      if (config.searchContext) {
+        setExtractedContext({
+          industry: config.searchContext.industry || null,
+          companyProfile: config.searchContext.company_profile || null,
+          technologyFocus: config.searchContext.technology_focus || null,
+          qualifyingCriteria: config.searchContext.qualifying_criteria || null,
+          disqualifiers: config.searchContext.disqualifiers || null,
+          geographicRegion: config.searchContext.geographic_region || null,
+          countryCode: config.countryCode || null,
+        });
+      }
+
+      // POST to the unified pipeline/create endpoint
+      const response = await fetch("/api/proxy/pipeline/create", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
+        body: JSON.stringify({
+          name: config.name,
+          mode: config.mode,
+          search_context: config.searchContext || undefined,
+          domains: config.domains || undefined,
+          template_id: config.templateId || undefined,
+          country_code: config.countryCode || undefined,
+          options: config.options || { use_vision: true },
+        }),
+      });
+
+      if (!response.ok) {
+        if (response.status === 429) {
+          const err = await response.json();
+          window.dispatchEvent(new CustomEvent("hunt:quota_exceeded", { detail: err }));
+          setPhase("chat");
+          setIsPipelineRunning(false);
+          return;
+        }
+        setIsPipelineRunning(false);
+        const errText = await response.text().catch(() => "Pipeline creation failed");
+        throw new Error(errText);
+      }
+
+      const { pipeline_id: newPipelineId } = await response.json();
+      setSearchId(newPipelineId);
+
+      // Persist to sessionStorage
+      try {
+        const raw = sessionStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const s = JSON.parse(raw);
+          s.searchId = newPipelineId;
+          s.phase = config.mode === "discover" ? "discovering" : "qualifying";
+          sessionStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+        }
+      } catch { /* ignore */ }
+
+      // Connect to SSE stream for live results
+      connectToStream(newPipelineId, session?.access_token || "");
+    },
+    [session, connectToStream],
+  );
+
   /* ── Resume a saved hunt from the DB ── */
   const resumeHunt = useCallback(
     async (savedSearchId: string) => {
@@ -851,6 +1051,74 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     [session],
   );
 
+  /* ── Resume a chat session (loads messages, stays in "chat" phase) ── */
+  const resumeChat = useCallback(
+    async (sessionId: string) => {
+      if (!session?.access_token) throw new Error("Not authenticated");
+
+      // Don't reload if we're already on this session
+      if (chatSessionId === sessionId && messages.length > 0) return;
+
+      const res = await fetch(`/api/proxy/searches/${sessionId}`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) throw new Error("Failed to load chat session");
+      const data = await res.json();
+
+      const search = data.search;
+
+      // Restore messages
+      if (Array.isArray(search.messages) && search.messages.length > 0) {
+        setMessages(
+          search.messages.map((m: { role: string; content: string }) => ({
+            id: crypto.randomUUID(),
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: Date.now(),
+          })),
+        );
+      }
+
+      // Restore context (if any was extracted)
+      if (search.industry || search.technology_focus || search.qualifying_criteria) {
+        setExtractedContext({
+          industry: search.industry || null,
+          companyProfile: search.company_profile || null,
+          technologyFocus: search.technology_focus || null,
+          qualifyingCriteria: search.qualifying_criteria || null,
+          disqualifiers: search.disqualifiers || null,
+          geographicRegion: search.geographic_region || null,
+          countryCode: search.country_code || null,
+        });
+        // Update readiness based on what context exists
+        setReadiness({
+          industry: !!search.industry,
+          companyProfile: !!search.company_profile,
+          technologyFocus: !!search.technology_focus,
+          qualifyingCriteria: !!search.qualifying_criteria,
+          isReady: !!(search.industry && search.technology_focus && search.qualifying_criteria),
+        });
+      }
+
+      // If this session has leads, restore them too
+      const leads = data.leads || [];
+      if (leads.length > 0) {
+        const qualified = mapLeadsToQualified(leads);
+        setQualifiedCompanies(qualified);
+        setPipelineSummary(buildSummary(qualified));
+        setPhase("complete");
+      } else {
+        // Stay in chat phase so user can continue the conversation
+        setPhase("chat");
+      }
+
+      // Link to this session so auto-save updates it instead of creating a new one
+      setChatSessionId(sessionId);
+      setSearchId(null); // Not a pipeline — keep searchId null so auto-save works
+    },
+    [session, chatSessionId, messages.length],
+  );
+
   return (
     <HuntContext.Provider
       value={{
@@ -880,10 +1148,13 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         setEnrichDone,
         launchSearch,
         launchPipeline,
+        createPipeline,
         resetHunt,
         resumeHunt,
+        resumeChat,
         searchId,
         isPipelineRunning,
+        discoveryProgress,
       }}
     >
       {children}
