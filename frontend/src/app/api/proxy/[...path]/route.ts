@@ -14,8 +14,9 @@ import { NextRequest, NextResponse } from "next/server";
 /* Force Node.js runtime — SSE streams can run for minutes and must not be
    killed by the default edge/serverless timeout. */
 export const runtime = "nodejs";
-/* Disable body size limit (SSE has no predetermined length). */
-export const maxDuration = 600; // seconds
+/* Max duration for serverless function — 300s is the hobby plan cap.
+   SSE streams may exceed this; upgrade to Pro for up to 900s. */
+export const maxDuration = 300; // seconds (Vercel hobby max)
 
 const BACKEND =
   process.env.CHAT_BACKEND_URL ||
