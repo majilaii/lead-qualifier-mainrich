@@ -40,6 +40,7 @@ from sqlalchemy import select, func, delete
 from auth import require_auth
 from chat_engine import ChatEngine, ExtractedContext
 from logging_config import setup_logging
+from pipeline_engine import process_companies as _process_companies_core, run_discovery
 from stripe_billing import is_stripe_configured
 from contact_extraction import extract_contacts_from_content
 from linkedin_enrichment import enrich_linkedin, get_linkedin_status
@@ -186,6 +187,26 @@ class PipelineManager:
     def set_task(self, search_id: str, task: asyncio.Task):
         self._tasks[search_id] = task
         task.add_done_callback(lambda _t: self._tasks.pop(search_id, None))
+
+    async def cancel(self, search_id: str) -> bool:
+        """Cancel a running pipeline. Returns True if it was running."""
+        run = self._runs.get(search_id)
+        if not run or run.status != "running":
+            return False
+        # Cancel the asyncio task
+        task = self._tasks.get(search_id)
+        if task and not task.done():
+            task.cancel()
+        # Emit a complete event so SSE subscribers get notified
+        summary = {"hot": 0, "review": 0, "rejected": 0, "failed": 0, "stopped": True}
+        # Count what we have so far
+        for ev in run.events:
+            if ev.get("type") == "result":
+                tier = ev.get("company", {}).get("tier", "rejected")
+                if tier in summary:
+                    summary[tier] += 1
+        await run.emit({"type": "complete", "summary": summary, "search_id": search_id, "stopped": True})
+        return True
 
     def cleanup_old(self, max_age_seconds: int = 3600):
         """Remove completed runs older than max_age_seconds to prevent memory leak."""
@@ -670,6 +691,77 @@ async def enrich_contacts(request: EnrichRequest, user=Depends(require_auth)):
 
 
 # ──────────────────────────────────────────────
+# Chat Session Auto-Save Endpoint
+# ──────────────────────────────────────────────
+
+class ChatSessionRequest(BaseModel):
+    session_id: Optional[str] = None
+    messages: list[dict]
+    extracted_context: Optional[dict] = None
+
+
+@app.post("/api/chat/session")
+async def save_chat_session(request: ChatSessionRequest, user=Depends(require_auth)):
+    """
+    Create or update a chat session (Search record) so in-progress chats
+    appear on the dashboard before a pipeline is launched.
+    """
+    from db import get_db as _get_db
+    from db.models import Search
+    from sqlalchemy import select as _select
+
+    ctx = request.extracted_context or {}
+    # Normalise camelCase keys from frontend to snake_case
+    context = {
+        "industry": ctx.get("industry"),
+        "company_profile": ctx.get("companyProfile") or ctx.get("company_profile"),
+        "technology_focus": ctx.get("technologyFocus") or ctx.get("technology_focus"),
+        "qualifying_criteria": ctx.get("qualifyingCriteria") or ctx.get("qualifying_criteria"),
+        "disqualifiers": ctx.get("disqualifiers"),
+    }
+
+    async for db in _get_db():
+        await _ensure_profile_exists(db, user.id)
+
+        if request.session_id:
+            # Try to update existing session
+            existing = (await db.execute(
+                _select(Search).where(
+                    Search.id == request.session_id,
+                    Search.user_id == user.id,
+                )
+            )).scalar_one_or_none()
+
+            if existing:
+                existing.messages = request.messages
+                existing.industry = context.get("industry") or existing.industry
+                existing.company_profile = context.get("company_profile") or existing.company_profile
+                existing.technology_focus = context.get("technology_focus") or existing.technology_focus
+                existing.qualifying_criteria = context.get("qualifying_criteria") or existing.qualifying_criteria
+                existing.disqualifiers = context.get("disqualifiers") or existing.disqualifiers
+                await db.commit()
+                return {"session_id": existing.id}
+
+        # Create new session
+        session_id = str(uuid.uuid4())
+        search = Search(
+            id=session_id,
+            user_id=user.id,
+            industry=context.get("industry"),
+            company_profile=context.get("company_profile"),
+            technology_focus=context.get("technology_focus"),
+            qualifying_criteria=context.get("qualifying_criteria"),
+            disqualifiers=context.get("disqualifiers"),
+            queries_used={"_mode": "chat_session"},
+            total_found=0,
+            messages=request.messages,
+        )
+        db.add(search)
+        await db.commit()
+        return {"session_id": session_id}
+
+
+# ──────────────────────────────────────────────
 # Pipeline SSE Endpoint
 # ──────────────────────────────────────────────
 
@@ -691,7 +783,7 @@ class SearchContext(BaseModel):
 
 
 class PipelineRequest(BaseModel):
-    companies: list[PipelineCompany] = Field(..., max_length=50)
+    companies: list[PipelineCompany] = Field(..., max_length=200)
     use_vision: bool = True
     search_context: Optional[SearchContext] = None
     messages: Optional[list[dict]] = None  # chat history [{role, content}]
@@ -722,6 +814,26 @@ class LinkedInEnrichRequest(BaseModel):
 class LeadSearchRequest(BaseModel):
     query: str = Field(..., max_length=500)
     tier: Optional[str] = None
+
+
+class PipelineCreateRequest(BaseModel):
+    """
+    Unified pipeline creation — the primary entry point for all pipeline runs.
+
+    Modes:
+      - discover: generate Exa queries from search_context -> search -> crawl -> qualify
+      - qualify_only: take provided domains -> crawl -> qualify (skip discovery)
+    """
+    name: Optional[str] = Field(None, max_length=255, description="Pipeline name (auto-generated if omitted)")
+    mode: str = Field("discover", pattern="^(discover|qualify_only)$")
+    search_context: Optional[SearchContext] = None
+    domains: Optional[list[str]] = Field(None, max_length=200, description="Domains for qualify_only mode")
+    template_id: Optional[str] = Field(None, max_length=100, description="Load search_context from a saved template")
+    country_code: Optional[str] = Field(None, max_length=2, description="ISO 3166-1 alpha-2 for Exa geo filtering")
+    options: Optional[dict] = Field(default_factory=lambda: {
+        "use_vision": True,
+        "max_leads": 100,
+    })
 
 
 def sse_event(data: dict) -> str:
@@ -768,12 +880,18 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
     companies.sort(key=lambda c: c.get("score") or 0, reverse=True)
 
     # Save search to DB upfront so we have a search_id
+    # Tag as chat-originated pipeline so the frontend can show "Resume Chat"
+    pipeline_name = (search_ctx or {}).get("industry") or (search_ctx or {}).get("company_profile") or "Chat Pipeline"
+    ctx_for_db = {
+        "_mode": "chat_pipeline",
+        "_pipeline_name": pipeline_name,
+    }
     search_id = None
     try:
         search_id = await _save_search_to_db(
             user_id=user.id,
             context=search_ctx or {},
-            queries=[],
+            queries=ctx_for_db,
             total_found=len(companies),
             messages=pipeline_messages,
         )
@@ -790,264 +908,20 @@ async def run_pipeline(request: PipelineRequest, user=Depends(require_auth)):
     run = pipeline_manager.register(search_id, total)
 
     async def _run_pipeline_bg():
-        """Background task — processes companies and emits events."""
-        from scraper import CrawlerPool, crawl_company
-        from intelligence import LeadQualifier
-        from utils import determine_tier
-
-        await run.emit({"type": "init", "total": total})
-
-        qualifier = LeadQualifier(search_context=search_ctx)
-        stats = {"hot": 0, "review": 0, "rejected": 0, "failed": 0}
-
-        # ── Spread co-located pins in a spiral so they don't stack ──
-        _geo_hit_count: dict[tuple[float, float], int] = {}
-
-        def _spread_co_located(
-            lat: Optional[float], lng: Optional[float]
-        ) -> tuple[Optional[float], Optional[float]]:
-            if lat is None or lng is None:
-                return lat, lng
-            key = (round(lat, 6), round(lng, 6))
-            n = _geo_hit_count.get(key, 0)
-            _geo_hit_count[key] = n + 1
-            if n == 0:
-                return lat, lng
-            angle = n * 2.399_963
-            r = 0.0012 * math.sqrt(n)
-            return lat + r * math.cos(angle), lng + r * math.sin(angle)
-
-        try:
-            async with CrawlerPool() as pool:
-                for i, company in enumerate(companies):
-                    try:
-                        # Phase: Crawling
-                        await run.emit({
-                            "type": "progress",
-                            "index": i,
-                            "total": total,
-                            "phase": "crawling",
-                            "company": {
-                                "title": company["title"],
-                                "domain": company["domain"],
-                            },
-                        })
-
-                        crawl_result = await crawl_company(
-                            company["url"],
-                            take_screenshot=use_vision,
-                            crawler_pool=pool,
-                        )
-
-                        if crawl_result.success and crawl_result.markdown_content:
-                            try:
-                                contact_snippet = await pool.crawl_contact_pages(company["url"])
-                                if contact_snippet:
-                                    crawl_result = crawl_result.model_copy(update={
-                                        "markdown_content": (
-                                            crawl_result.markdown_content
-                                            + "\n\n=== ADDRESS & CONTACT INFO FROM OTHER PAGES ===\n"
-                                            + contact_snippet
-                                        )
-                                    })
-                                    logger.debug(
-                                        "Appended contact page content for %s (+%d chars)",
-                                        company.get("domain"), len(contact_snippet),
-                                    )
-                            except Exception as e:
-                                logger.debug("Contact page sniff failed for %s: %s", company.get("domain"), e)
-
-                        if not crawl_result.success:
-                            fail_country = _guess_country_from_domain(company.get("domain", ""))
-                            fail_lat = None
-                            fail_lng = None
-                            if fail_country:
-                                geo = await _geocode_location(fail_country)
-                                if geo:
-                                    _, fail_lat, fail_lng = geo
-                            fail_lat, fail_lng = _spread_co_located(fail_lat, fail_lng)
-
-                            result_data = {
-                                "title": company["title"],
-                                "domain": company["domain"],
-                                "url": company["url"],
-                                "score": 5,
-                                "tier": "review",
-                                "reasoning": f"Website could not be crawled — {_sanitize_crawl_error(crawl_result.error_message)}. This company may still be relevant; visit the site manually to verify.",
-                                "hardware_type": None,
-                                "key_signals": [],
-                                "red_flags": ["Crawl failed — needs manual review"],
-                                "country": fail_country,
-                                "latitude": fail_lat,
-                                "longitude": fail_lng,
-                            }
-                            stats["review"] += 1
-                            await run.emit({
-                                "type": "result",
-                                "index": i,
-                                "total": total,
-                                "company": result_data,
-                            })
-                            if search_id:
-                                try:
-                                    await _save_lead_to_db(search_id, result_data, user_id=user.id)
-                                except Exception as e:
-                                    logger.error("Failed to save crawl-failed lead %s to DB: %s", company.get('title'), e, exc_info=True)
-                            continue
-
-                        # Phase: Qualifying
-                        await run.emit({
-                            "type": "progress",
-                            "index": i,
-                            "total": total,
-                            "phase": "qualifying",
-                            "company": {
-                                "title": company["title"],
-                                "domain": company["domain"],
-                            },
-                        })
-
-                        qual_result = await qualifier.qualify_lead(
-                            company_name=company["title"],
-                            website_url=company["url"],
-                            crawl_result=crawl_result,
-                            use_vision=use_vision,
-                        )
-
-                        tier = determine_tier(qual_result.confidence_score)
-
-                        # Geocode
-                        hq_location = qual_result.headquarters_location
-                        search_region = (search_ctx or {}).get("geographic_region")
-                        domain_country = _guess_country_from_domain(company.get("domain", ""))
-                        country = None
-                        latitude = None
-                        longitude = None
-
-                        if hq_location:
-                            geo = await _geocode_location(hq_location)
-                            if geo:
-                                resolved_country, resolved_lat, resolved_lng = geo
-                                country_matches = _location_matches_region(
-                                    resolved_country or hq_location, search_region
-                                )
-                                if country_matches:
-                                    country, latitude, longitude = resolved_country, resolved_lat, resolved_lng
-                                else:
-                                    logger.info(
-                                        "Geo mismatch for %s: LLM said '%s' (resolved: %s) but search region is '%s' — using domain/region fallback",
-                                        company.get("domain"), hq_location, resolved_country, search_region,
-                                    )
-                                    if domain_country:
-                                        geo2 = await _geocode_location(domain_country)
-                                        if geo2:
-                                            country, latitude, longitude = geo2
-                                    elif search_region:
-                                        geo2 = await _geocode_location(search_region)
-                                        if geo2:
-                                            country, latitude, longitude = geo2
-
-                        if not country:
-                            if domain_country:
-                                country = domain_country
-                                if search_region and _location_matches_region(domain_country, search_region):
-                                    geo = await _geocode_location(search_region)
-                                    if geo:
-                                        _, latitude, longitude = geo
-                                if not latitude:
-                                    geo = await _geocode_location(country)
-                                    if geo:
-                                        _, latitude, longitude = geo
-                            elif search_region:
-                                geo = await _geocode_location(search_region)
-                                if geo:
-                                    country, latitude, longitude = geo
-
-                        latitude, longitude = _spread_co_located(latitude, longitude)
-
-                        # Extract contacts
-                        extracted_contacts = []
-                        try:
-                            from contact_extraction import extract_contacts_from_content
-                            people = await extract_contacts_from_content(
-                                company_name=company["title"],
-                                domain=company["domain"],
-                                page_content=crawl_result.markdown_content or "",
-                            )
-                            extracted_contacts = [
-                                {
-                                    "full_name": p.full_name,
-                                    "job_title": p.job_title,
-                                    "email": p.email,
-                                    "phone": p.phone,
-                                    "linkedin_url": p.linkedin_url,
-                                    "source": "website",
-                                }
-                                for p in people
-                            ]
-                        except Exception as ce:
-                            logger.debug("Contact extraction failed for %s: %s", company.get("domain"), ce)
-
-                        result_data = {
-                            "title": company["title"],
-                            "domain": company["domain"],
-                            "url": company["url"],
-                            "score": qual_result.confidence_score,
-                            "tier": tier.value,
-                            "hardware_type": qual_result.hardware_type,
-                            "industry_category": qual_result.industry_category,
-                            "reasoning": qual_result.reasoning,
-                            "key_signals": qual_result.key_signals,
-                            "red_flags": qual_result.red_flags,
-                            "country": country,
-                            "latitude": latitude,
-                            "longitude": longitude,
-                            "contacts": extracted_contacts,
-                        }
-
-                        stats[tier.value] += 1
-
-                        await run.emit({
-                            "type": "result",
-                            "index": i,
-                            "total": total,
-                            "company": result_data,
-                        })
-
-                        if search_id:
-                            try:
-                                await _save_lead_to_db(search_id, result_data, user_id=user.id, contacts=extracted_contacts)
-                            except Exception as e:
-                                logger.error("Failed to save lead %s to DB: %s (type: %s)", company.get('title'), e, type(e).__name__, exc_info=True)
-
-                    except Exception as e:
-                        logger.error("Pipeline error for %s: %s", company.get('title', '?'), e)
-                        stats["failed"] += 1
-                        await run.emit({
-                            "type": "error",
-                            "index": i,
-                            "total": total,
-                            "company": {
-                                "title": company["title"],
-                                "domain": company["domain"],
-                            },
-                            "error": str(e)[:200],
-                        })
-
-        except Exception as e:
-            logger.error("Fatal pipeline error: %s", e)
-            await run.emit({
-                "type": "error",
-                "error": str(e)[:200],
-                "fatal": True,
-            })
-            return
-
-        await run.emit({
-            "type": "complete",
-            "summary": stats,
-            "search_id": search_id,
-        })
+        """Background task — delegates to shared pipeline engine."""
+        await _process_companies_core(
+            companies=companies,
+            search_ctx=search_ctx,
+            use_vision=use_vision,
+            run=run,
+            search_id=search_id,
+            user_id=user.id,
+            geocode_fn=_geocode_location,
+            country_from_domain_fn=_guess_country_from_domain,
+            location_matches_fn=_location_matches_region,
+            sanitize_error_fn=_sanitize_crawl_error,
+            save_lead_fn=_save_lead_to_db,
+        )
 
     task = asyncio.create_task(_run_pipeline_bg())
     pipeline_manager.set_task(search_id, task)
@@ -1087,6 +961,249 @@ async def pipeline_status(search_id: str, user=Depends(require_auth)):
     if not run:
         return {"search_id": search_id, "status": "not_found"}
     return run.snapshot()
+
+
+@app.post("/api/pipeline/{search_id}/stop")
+async def stop_pipeline(search_id: str, user=Depends(require_auth)):
+    """Stop a running pipeline. Keeps any leads already processed."""
+    cancelled = await pipeline_manager.cancel(search_id)
+    if not cancelled:
+        run = pipeline_manager.get(search_id)
+        status = run.status if run else "not_found"
+        return {"search_id": search_id, "stopped": False, "status": status}
+    return {"search_id": search_id, "stopped": True, "status": "stopped"}
+
+
+# ──────────────────────────────────────────────
+# Pipeline Create — Unified Entry Point
+# ──────────────────────────────────────────────
+
+@app.post("/api/pipeline/create")
+async def create_pipeline(request: PipelineCreateRequest, user=Depends(require_auth)):
+    """
+    Unified pipeline creation — the **primary** entry point for all pipeline runs.
+
+    This replaces the split flow of /api/chat/search + /api/pipeline/run.
+    The frontend can call this single endpoint from any entry point:
+    chat, manual config form, saved template, or API.
+
+    Modes:
+      - discover: generate Exa queries from search_context → Exa search → crawl → qualify
+      - qualify_only: take provided domains → crawl → qualify (skip discovery)
+
+    Returns immediately with { pipeline_id, status: "running" }.
+    Connect to GET /api/pipeline/{pipeline_id}/stream for live SSE.
+    """
+    from pipeline_engine import run_discovery, process_companies
+    from usage import check_quota, increment_usage, LEADS_PER_HUNT
+    from db import get_db as _get_db
+    from db.models import Profile, SearchTemplate
+
+    # ── Resolve search_context from template if needed ──
+    search_ctx_model = request.search_context
+    if request.template_id and not search_ctx_model:
+        async for db in _get_db():
+            from sqlalchemy import select as sa_select
+            tmpl = (await db.execute(
+                sa_select(SearchTemplate).where(
+                    SearchTemplate.id == request.template_id,
+                    SearchTemplate.user_id == user.id,
+                )
+            )).scalar_one_or_none()
+            if not tmpl:
+                raise HTTPException(status_code=404, detail="Template not found")
+            ctx_data = tmpl.search_context or {}
+            search_ctx_model = SearchContext(
+                industry=ctx_data.get("industry"),
+                company_profile=ctx_data.get("company_profile"),
+                technology_focus=ctx_data.get("technology_focus"),
+                qualifying_criteria=ctx_data.get("qualifying_criteria"),
+                disqualifiers=ctx_data.get("disqualifiers"),
+                geographic_region=ctx_data.get("geographic_region"),
+            )
+
+    search_ctx = search_ctx_model.model_dump() if search_ctx_model else None
+    use_vision = (request.options or {}).get("use_vision", True)
+    max_leads = (request.options or {}).get("max_leads", 100)
+
+    # ── Validate mode requirements ──
+    if request.mode == "discover" and not search_ctx:
+        raise HTTPException(status_code=400, detail="search_context is required for discover mode")
+    if request.mode == "qualify_only" and not request.domains:
+        raise HTTPException(status_code=400, detail="domains are required for qualify_only mode")
+
+    # ── Quota checks ──
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        plan_max_leads = LEADS_PER_HUNT.get(plan, 25)
+        max_leads = min(max_leads, plan_max_leads)
+
+        # Check search quota (for discover mode)
+        if request.mode == "discover":
+            exceeded = await check_quota(db, user.id, plan_tier=plan, action="search")
+            if exceeded:
+                return JSONResponse(status_code=429, content=exceeded)
+            await increment_usage(db, user.id, searches_run=1)
+
+    # ── Clean domains for qualify_only mode ──
+    clean_domains = []
+    if request.mode == "qualify_only" and request.domains:
+        seen = set()
+        for d in request.domains:
+            d = d.strip().lower().replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+            if d and d not in seen and "." in d:
+                seen.add(d)
+                clean_domains.append(d)
+        clean_domains = clean_domains[:max_leads]
+
+    # ── Generate pipeline name ──
+    pipeline_name = request.name
+    if not pipeline_name:
+        if search_ctx:
+            parts = []
+            if search_ctx.get("industry"):
+                parts.append(search_ctx["industry"][:30])
+            if search_ctx.get("geographic_region"):
+                parts.append(search_ctx["geographic_region"][:20])
+            pipeline_name = " — ".join(parts) if parts else "Pipeline"
+        elif clean_domains:
+            pipeline_name = f"Bulk import ({len(clean_domains)} domains)"
+        else:
+            pipeline_name = "Pipeline"
+
+    # ── Save search to DB ──
+    search_id = None
+    try:
+        ctx_for_db = search_ctx or {}
+        if request.mode == "qualify_only":
+            ctx_for_db["_bulk_import"] = True
+        ctx_for_db["_pipeline_name"] = pipeline_name
+        ctx_for_db["_mode"] = request.mode
+
+        initial_count = len(clean_domains) if request.mode == "qualify_only" else 0
+        search_id = await _save_search_to_db(
+            user_id=user.id,
+            context=ctx_for_db,
+            queries=ctx_for_db,  # Store full context (incl. _pipeline_name, _mode) in queries_used
+            total_found=initial_count,
+            messages=[{"role": "system", "content": f"Pipeline created: {pipeline_name} (mode: {request.mode})"}],
+        )
+        logger.info("Created pipeline %s (%s) for user %s", search_id, pipeline_name, user.id)
+    except Exception as e:
+        logger.error("Failed to create pipeline record: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create pipeline record")
+
+    # ── Register with pipeline manager and spawn background task ──
+    pipeline_manager.cleanup_old()
+    initial_total = len(clean_domains) if request.mode == "qualify_only" else 0
+    run = pipeline_manager.register(search_id, initial_total)
+
+    async def _pipeline_bg():
+        """Background task — handles discovery (if needed) + processing."""
+        try:
+            companies = []
+
+            if request.mode == "discover":
+                # ── Stage 1: Discovery ──
+                if not engine:
+                    await run.emit({"type": "error", "error": "Search engine not initialized", "fatal": True})
+                    return
+
+                discovered = await run_discovery(
+                    engine=engine,
+                    search_context={
+                        **(search_ctx or {}),
+                        "country_code": request.country_code,
+                    },
+                    run=run,
+                )
+
+                if not discovered:
+                    await run.emit({
+                        "type": "complete",
+                        "summary": {"hot": 0, "review": 0, "rejected": 0, "failed": 0, "discovery_empty": True},
+                        "search_id": search_id,
+                    })
+                    return
+
+                # Sort by Exa score (descending) and cap
+                discovered.sort(key=lambda c: c.get("score") or 0, reverse=True)
+                companies = discovered[:max_leads]
+                run.total = len(companies)
+
+                # Check leads quota now that we know the count
+                try:
+                    async for db in _get_db():
+                        profile = (await db.execute(
+                            select(Profile).where(Profile.id == user.id)
+                        )).scalar_one_or_none()
+                        plan = profile.plan if profile else "free"
+                        exceeded = await check_quota(db, user.id, plan_tier=plan, action="leads", count=len(companies))
+                        if exceeded:
+                            await run.emit({"type": "error", "error": "Lead quota exceeded", "fatal": True})
+                            return
+                        await increment_usage(db, user.id, leads_qualified=len(companies))
+                except Exception as e:
+                    logger.error("Quota check in pipeline bg failed: %s", e)
+
+            else:
+                # ── qualify_only: build company list from domains ──
+                companies = []
+                for d in clean_domains:
+                    title = d.split(".")[0].replace("-", " ").title()
+                    companies.append({
+                        "url": f"https://{d}",
+                        "domain": d,
+                        "title": title,
+                    })
+
+                # Quota check for leads
+                try:
+                    async for db in _get_db():
+                        profile = (await db.execute(
+                            select(Profile).where(Profile.id == user.id)
+                        )).scalar_one_or_none()
+                        plan = profile.plan if profile else "free"
+                        exceeded = await check_quota(db, user.id, plan_tier=plan, action="leads", count=len(companies))
+                        if exceeded:
+                            await run.emit({"type": "error", "error": "Lead quota exceeded", "fatal": True})
+                            return
+                        await increment_usage(db, user.id, leads_qualified=len(companies))
+                except Exception as e:
+                    logger.error("Quota check in pipeline bg failed: %s", e)
+
+            # ── Stage 2+: Process companies (crawl → qualify → enrich) ──
+            await process_companies(
+                companies=companies,
+                search_ctx=search_ctx,
+                use_vision=use_vision,
+                run=run,
+                search_id=search_id,
+                user_id=user.id,
+                geocode_fn=_geocode_location,
+                country_from_domain_fn=_guess_country_from_domain,
+                location_matches_fn=_location_matches_region,
+                sanitize_error_fn=_sanitize_crawl_error,
+                save_lead_fn=_save_lead_to_db,
+            )
+
+        except Exception as e:
+            logger.error("Fatal pipeline create error: %s", e, exc_info=True)
+            await run.emit({"type": "error", "error": str(e)[:200], "fatal": True})
+
+    task = asyncio.create_task(_pipeline_bg())
+    pipeline_manager.set_task(search_id, task)
+
+    return {
+        "pipeline_id": search_id,
+        "name": pipeline_name,
+        "mode": request.mode,
+        "status": "running",
+    }
 
 
 # ──────────────────────────────────────────────
@@ -1252,18 +1369,51 @@ async def list_searches(user=Depends(require_auth)):
             )).all()
             tiers = {row[0]: row[1] for row in tier_counts}
 
+            # Extract pipeline metadata from queries_used (where _pipeline_name etc. are stored)
+            queries_ctx = s.queries_used if isinstance(s.queries_used, dict) else {}
+            pipeline_name = queries_ctx.get("_pipeline_name") or s.industry or s.company_profile or "Untitled Pipeline"
+            pipeline_mode = queries_ctx.get("_mode", "discover")
+
+            # Build the reusable search_context for re-runs
+            search_context = {}
+            for key in ("industry", "company_profile", "technology_focus", "qualifying_criteria", "disqualifiers"):
+                val = getattr(s, key, None)
+                if val:
+                    search_context[key] = val
+            # geographic_region is not a column — pull from queries_used
+            if queries_ctx.get("geographic_region"):
+                search_context["geographic_region"] = queries_ctx["geographic_region"]
+
+            # Check if this pipeline is currently running in memory
+            live_run = pipeline_manager.get(s.id)
+            run_status = "complete"
+            run_progress = None
+            if live_run:
+                run_status = live_run.status  # running | complete | error
+                if live_run.status == "running":
+                    run_progress = {
+                        "processed": live_run.processed,
+                        "total": live_run.total,
+                    }
+
             results.append({
                 "id": s.id,
+                "name": pipeline_name,
+                "mode": pipeline_mode,
                 "industry": s.industry,
                 "company_profile": s.company_profile,
                 "technology_focus": s.technology_focus,
                 "qualifying_criteria": s.qualifying_criteria,
                 "disqualifiers": s.disqualifiers,
+                "geographic_region": queries_ctx.get("geographic_region"),
+                "search_context": search_context,
                 "total_found": s.total_found,
                 "hot": tiers.get("hot", 0),
                 "review": tiers.get("review", 0),
                 "rejected": tiers.get("rejected", 0),
                 "created_at": s.created_at.isoformat() if s.created_at else None,
+                "run_status": run_status,
+                "run_progress": run_progress,
             })
 
         return results
@@ -1324,6 +1474,88 @@ async def get_search(search_id: str, user=Depends(require_auth)):
                 for l in leads
             ],
         }
+
+
+@app.post("/api/searches/{search_id}/rerun")
+async def rerun_search(search_id: str, user=Depends(require_auth)):
+    """Re-run a pipeline with the same configuration as an existing search.
+    
+    Clones the ICP context from the original search and creates a brand-new
+    pipeline run (new search_id, new leads).  Returns the same shape as
+    POST /api/pipeline/create.
+    """
+    from db import get_db as _get_db
+    from db.models import Search
+
+    async for db in _get_db():
+        original = (await db.execute(
+            select(Search)
+            .where(Search.id == search_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not original:
+            raise HTTPException(status_code=404, detail="Search not found")
+
+        # Reconstruct the PipelineCreateRequest from stored data
+        queries_ctx = original.queries_used if isinstance(original.queries_used, dict) else {}
+        mode = queries_ctx.get("_mode", "discover")
+        pipeline_name = queries_ctx.get("_pipeline_name", original.industry or "Pipeline")
+
+        search_context = SearchContext(
+            industry=original.industry,
+            company_profile=original.company_profile,
+            technology_focus=original.technology_focus,
+            qualifying_criteria=original.qualifying_criteria,
+            disqualifiers=original.disqualifiers,
+            geographic_region=queries_ctx.get("geographic_region"),
+        )
+
+        create_req = PipelineCreateRequest(
+            name=f"{pipeline_name} (re-run)",
+            mode=mode,
+            search_context=search_context,
+            options={"use_vision": True, "max_leads": 100},
+        )
+
+        # Delegate to the existing create_pipeline endpoint logic
+        return await create_pipeline(create_req, user)
+
+
+@app.get("/api/pipeline/active")
+async def list_active_pipelines(user=Depends(require_auth)):
+    """List all currently running pipelines for this user (in-memory state).
+    
+    Returns a list of pipeline snapshots with progress info.
+    """
+    from db import get_db as _get_db
+    from db.models import Search
+
+    active = []
+    # Get all running pipelines from the manager
+    for sid, run in pipeline_manager._runs.items():
+        if run.status != "running":
+            continue
+        # Verify this run belongs to the requesting user
+        async for db in _get_db():
+            search = (await db.execute(
+                select(Search)
+                .where(Search.id == sid, Search.user_id == user.id)
+            )).scalar_one_or_none()
+            if search:
+                queries_ctx = search.queries_used if isinstance(search.queries_used, dict) else {}
+                active.append({
+                    "id": sid,
+                    "name": queries_ctx.get("_pipeline_name", search.industry or "Pipeline"),
+                    "mode": queries_ctx.get("_mode", "discover"),
+                    "status": run.status,
+                    "processed": run.processed,
+                    "total": run.total,
+                    "industry": search.industry,
+                    "technology_focus": search.technology_focus,
+                    "created_at": search.created_at.isoformat() if search.created_at else None,
+                })
+
+    return active
 
 
 @app.delete("/api/searches/{search_id}")
@@ -1442,6 +1674,150 @@ async def leads_geo(user=Depends(require_auth)):
             }
             for row in leads
         ]
+
+
+# ──────────────────────────────────────────────
+# Search Within Database
+# ──────────────────────────────────────────────
+
+@app.get("/api/leads/search")
+async def search_leads(
+    q: str,
+    tier: Optional[str] = None,
+    user=Depends(require_auth),
+):
+    """Search across stored leads by company name, domain, industry, signals."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead
+    from sqlalchemy import or_
+
+    async for db in _get_db():
+        query = (
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user.id)
+        )
+
+        # Text search across multiple columns
+        search_term = f"%{q}%"
+        query = query.where(
+            or_(
+                QualifiedLead.company_name.ilike(search_term),
+                QualifiedLead.domain.ilike(search_term),
+                QualifiedLead.industry_category.ilike(search_term),
+                QualifiedLead.hardware_type.ilike(search_term),
+                QualifiedLead.reasoning.ilike(search_term),
+                QualifiedLead.country.ilike(search_term),
+            )
+        )
+
+        if tier:
+            query = query.where(QualifiedLead.tier == tier)
+
+        query = query.order_by(QualifiedLead.score.desc()).limit(100)
+        leads = (await db.execute(query)).scalars().all()
+
+        return [
+            {
+                "id": l.id,
+                "company_name": l.company_name,
+                "domain": l.domain,
+                "website_url": l.website_url,
+                "score": l.score,
+                "tier": l.tier,
+                "hardware_type": l.hardware_type,
+                "industry_category": l.industry_category,
+                "reasoning": l.reasoning,
+                "country": l.country,
+                "status": l.status,
+                "created_at": l.created_at.isoformat() if l.created_at else None,
+            }
+            for l in leads
+        ]
+
+
+# ──────────────────────────────────────────────
+# Export Leads as CSV
+# ──────────────────────────────────────────────
+
+@app.get("/api/leads/export")
+async def export_all_leads(
+    user=Depends(require_auth),
+    tier: str | None = None,
+    search_id: str | None = None,
+):
+    """Export user's leads as CSV with optional tier/search_id filter."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact
+    from fastapi.responses import Response
+    from datetime import datetime as _dt
+    import csv
+    import io
+
+    async for db in _get_db():
+        query = (
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(Search.user_id == user.id)
+        )
+        if tier and tier in ("hot", "review", "rejected"):
+            query = query.where(QualifiedLead.tier == tier)
+        if search_id:
+            query = query.where(QualifiedLead.search_id == search_id)
+        query = query.order_by(QualifiedLead.score.desc())
+        leads = (await db.execute(query)).scalars().all()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # Header
+        writer.writerow([
+            "Company Name", "Domain", "Website", "Score", "Tier",
+            "Industry", "Product Type", "Reasoning", "Key Signals", "Red Flags",
+            "Country", "Status", "Notes", "Deal Value",
+            "Contact Names", "Contact Emails", "Contact Titles",
+            "Created At", "Last Seen At",
+        ])
+
+        for lead in leads:
+            # Get contacts for this lead
+            contacts = (await db.execute(
+                select(LeadContact).where(LeadContact.lead_id == lead.id)
+            )).scalars().all()
+
+            names = "; ".join(c.full_name for c in contacts if c.full_name)
+            emails = "; ".join(c.email for c in contacts if c.email)
+            titles = "; ".join(c.job_title for c in contacts if c.job_title)
+
+            signals = "; ".join(lead.key_signals) if lead.key_signals else ""
+            flags = "; ".join(lead.red_flags) if lead.red_flags else ""
+
+            writer.writerow([
+                lead.company_name, lead.domain, lead.website_url,
+                lead.score, lead.tier,
+                lead.industry_category or "", lead.hardware_type or "",
+                lead.reasoning, signals, flags,
+                lead.country or "", lead.status or "new",
+                lead.notes or "", lead.deal_value or "",
+                names, emails, titles,
+                lead.created_at.isoformat() if lead.created_at else "",
+                lead.last_seen_at.isoformat() if lead.last_seen_at else "",
+            ])
+
+        csv_content = output.getvalue()
+
+        parts = ["leads"]
+        if tier:
+            parts.append(tier)
+        if search_id:
+            parts.append(search_id[:8])
+        parts.append(_dt.now().strftime("%Y-%m-%d"))
+        filename = "_".join(parts) + ".csv"
+        return Response(
+            content=csv_content,
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
 
 
 @app.get("/api/leads/{lead_id}")
@@ -2010,133 +2386,6 @@ async def bulk_import(request: BulkImportRequest, user=Depends(require_auth)):
         generate(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
-    )
-
-
-# ──────────────────────────────────────────────
-# Search Within Database
-# ──────────────────────────────────────────────
-
-@app.get("/api/leads/search")
-async def search_leads(
-    q: str,
-    tier: Optional[str] = None,
-    user=Depends(require_auth),
-):
-    """Search across stored leads by company name, domain, industry, signals."""
-    from db import get_db as _get_db
-    from db.models import Search, QualifiedLead
-    from sqlalchemy import or_
-
-    async for db in _get_db():
-        query = (
-            select(QualifiedLead)
-            .join(Search, QualifiedLead.search_id == Search.id)
-            .where(Search.user_id == user.id)
-        )
-
-        # Text search across multiple columns
-        search_term = f"%{q}%"
-        query = query.where(
-            or_(
-                QualifiedLead.company_name.ilike(search_term),
-                QualifiedLead.domain.ilike(search_term),
-                QualifiedLead.industry_category.ilike(search_term),
-                QualifiedLead.hardware_type.ilike(search_term),
-                QualifiedLead.reasoning.ilike(search_term),
-                QualifiedLead.country.ilike(search_term),
-            )
-        )
-
-        if tier:
-            query = query.where(QualifiedLead.tier == tier)
-
-        query = query.order_by(QualifiedLead.score.desc()).limit(100)
-        leads = (await db.execute(query)).scalars().all()
-
-        return [
-            {
-                "id": l.id,
-                "company_name": l.company_name,
-                "domain": l.domain,
-                "website_url": l.website_url,
-                "score": l.score,
-                "tier": l.tier,
-                "hardware_type": l.hardware_type,
-                "industry_category": l.industry_category,
-                "reasoning": l.reasoning,
-                "country": l.country,
-                "status": l.status,
-                "created_at": l.created_at.isoformat() if l.created_at else None,
-            }
-            for l in leads
-        ]
-
-
-# ──────────────────────────────────────────────
-# Export All Leads
-# ──────────────────────────────────────────────
-
-@app.get("/api/leads/export")
-async def export_all_leads(user=Depends(require_auth)):
-    """Export all user's leads as CSV."""
-    from db import get_db as _get_db
-    from db.models import Search, QualifiedLead, LeadContact
-    import csv
-    import io
-
-    async for db in _get_db():
-        leads = (await db.execute(
-            select(QualifiedLead)
-            .join(Search, QualifiedLead.search_id == Search.id)
-            .where(Search.user_id == user.id)
-            .order_by(QualifiedLead.score.desc())
-        )).scalars().all()
-
-        output = io.StringIO()
-        writer = csv.writer(output)
-
-        # Header
-        writer.writerow([
-            "Company Name", "Domain", "Website", "Score", "Tier",
-            "Industry", "Product Type", "Reasoning", "Key Signals", "Red Flags",
-            "Country", "Status", "Notes", "Deal Value",
-            "Contact Names", "Contact Emails", "Contact Titles",
-            "Created At", "Last Seen At",
-        ])
-
-        for lead in leads:
-            # Get contacts for this lead
-            contacts = (await db.execute(
-                select(LeadContact).where(LeadContact.lead_id == lead.id)
-            )).scalars().all()
-
-            names = "; ".join(c.full_name for c in contacts if c.full_name)
-            emails = "; ".join(c.email for c in contacts if c.email)
-            titles = "; ".join(c.job_title for c in contacts if c.job_title)
-
-            signals = "; ".join(lead.key_signals) if lead.key_signals else ""
-            flags = "; ".join(lead.red_flags) if lead.red_flags else ""
-
-            writer.writerow([
-                lead.company_name, lead.domain, lead.website_url,
-                lead.score, lead.tier,
-                lead.industry_category or "", lead.hardware_type or "",
-                lead.reasoning, signals, flags,
-                lead.country or "", lead.status or "new",
-                lead.notes or "", lead.deal_value or "",
-                names, emails, titles,
-                lead.created_at.isoformat() if lead.created_at else "",
-                lead.last_seen_at.isoformat() if lead.last_seen_at else "",
-            ])
-
-        csv_content = output.getvalue()
-
-    from fastapi.responses import Response
-    return Response(
-        content=csv_content,
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=hunt_leads_export.csv"},
     )
 
 

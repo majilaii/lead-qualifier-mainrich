@@ -93,13 +93,20 @@ async def enrich_linkedin_pdl(domain: str, max_results: int = 5) -> list[LinkedI
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # Step 1: Search for people at the company
-            resp = await client.get(
+            # Step 1: Search for people at the company using Elasticsearch query
+            resp = await client.post(
                 "https://api.peopledatalabs.com/v5/person/search",
-                params={
-                    "query": f"job_company_website:{clean_domain}",
+                json={
+                    "query": {
+                        "bool": {
+                            "must": [
+                                {"term": {"job_company_website": clean_domain}},
+                            ]
+                        }
+                    },
                     "size": 20,
                     "dataset": "all",
+                    "titlecase": True,
                 },
                 headers={
                     "X-Api-Key": PDL_API_KEY,
@@ -119,26 +126,41 @@ async def enrich_linkedin_pdl(domain: str, max_results: int = 5) -> list[LinkedI
 
                     title = person.get("job_title", "").strip()
                     linkedin = person.get("linkedin_url") or ""
+                    # Ensure LinkedIn URL is fully qualified
+                    if linkedin and not linkedin.startswith("http"):
+                        linkedin = f"https://{linkedin}"
                     email = None
                     phone = None
 
-                    # Get work email if available
-                    emails = person.get("emails", [])
-                    if emails:
-                        # Prefer work email
-                        for e in emails:
-                            if isinstance(e, dict):
-                                if e.get("type") == "current_professional":
+                    # Get work email — prefer top-level work_email field first
+                    # Note: on free/basic PDL plans, contact fields may be
+                    # boolean (True = data exists but obfuscated, False = no data)
+                    raw_work_email = person.get("work_email")
+                    if isinstance(raw_work_email, str) and "@" in raw_work_email:
+                        email = raw_work_email
+
+                    if not email:
+                        # Fall back to emails array — prefer professional type
+                        raw_emails = person.get("emails")
+                        if isinstance(raw_emails, list):
+                            for e in raw_emails:
+                                if isinstance(e, dict) and e.get("type") in ("professional", "current_professional"):
                                     email = e.get("address")
                                     break
-                        if not email and emails:
-                            first = emails[0]
-                            email = first.get("address") if isinstance(first, dict) else str(first)
+                            if not email and raw_emails:
+                                first = raw_emails[0]
+                                email = first.get("address") if isinstance(first, dict) else None
 
-                    # Get phone
-                    phones = person.get("phone_numbers", [])
-                    if phones:
-                        phone = phones[0] if isinstance(phones[0], str) else str(phones[0])
+                    # Get phone — prefer mobile_phone, then phone_numbers array
+                    raw_mobile = person.get("mobile_phone")
+                    if isinstance(raw_mobile, str) and len(raw_mobile) > 5:
+                        phone = raw_mobile
+                    if not phone:
+                        raw_phones = person.get("phone_numbers")
+                        if isinstance(raw_phones, list) and raw_phones:
+                            first_phone = raw_phones[0]
+                            if isinstance(first_phone, str):
+                                phone = first_phone
 
                     contacts.append(LinkedInContact(
                         full_name=name,

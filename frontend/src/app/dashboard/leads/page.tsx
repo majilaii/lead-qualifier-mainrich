@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "../../components/auth/SessionProvider";
 import LeadDrawer from "./LeadDrawer";
@@ -22,10 +22,22 @@ interface Lead {
   created_at: string | null;
 }
 
+interface SearchItem {
+  id: string;
+  name: string | null;
+  industry: string | null;
+  company_profile: string | null;
+  technology_focus: string | null;
+  qualifying_criteria: string | null;
+  total_found: number;
+  hot: number;
+  review: number;
+  rejected: number;
+  created_at: string | null;
+}
+
 type TierFilter = "all" | "hot" | "review" | "rejected";
 type SortField = "score" | "company_name" | "created_at";
-
-// All backend calls go through /api/proxy/* (Next.js server proxy)
 
 const TIER_BADGE: Record<string, { bg: string; label: string }> = {
   hot: { bg: "bg-hot/10 text-hot border-hot/20", label: "Hot" },
@@ -48,23 +60,41 @@ const STATUS_DOT: Record<string, string> = {
   archived: "bg-text-dim",
 };
 
+/* ── Colour palette for pipeline cards ── */
+const PIPELINE_COLORS = [
+  "border-secondary/40 bg-secondary/5",
+  "border-blue-400/40 bg-blue-400/5",
+  "border-purple-400/40 bg-purple-400/5",
+  "border-amber-400/40 bg-amber-400/5",
+  "border-teal-400/40 bg-teal-400/5",
+  "border-pink-400/40 bg-pink-400/5",
+  "border-cyan-400/40 bg-cyan-400/5",
+  "border-orange-400/40 bg-orange-400/5",
+];
+
 export default function LeadsPage() {
   const { session } = useAuth();
   const searchParams = useSearchParams();
-  const searchIdFilter = searchParams.get("search_id");
+  const searchIdParam = searchParams.get("search_id");
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [searches, setSearches] = useState<SearchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
   const [sortField, setSortField] = useState<SortField>("score");
   const [sortOrder, setSortOrder] = useState<"desc" | "asc">("desc");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [selectedPipeline, setSelectedPipeline] = useState<string | null>(
+    searchIdParam
+  );
   const [dbSearchQuery, setDbSearchQuery] = useState("");
   const [dbSearchResults, setDbSearchResults] = useState<Lead[] | null>(null);
   const [dbSearching, setDbSearching] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
+  /* ── Fetch all leads (no search_id filter – we filter client-side) ── */
   const fetchLeads = useCallback(async () => {
     if (!session?.access_token) return;
     try {
@@ -73,7 +103,6 @@ export default function LeadsPage() {
         order: sortOrder,
       });
       if (tierFilter !== "all") params.set("tier", tierFilter);
-      if (searchIdFilter) params.set("search_id", searchIdFilter);
 
       const res = await fetch(`/api/proxy/leads?${params}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -82,11 +111,64 @@ export default function LeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [session, sortField, sortOrder, tierFilter, searchIdFilter]);
+  }, [session, sortField, sortOrder, tierFilter]);
+
+  /* ── Fetch searches (pipelines) ── */
+  const fetchSearches = useCallback(async () => {
+    if (!session?.access_token) return;
+    try {
+      const res = await fetch("/api/proxy/searches", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) setSearches(await res.json());
+    } catch {
+      /* ignore */
+    }
+  }, [session]);
 
   useEffect(() => {
     fetchLeads();
-  }, [fetchLeads]);
+    fetchSearches();
+  }, [fetchLeads, fetchSearches]);
+
+  /* ── Pipeline-aware filtering ── */
+  const pipelineLeads = useMemo(() => {
+    if (!selectedPipeline) return leads;
+    return leads.filter((l) => l.search_id === selectedPipeline);
+  }, [leads, selectedPipeline]);
+
+  const sourceLeads = dbSearchResults !== null ? dbSearchResults : pipelineLeads;
+  const filtered = sourceLeads.filter((l) => {
+    if (!searchQuery) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      l.company_name.toLowerCase().includes(q) ||
+      l.domain.toLowerCase().includes(q) ||
+      (l.country || "").toLowerCase().includes(q) ||
+      (l.industry_category || "").toLowerCase().includes(q)
+    );
+  });
+
+  /* ── Tier counts scoped to selected pipeline ── */
+  const tierCounts = useMemo(() => ({
+    all: pipelineLeads.length,
+    hot: pipelineLeads.filter((l) => l.tier === "hot").length,
+    review: pipelineLeads.filter((l) => l.tier === "review").length,
+    rejected: pipelineLeads.filter((l) => l.tier === "rejected").length,
+  }), [pipelineLeads]);
+
+  /* ── Per-pipeline lead counts (from actual leads data for accuracy) ── */
+  const pipelineLeadCounts = useMemo(() => {
+    const map: Record<string, { total: number; hot: number; review: number; rejected: number }> = {};
+    for (const l of leads) {
+      if (!map[l.search_id]) map[l.search_id] = { total: 0, hot: 0, review: 0, rejected: 0 };
+      map[l.search_id].total++;
+      if (l.tier === "hot") map[l.search_id].hot++;
+      else if (l.tier === "review") map[l.search_id].review++;
+      else if (l.tier === "rejected") map[l.search_id].rejected++;
+    }
+    return map;
+  }, [leads]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -103,7 +185,6 @@ export default function LeadsPage() {
     );
   };
 
-  // Cross-hunt database search
   const handleDbSearch = useCallback(async () => {
     if (!session?.access_token || !dbSearchQuery.trim()) {
       setDbSearchResults(null);
@@ -124,49 +205,41 @@ export default function LeadsPage() {
     }
   }, [session, dbSearchQuery, tierFilter]);
 
-  // Export all leads as CSV
-  const handleExport = useCallback(async () => {
+  const handleExport = useCallback(async (options?: { tier?: string; search_id?: string; label?: string }) => {
     if (!session?.access_token) return;
     setExporting(true);
+    setExportMenuOpen(false);
     try {
-      const res = await fetch("/api/proxy/leads/export", {
+      const params = new URLSearchParams();
+      if (options?.tier) params.set("tier", options.tier);
+      if (options?.search_id) params.set("search_id", options.search_id);
+      const qs = params.toString();
+      const url = `/api/proxy/leads/export${qs ? `?${qs}` : ""}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (res.ok) {
         const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
+        const blobUrl = URL.createObjectURL(blob);
         const a = document.createElement("a");
-        a.href = url;
-        a.download = `all-leads-${new Date().toISOString().slice(0, 10)}.csv`;
+        a.href = blobUrl;
+        // Build a descriptive filename
+        const parts = ["leads"];
+        if (options?.tier) parts.push(options.tier);
+        if (options?.search_id) parts.push("pipeline");
+        parts.push(new Date().toISOString().slice(0, 10));
+        a.download = `${parts.join("-")}.csv`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        URL.revokeObjectURL(blobUrl);
       }
     } finally {
       setExporting(false);
     }
   }, [session]);
 
-  // Client-side text filter (or use DB search results)
-  const sourceLeads = dbSearchResults !== null ? dbSearchResults : leads;
-  const filtered = sourceLeads.filter((l) => {
-    if (!searchQuery) return true;
-    const q = searchQuery.toLowerCase();
-    return (
-      l.company_name.toLowerCase().includes(q) ||
-      l.domain.toLowerCase().includes(q) ||
-      (l.country || "").toLowerCase().includes(q) ||
-      (l.industry_category || "").toLowerCase().includes(q)
-    );
-  });
-
-  const tierCounts = {
-    all: leads.length,
-    hot: leads.filter((l) => l.tier === "hot").length,
-    review: leads.filter((l) => l.tier === "review").length,
-    rejected: leads.filter((l) => l.tier === "rejected").length,
-  };
+  const selectedSearchInfo = searches.find((s) => s.id === selectedPipeline);
 
   const SortArrow = ({ field }: { field: SortField }) =>
     sortField === field ? (
@@ -192,18 +265,23 @@ export default function LeadsPage() {
             Leads
           </h1>
           <p className="font-sans text-sm text-text-muted mt-1">
-            {leads.length} lead{leads.length !== 1 && "s"} across all searches
-            {searchIdFilter && (
-              <span className="text-secondary ml-2">(filtered by search)</span>
+            {leads.length} lead{leads.length !== 1 && "s"} across{" "}
+            {searches.length} pipeline{searches.length !== 1 && "s"}
+            {selectedPipeline && selectedSearchInfo && (
+              <span className="text-secondary ml-2">
+                — viewing {selectedSearchInfo.name || selectedSearchInfo.industry || "Pipeline"}
+              </span>
             )}
             {dbSearchResults !== null && (
-              <span className="text-secondary ml-2">({dbSearchResults.length} search results)</span>
+              <span className="text-secondary ml-2">
+                ({dbSearchResults.length} search results)
+              </span>
             )}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="relative flex gap-2">
           <button
-            onClick={handleExport}
+            onClick={() => setExportMenuOpen((v) => !v)}
             disabled={exporting || leads.length === 0}
             className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer disabled:opacity-30"
           >
@@ -213,80 +291,278 @@ export default function LeadsPage() {
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
             {exporting ? "Exporting…" : "Export CSV"}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </button>
+
+          {exportMenuOpen && (
+            <>
+              {/* Backdrop to close menu */}
+              <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
+              <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-surface-2 border border-border rounded-xl shadow-xl py-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
+                <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+                  Export as CSV
+                </p>
+
+                <button
+                  onClick={() => handleExport()}
+                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                >
+                  <span>All Leads</span>
+                  <span className="text-text-dim text-[10px]">{leads.length}</span>
+                </button>
+
+                <button
+                  onClick={() => handleExport({ tier: "hot" })}
+                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-hot hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                >
+                  <span>🔥 Hot Leads Only</span>
+                  <span className="text-text-dim text-[10px]">{tierCounts.hot}</span>
+                </button>
+
+                <button
+                  onClick={() => handleExport({ tier: "review" })}
+                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-review hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                >
+                  <span>🔍 Review Leads Only</span>
+                  <span className="text-text-dim text-[10px]">{tierCounts.review}</span>
+                </button>
+
+                <button
+                  onClick={() => handleExport({ tier: "rejected" })}
+                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-text-muted hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                >
+                  <span>❌ Rejected Leads Only</span>
+                  <span className="text-text-dim text-[10px]">{tierCounts.rejected}</span>
+                </button>
+
+                {selectedPipeline && selectedSearchInfo && (
+                  <>
+                    <div className="border-t border-border my-1" />
+                    <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+                      Current Pipeline
+                    </p>
+                    <button
+                      onClick={() => handleExport({ search_id: selectedPipeline })}
+                      className="w-full text-left px-3 py-2 font-mono text-[11px] text-secondary hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                    >
+                      <span className="truncate pr-2">{selectedSearchInfo.name || selectedSearchInfo.industry || "Pipeline"} — All</span>
+                      <span className="text-text-dim text-[10px] flex-shrink-0">{pipelineLeads.length}</span>
+                    </button>
+                    <button
+                      onClick={() => handleExport({ search_id: selectedPipeline, tier: "hot" })}
+                      className="w-full text-left px-3 py-2 font-mono text-[11px] text-hot hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                    >
+                      <span className="truncate pr-2">{selectedSearchInfo.name || selectedSearchInfo.industry || "Pipeline"} — Hot</span>
+                      <span className="text-text-dim text-[10px] flex-shrink-0">{pipelineLeads.filter(l => l.tier === "hot").length}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Cross-hunt DB search */}
-      <div className="flex gap-2">
-        <div className="relative flex-1 max-w-md">
-          <input
-            type="text"
-            placeholder="Search all leads (company, domain, industry, country)..."
-            value={dbSearchQuery}
-            onChange={(e) => {
-              setDbSearchQuery(e.target.value);
-              if (!e.target.value.trim()) setDbSearchResults(null);
-            }}
-            onKeyDown={(e) => { if (e.key === "Enter") handleDbSearch(); }}
-            className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors"
-          />
-        </div>
-        <button
-          onClick={handleDbSearch}
-          disabled={dbSearching || !dbSearchQuery.trim()}
-          className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-30 cursor-pointer"
-        >
-          {dbSearching ? "…" : "Search DB"}
-        </button>
-        {dbSearchResults !== null && (
-          <button
-            onClick={() => { setDbSearchResults(null); setDbSearchQuery(""); }}
-            className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary transition-colors cursor-pointer"
-          >
-            Clear
-          </button>
-        )}
-      </div>
-
-      {/* Filter bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-        {/* Tier tabs */}
-        <div className="flex gap-1 bg-surface-2 border border-border rounded-lg p-1">
-          {(["all", "hot", "review", "rejected"] as TierFilter[]).map((t) => (
+      {/* ═══ Pipeline cards ═══ */}
+      {searches.length > 0 && (
+        <div>
+          <h2 className="font-mono text-[10px] uppercase tracking-[0.15em] text-text-dim mb-3">
+            Filter by Pipeline
+          </h2>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+            {/* All pipelines card */}
             <button
-              key={t}
-              onClick={() => setTierFilter(t)}
-              className={`font-mono text-[10px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md transition-all cursor-pointer ${
-                tierFilter === t
-                  ? "bg-secondary/10 text-secondary"
-                  : "text-text-muted hover:text-text-primary"
+              onClick={() => { setSelectedPipeline(null); setDbSearchResults(null); setDbSearchQuery(""); }}
+              className={`flex-shrink-0 w-44 rounded-xl border p-4 transition-all cursor-pointer text-left ${
+                !selectedPipeline
+                  ? "border-secondary/50 bg-secondary/10 ring-1 ring-secondary/20"
+                  : "border-border bg-surface-2 hover:border-border-bright"
               }`}
             >
-              {t === "all" ? "All" : t === "hot" ? "Hot" : t === "review" ? "Review" : "Rejected"}{" "}
-              {tierCounts[t]}
+              <div className="flex items-center gap-2 mb-2">
+                <div className="w-6 h-6 rounded-lg bg-secondary/10 flex items-center justify-center">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-secondary">
+                    <rect x="3" y="3" width="7" height="7" rx="1" />
+                    <rect x="14" y="3" width="7" height="7" rx="1" />
+                    <rect x="3" y="14" width="7" height="7" rx="1" />
+                    <rect x="14" y="14" width="7" height="7" rx="1" />
+                  </svg>
+                </div>
+                <span className="font-mono text-[10px] font-semibold text-text-primary uppercase tracking-[0.1em]">
+                  All
+                </span>
+              </div>
+              <span className="font-mono text-lg font-bold text-text-primary">
+                {leads.length}
+              </span>
+              <span className="font-mono text-[10px] text-text-dim ml-1.5">
+                leads
+              </span>
             </button>
-          ))}
+
+            {/* Individual pipeline cards */}
+            {searches.map((s, idx) => {
+              const counts = pipelineLeadCounts[s.id] || { total: 0, hot: 0, review: 0, rejected: 0 };
+              const isSelected = selectedPipeline === s.id;
+              const colorClass = PIPELINE_COLORS[idx % PIPELINE_COLORS.length];
+              const displayName = s.name || s.industry || s.technology_focus || "Untitled Pipeline";
+
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => {
+                    setSelectedPipeline(isSelected ? null : s.id);
+                    setDbSearchResults(null);
+                    setDbSearchQuery("");
+                  }}
+                  className={`flex-shrink-0 w-56 rounded-xl border p-4 transition-all cursor-pointer text-left ${
+                    isSelected
+                      ? `${colorClass} ring-1 ring-secondary/20`
+                      : "border-border bg-surface-2 hover:border-border-bright"
+                  }`}
+                >
+                  <p className="font-mono text-[11px] font-semibold text-text-primary truncate mb-1.5 leading-tight">
+                    {displayName}
+                  </p>
+                  {s.qualifying_criteria && (
+                    <p className="font-sans text-[10px] text-text-dim truncate mb-2 leading-tight">
+                      {s.qualifying_criteria}
+                    </p>
+                  )}
+                  <div className="flex items-baseline gap-1.5 mb-2">
+                    <span className="font-mono text-lg font-bold text-text-primary">
+                      {counts.total}
+                    </span>
+                    <span className="font-mono text-[10px] text-text-dim">
+                      leads
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono text-[9px]">
+                    <span className="text-hot">{counts.hot} hot</span>
+                    <span className="text-text-dim">·</span>
+                    <span className="text-review">{counts.review} review</span>
+                    <span className="text-text-dim">·</span>
+                    <span className="text-text-dim">{counts.rejected} rej</span>
+                  </div>
+                  {s.created_at && (
+                    <p className="font-mono text-[9px] text-text-dim mt-2">
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </p>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Search bar + tier filter ═══ */}
+      <div className="flex flex-col gap-3">
+        {/* DB search */}
+        <div className="flex gap-2">
+          <div className="relative flex-1 max-w-md">
+            <input
+              type="text"
+              placeholder="Search all leads (company, domain, industry, country)..."
+              value={dbSearchQuery}
+              onChange={(e) => {
+                setDbSearchQuery(e.target.value);
+                if (!e.target.value.trim()) setDbSearchResults(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleDbSearch();
+              }}
+              className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors"
+            />
+          </div>
+          <button
+            onClick={handleDbSearch}
+            disabled={dbSearching || !dbSearchQuery.trim()}
+            className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-30 cursor-pointer"
+          >
+            {dbSearching ? "…" : "Search DB"}
+          </button>
+          {dbSearchResults !== null && (
+            <button
+              onClick={() => {
+                setDbSearchResults(null);
+                setDbSearchQuery("");
+              }}
+              className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+            >
+              Clear
+            </button>
+          )}
         </div>
 
-        {/* Search */}
-        <div className="relative flex-1 max-w-xs">
-          <input
-            type="text"
-            placeholder="Search companies..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors"
-          />
+        {/* Tier tabs + inline filter */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+          <div className="flex gap-1 bg-surface-2 border border-border rounded-lg p-1">
+            {(["all", "hot", "review", "rejected"] as TierFilter[]).map(
+              (t) => (
+                <button
+                  key={t}
+                  onClick={() => setTierFilter(t)}
+                  className={`font-mono text-[10px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                    tierFilter === t
+                      ? "bg-secondary/10 text-secondary"
+                      : "text-text-muted hover:text-text-primary"
+                  }`}
+                >
+                  {t === "all"
+                    ? "All"
+                    : t === "hot"
+                    ? "Hot"
+                    : t === "review"
+                    ? "Review"
+                    : "Rejected"}{" "}
+                  {tierCounts[t]}
+                </button>
+              )
+            )}
+          </div>
+
+          <div className="relative flex-1 max-w-xs">
+            <input
+              type="text"
+              placeholder="Filter companies..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors"
+            />
+          </div>
+
+          {selectedPipeline && (
+            <button
+              onClick={() => setSelectedPipeline(null)}
+              className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-md border border-secondary/20 text-secondary hover:bg-secondary/10 transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+              Clear pipeline filter
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Table */}
+      {/* ═══ Leads table ═══ */}
       {filtered.length === 0 ? (
         <div className="bg-surface-2 border border-border rounded-xl px-6 py-16 text-center">
           <p className="font-mono text-xs text-text-dim">
             No leads found matching your filters
           </p>
+          {selectedPipeline && (
+            <button
+              onClick={() => setSelectedPipeline(null)}
+              className="mt-3 font-mono text-[10px] uppercase tracking-[0.15em] text-secondary hover:text-secondary/80 cursor-pointer"
+            >
+              Show all pipelines →
+            </button>
+          )}
         </div>
       ) : (
         <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
@@ -320,6 +596,11 @@ export default function LeadsPage() {
                   <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
                     Status
                   </th>
+                  {!selectedPipeline && (
+                    <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden xl:table-cell">
+                      Pipeline
+                    </th>
+                  )}
                   <th
                     onClick={() => handleSort("created_at")}
                     className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors hidden sm:table-cell"
@@ -334,6 +615,10 @@ export default function LeadsPage() {
                   const badge = TIER_BADGE[lead.tier] || TIER_BADGE.rejected;
                   const statusDot =
                     STATUS_DOT[lead.status || "new"] || STATUS_DOT.new;
+                  const pipelineName =
+                    searches.find((s) => s.id === lead.search_id)?.industry ||
+                    searches.find((s) => s.id === lead.search_id)?.name ||
+                    null;
                   return (
                     <tr
                       key={lead.id}
@@ -380,6 +665,20 @@ export default function LeadsPage() {
                           {(lead.status || "new").replace("_", " ")}
                         </span>
                       </td>
+                      {!selectedPipeline && (
+                        <td className="px-5 py-3.5 hidden xl:table-cell">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedPipeline(lead.search_id);
+                            }}
+                            className="font-mono text-[10px] text-text-dim hover:text-secondary truncate max-w-[120px] block transition-colors"
+                            title={pipelineName || "Unknown pipeline"}
+                          >
+                            {pipelineName || "—"}
+                          </button>
+                        </td>
+                      )}
                       <td className="px-5 py-3.5 hidden sm:table-cell">
                         <span className="font-mono text-[10px] text-text-dim">
                           {lead.created_at
@@ -406,7 +705,15 @@ export default function LeadsPage() {
             setLeads((prev) =>
               prev.map((l) =>
                 l.id === leadId
-                  ? { ...l, ...(updates.notes !== undefined && { notes: updates.notes ?? null }), ...(updates.deal_value !== undefined && { deal_value: updates.deal_value ?? null }) }
+                  ? {
+                      ...l,
+                      ...(updates.notes !== undefined && {
+                        notes: updates.notes ?? null,
+                      }),
+                      ...(updates.deal_value !== undefined && {
+                        deal_value: updates.deal_value ?? null,
+                      }),
+                    }
                   : l
               )
             );

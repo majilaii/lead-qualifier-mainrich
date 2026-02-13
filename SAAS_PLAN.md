@@ -1,4 +1,4 @@
-# ◈ Hunt — SaaS Roadmap (v2)
+# ◈ Hunt — SaaS Roadmap (v3 — Pipeline-First)
 
 > Dual-purpose: power Mainrich's own lead generation across Europe & America **and** evolve into a paid SaaS product.
 
@@ -10,12 +10,104 @@ _Last updated: February 2026_
 
 **Don't compete as "another lead gen tool."** Clay, Apollo, and Instantly will crush you on database size, integrations, and brand.
 
-**Win on:** _"AI that reads company websites to find hidden B2B opportunities that databases miss."_
+**Win on:** _"AI agent swarm that systematically hunts B2B leads your competitors can't find."_
 
 Best-fit verticals (where databases fail):
 - **Manufacturing / hardware / industrial** — no LinkedIn presence, no Crunchbase profile, no BuiltWith tech stack
 - **International / emerging markets** — blind spots in US-centric databases
 - **Highly specific ICPs** — "companies that use servo motors in their products" — no database has that filter, but Hunt reads the product page and figures it out
+
+---
+
+## Core Architecture — Pipeline First
+
+The **pipeline** is the central primitive, not the chat. A pipeline is an autonomous agent swarm that discovers, crawls, qualifies, and enriches leads — and it can be launched from anywhere.
+
+```
+                         ┌──────────────────────────────┐
+                         │         PIPELINE ENGINE       │
+                         │                               │
+                         │  ┌─────────┐  ┌───────────┐  │
+                         │  │Discovery│  │  Crawl     │  │
+                         │  │ Agents  │──│  Agents    │  │
+                         │  └─────────┘  └─────┬─────┘  │
+                         │                     │        │
+                         │  ┌──────────┐ ┌─────▼─────┐  │
+                         │  │ Enrich   │ │ Qualify    │  │
+                         │  │ Agents   │◄│ Agents     │  │
+                         │  └────┬─────┘ └───────────┘  │
+                         │       │                       │
+                         │  ┌────▼──────────┐            │
+                         │  │Deep Research   │            │
+                         │  │Agents (hot 8+) │            │
+                         │  └───────────────┘            │
+                         └──────────────▲───────────────┘
+                                        │
+                    ┌───────────────────┼──────────────────┐
+                    │                   │                   │
+           ┌────────┴────────┐ ┌───────┴────────┐ ┌───────┴───────┐
+           │  GUIDED (Chat)  │ │ MANUAL CONFIG  │ │ PROGRAMMATIC  │
+           │                 │ │  (Form UI)     │ │               │
+           │  New users,     │ │  Power users,  │ │  API calls,   │
+           │  new ICPs,      │ │  saved ICPs,   │ │  Scheduled,   │
+           │  exploration    │ │  bulk import   │ │  Webhooks     │
+           └─────────────────┘ └────────────────┘ └───────────────┘
+```
+
+### Five Entry Points, One Engine
+
+| Entry Point | Who | How | Chat Required? |
+|---|---|---|---|
+| **Chat (guided)** | New users, new ICPs | Conversational ICP definition → auto-launches pipeline | Yes (by choice) |
+| **Manual config (form)** | Power users | Form: industry, geo, criteria, go → pipeline runs | No |
+| **Saved templates** | Repeat users | One-click from dashboard → pipeline runs | No |
+| **Bulk import** | Users with lists | Paste domains or CSV → qualify + enrich pipeline | No |
+| **API / Scheduled** | Automation | `POST /api/v1/pipeline/run` with config payload | No |
+
+### Pipeline as Visible Entity
+
+Every pipeline run is a **first-class object** on the dashboard:
+
+```
+Pipeline #47 — "CNC Manufacturers DACH"
+Status: Running (3/5 stages complete)
+├── Discovery:    ████████████████████ 8/8 queries done     (42 companies found)
+├── Crawling:     ██████████████░░░░░░ 34/42 sites crawled
+├── Qualifying:   ██████████░░░░░░░░░░ 28/34 scored          (7 hot, 15 review)
+├── Enriching:    ████░░░░░░░░░░░░░░░░ 3/7 hot leads enriched
+└── Deep Research: ░░░░░░░░░░░░░░░░░░░ waiting for enrichment
+```
+
+- Can be paused, cancelled, or restarted
+- Agents work in parallel (not sequentially through a chat)
+- Results stream into the dashboard in real-time
+- Multiple pipelines can run concurrently
+
+### Dashboard is the Command Center
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  ◈ Hunt Dashboard                                        │
+│                                                          │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
+│  │  Active   │  │  Lead    │  │  Templates│  │  Map    │ │
+│  │  Pipelines│  │  Database│  │  & ICPs   │  │  View   │ │
+│  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
+│                                                          │
+│  ┌──────────────────────────────┐                        │
+│  │  + New Pipeline               │                       │
+│  │  ┌────────┐ ┌──────┐ ┌─────┐│                        │
+│  │  │ Guided │ │ Form │ │Bulk ││                        │
+│  │  │ (Chat) │ │Config│ │Imp. ││                        │
+│  │  └────────┘ └──────┘ └─────┘│                        │
+│  └──────────────────────────────┘                        │
+└─────────────────────────────────────────────────────────┘
+```
+
+- Landing page for logged-in users is the **dashboard**, not the chat
+- Chat is accessible as one option from "New Pipeline"
+- All pipeline results, leads, and stats live on the dashboard
+- The chat is a "wizard" — helpful, but not the product
 
 ---
 
@@ -39,7 +131,7 @@ LAYER 3 — LINKEDIN ENRICHMENT (pay-per-use, hot leads only)    ← NOT BUILT
   Cost: ~$0.01-0.05/lead, only on ~10-20% of leads
 ```
 
-**Why this wins:** Every hunt adds to the database. Re-crawls keep it fresh. Over 6 months, you have thousands of qualified, enriched leads with zero ongoing subscription cost.
+**Why this wins:** Every pipeline run adds to the database. Re-crawls keep it fresh. Over 6 months, you have thousands of qualified, enriched leads with zero ongoing subscription cost.
 
 ---
 
@@ -68,9 +160,85 @@ LAYER 3 — LINKEDIN ENRICHMENT (pay-per-use, hot leads only)    ← NOT BUILT
 
 ---
 
-## 🔴 Tier 1 — Power Features (Internal Use + SaaS Value)
+## 🔴 Tier 1 — Pipeline-First Restructure
 
-_These make the tool immediately more useful for Mainrich's own prospecting AND are the features that make customers pay. Target: 1-2 weeks._
+_Decouple the pipeline from the chat. Make the dashboard the command center. Add multiple entry points. Target: 1-2 weeks._
+
+### 1.0 Pipeline-First Architecture Refactor
+**Effort:** 2-3 days · **Impact:** 🔥🔥🔥🔥 (foundational — everything else builds on this)
+
+The backend pipeline endpoints are already decoupled (`/api/pipeline/run` only requires `companies` + auth, `search_context` is optional). The restructuring is primarily frontend + adding the form-based config flow.
+
+#### Backend Changes
+
+- [ ] **New endpoint: `POST /api/pipeline/create`** — creates a pipeline from a config, not from a chat
+  ```json
+  {
+    "name": "CNC Manufacturers DACH",           // user-given or auto-generated
+    "mode": "discover" | "qualify_only",        // discover = Exa search + full pipeline
+                                                 // qualify_only = domains provided, skip search
+    "search_context": {
+      "industry": "CNC machining, precision manufacturing",
+      "company_profile": "Manufacturers with 50-500 employees",
+      "technology_focus": "CNC milling, turning, 5-axis",
+      "qualifying_criteria": "Has product catalog, serves B2B",
+      "disqualifiers": "Pure distributor, no manufacturing",
+      "geographic_region": "Germany, Austria, Switzerland"
+    },
+    "domains": ["acme-cnc.de", "..."],          // only for qualify_only mode
+    "template_id": "uuid",                      // optional — load context from template
+    "options": {
+      "use_vision": true,
+      "enrich_hot_leads": true,
+      "deep_research": true,
+      "max_leads": 100
+    }
+  }
+  ```
+  - Returns `{ pipeline_id, status: "running" }` and starts streaming
+  - This replaces the current split of `/api/chat/search` + `/api/pipeline/run` for new flows
+  - Existing chat flow still works (chat produces search_context → calls same endpoint)
+
+- [ ] **Pipeline status model** — add `pipeline_status` field to `searches` table:
+  ```
+  stages: { discovery, crawling, qualifying, enriching, research }
+  each stage: { status: pending|running|done|failed, progress: 34/50, started_at, completed_at }
+  ```
+  - Exposed via `GET /api/pipeline/{id}/status` (already exists, enhance it)
+
+- [ ] **Exa search as pipeline stage** — move `POST /api/chat/search` logic into the pipeline engine
+  - Currently: chat calls `/api/chat/search` to get company list, then user triggers `/api/pipeline/run`
+  - New: pipeline engine handles discovery internally when `mode: "discover"`
+  - Discovery stage generates Exa queries from `search_context`, runs them, feeds results into crawl stage
+  - No user intervention needed between discovery and qualification
+
+#### Frontend Changes
+
+- [ ] **Dashboard as default landing** — redirect `/chat` to `/dashboard` for logged-in users
+  - Dashboard gets a prominent "+ New Pipeline" button
+  - New Pipeline opens a creation modal/page with three tabs: **Guided (Chat)** | **Configure** | **Bulk Import**
+
+- [ ] **Pipeline Config Form** (`/dashboard/new` or modal) — the "Configure" tab
+  - Form fields matching `search_context`: industry, company profile, tech focus, criteria, disqualifiers, geography
+  - Optional: name your pipeline, set options (vision, enrichment, deep research)
+  - "Launch Pipeline" button → calls `POST /api/pipeline/create` → redirects to pipeline view
+  - Template picker: "Load from template" dropdown pre-fills the form
+
+- [ ] **Refactor HuntContext → PipelineContext**
+  - Rename to reflect pipeline-first mental model
+  - Separate concerns: `PipelineContext` manages pipeline state (creation, streaming, results)
+  - Chat state is local to the chat component, not global
+  - Pipeline context is global (active pipelines, results streaming)
+
+- [ ] **Pipeline list view** on dashboard — shows all pipelines with status, progress, lead counts
+  - Active pipelines show live progress bars per stage
+  - Completed pipelines show summary (hot/review/rejected counts)
+  - Click to open detailed pipeline view (existing pipeline table + map)
+
+- [ ] **Chat becomes one option** — accessible from "+ New Pipeline → Guided"
+  - Chat still works exactly as before
+  - But when chat produces a `search_context` and the user launches, it creates a pipeline via the same `POST /api/pipeline/create` endpoint
+  - Results open in the pipeline dashboard view, not in the chat
 
 ### 1.1 Contact Page Scraper → Structured People Data
 **Effort:** 1 day · **Impact:** 🔥🔥🔥 (free people data from every crawl)
@@ -97,21 +265,7 @@ The crawler already visits company websites and can sniff /about, /team, /contac
 - [ ] **Show in LeadDrawer:** "People at this company" section with name, title, email, phone
 - [ ] **No API cost** — this uses content you're already crawling
 
-### 1.2 Bulk Domain Import
-**Effort:** 0.5 day · **Impact:** 🔥🔥🔥 (essential for daily Mainrich workflow)
-
-Skip the chat flow entirely. Paste a list of domains or upload a CSV → run the qualification pipeline directly.
-
-- [ ] **Backend:** `POST /api/pipeline/bulk` — accepts `{ domains: ["acme.com", "example.de", ...], search_context: {...} }`
-  - Creates a search record, then processes each domain through crawl → qualify → enrich
-  - Streams results via SSE (reuses existing pipeline streaming)
-- [ ] **Frontend:** "Bulk Import" button on dashboard or chat page
-  - Textarea: paste domains (one per line) or upload CSV
-  - Optional: set ICP context (industry, criteria) or pick a saved template
-  - Shows pipeline progress with the existing pipeline UI
-- [ ] **Use case:** After a manual LinkedIn Sales Navigator session, paste the domains you found → Hunt qualifies and enriches them all
-
-### 1.3 Saved Search Templates (ICP Presets)
+### 1.2 Saved Search Templates (ICP Presets)
 **Effort:** 0.5 day · **Impact:** 🔥🔥 (re-run monthly without re-explaining your ICP)
 
 - [ ] **Database:** `search_templates` table (user_id, name, search_context JSON, created_at)
@@ -120,53 +274,62 @@ Skip the chat flow entirely. Paste a list of domains or upload a CSV → run the
   - `GET /api/templates` — list user's templates
   - `DELETE /api/templates/:id`
 - [ ] **Frontend:**
-  - "Save as Template" button after completing chat parameters
-  - Template picker in chat: "Use a saved ICP" → select → skip chat questions → go straight to search
-  - Template picker in Bulk Import: apply saved ICP context to domain list
+  - "Save as Template" button after completing a pipeline config
+  - Template picker in the pipeline config form and chat
+  - "Run again" button on completed pipelines → creates new pipeline from same config
 - [ ] **Built-in starter templates:** "Manufacturing — Europe", "SaaS — North America", "Industrial Automation — DACH"
 
-### 1.4 LinkedIn Enrichment — People Data Labs or RocketReach (Hot Leads Only)
+### 1.3 LinkedIn Enrichment — People Data Labs or RocketReach (Hot Leads Only)
 **Effort:** 1 day · **Impact:** 🔥🔥 (LinkedIn data without subscription)
 
 For leads scoring 8+, find decision-makers' LinkedIn profiles programmatically. No Sales Nav subscription needed.
-
-**Provider options (decide later):**
-- **People Data Labs** — closest to old Proxycurl, person + company enrichment, ~$0.01/call, bulk-friendly
-- **RocketReach** — email + phone + LinkedIn lookup, from $39/mo, has API
 
 - [ ] **Backend:** `linkedin_enrichment.py`
   - `enrich_linkedin(company_domain)` → calls PDL Company Search or RocketReach Lookup API
   - Returns: name, title, email, phone, LinkedIn URL for C-suite / VP / Director level
   - Stores results in `lead_contacts` table with `source = 'pdl'` or `'rocketreach'`
   - Rate limited: only triggered on score 8+ leads (keeps costs low)
-- [ ] **Config:** `PDL_API_KEY` or `ROCKETREACH_API_KEY` in `.env` + `config.py`
-- [ ] **Frontend:** "Find Decision Makers" button in LeadDrawer for hot leads
-  - Shows LinkedIn profile links with titles + verified emails
-  - "Open in LinkedIn" quick action
+- [ ] **Runs automatically as pipeline stage** — no manual "Find Decision Makers" button needed
+  - Enrichment agents are part of the pipeline swarm
+  - Also available as manual trigger from LeadDrawer for leads that weren't auto-enriched
 - [ ] **SaaS tier gating:** Free = none, Pro = 50/mo, Enterprise = 500/mo
 
-### 1.5 Data Persistence + Global Dedup
+### 1.4 Data Persistence + Global Dedup
 **Effort:** 1 day · **Impact:** 🔥🔥🔥 (compounding database = your moat)
 
 Every lead ever found is stored with a unique domain key. Re-encounters merge data instead of creating duplicates. Over time, this becomes a proprietary database.
 
 - [ ] **Database:** Add unique constraint on `qualified_leads(domain, user_id)`
-- [ ] **Merge logic:** When a domain is re-encountered in a new hunt:
+- [ ] **Merge logic:** When a domain is re-encountered in a new pipeline:
   - Update score if re-qualified (keep history in `lead_snapshots`)
   - Merge new contacts into existing `lead_contacts` (dedup by email)
   - Update `last_seen_at` timestamp
   - Keep the highest score and the latest reasoning
-- [ ] **Dashboard:** "Total leads in database" counter (cumulative across all hunts)
+- [ ] **Dashboard:** "Total leads in database" counter (cumulative across all pipelines)
 - [ ] **Search within your database:** Simple text search across stored leads (company name, industry, signals)
 - [ ] **Export:** "Export all my leads" button (full database CSV/Excel download)
 
 ---
 
-## 🟡 Tier 2 — Engagement & Automation
+## 🟡 Tier 2 — Automation & Engagement
 
-_Ship within 2-4 weeks. These turn qualified leads into actual revenue._
+_Ship within 2-4 weeks. These turn the pipeline engine into a revenue machine._
 
-### 2.1 AI Email Drafts
+### 2.1 Scheduled / Recurring Pipelines
+**Effort:** 2 days · **Impact:** 🔥🔥🔥 (passive lead gen while you sleep — this is the killer feature)
+
+This is where the agent-swarm model truly shines. Pipelines run on a schedule, agents work autonomously, new leads appear in your database without lifting a finger.
+
+- [ ] **Database:** `schedules` table (user_id, pipeline_config JSON, frequency, last_run, next_run, is_active)
+- [ ] **Backend:** cron worker (APScheduler or simple loop) that triggers `POST /api/pipeline/create` for due schedules
+- [ ] **Frontend:** "Schedule this" toggle on completed pipelines or pipeline config form
+  - Frequency: daily / weekly / biweekly / monthly
+  - Shows upcoming runs + last results on dashboard
+- [ ] **When scheduled pipeline completes** → email notification + new leads merged into database (with dedup)
+- [ ] **Dashboard:** "Scheduled Pipelines" section showing upcoming runs + status
+- [ ] **SaaS gating:** Free = none, Pro = 2 schedules, Enterprise = unlimited
+
+### 2.2 AI Email Drafts
 **Effort:** 1-2 days · **Impact:** 🔥🔥🔥 (closes the loop from discovery → outreach)
 
 - [ ] "Draft Email" button on hot leads (LeadDrawer + pipeline table)
@@ -175,17 +338,7 @@ _Ship within 2-4 weeks. These turn qualified leads into actual revenue._
 - [ ] Tone options: formal / casual / consultative
 - [ ] Auto-fills recipient name + company from enrichment data
 - [ ] Copy to clipboard or open in default mail client
-- [ ] **SaaS value:** This is the feature that makes people upgrade — "Hunt doesn't just find leads, it writes the email for you"
-
-### 2.2 Scheduled / Recurring Hunts
-**Effort:** 2 days · **Impact:** 🔥🔥 (passive lead gen while you sleep)
-
-- [ ] Database: `schedules` table (user_id, search_context / template_id, frequency, last_run, next_run, is_active)
-- [ ] Backend: cron worker (APScheduler or simple loop) that triggers search + pipeline for due schedules
-- [ ] Frontend: "Run weekly/monthly" toggle on completed hunts → saves schedule
-- [ ] When scheduled hunt completes → email notification + new leads merged into database (with dedup)
-- [ ] Dashboard: "Scheduled Hunts" section showing upcoming runs + last results
-- [ ] **SaaS gating:** Free = none, Pro = 2 schedules, Enterprise = unlimited
+- [ ] **Future:** Batch draft — "Draft emails for all 12 hot leads" → generates all at once
 
 ### 2.3 Re-qualification Alerts
 **Effort:** 1 day · **Impact:** 🔥🔥 (keeps your database alive)
@@ -193,22 +346,21 @@ _Ship within 2-4 weeks. These turn qualified leads into actual revenue._
 Monthly re-crawl of your top leads. If their website changes (new products, expansion, new team members), re-score and alert you.
 
 - [ ] **Database:** `lead_snapshots` table — store score + signals + timestamp each time a company is re-qualified
-- [ ] **Backend:** Periodic re-crawl job for leads with `qualification_tier = 'hot'`
+- [ ] **Backend:** Periodic re-crawl job (reuses pipeline engine in `qualify_only` mode)
   - Compare new score vs. old score
   - If score changed by ±2 or new key signals appear → flag as "changed"
 - [ ] **Frontend:**
   - Score trend indicator (↑ ↓ →) on lead cards
   - "3 companies changed this week" notification badge on dashboard
   - Historical chart in LeadDrawer showing score over time
-- [ ] **Trigger re-crawl via scheduled hunts** — reuses the same infrastructure
 
 ### 2.4 Email Notifications
 **Effort:** 1 day
 
 - [ ] Integrate Resend (or Postmark) for transactional email
 - [ ] Trigger on:
-  - Hunt complete: "◈ Hunt complete — {hot_count} hot leads found"
-  - Scheduled hunt results: "Your weekly hunt found 5 new hot leads"
+  - Pipeline complete: "◈ Pipeline complete — {hot_count} hot leads found"
+  - Scheduled pipeline results: "Your weekly hunt found 5 new hot leads"
   - Re-qualification alert: "3 leads changed score this week"
 - [ ] Settings toggle: enable/disable per notification type
 - [ ] Welcome email on signup
@@ -216,7 +368,7 @@ Monthly re-crawl of your top leads. If their website changes (new products, expa
 ### 2.5 Better Empty States & Error UX
 **Effort:** 1 day
 
-- [ ] Loading skeletons for dashboard stats, hunts grid, pipeline table, map
+- [ ] Loading skeletons for dashboard stats, pipeline list, lead table, map
 - [ ] Friendly error pages (500, 404, rate limit, quota exceeded)
 - [ ] "No results" states with actionable guidance ("Try broadening your search criteria")
 - [ ] Toast notifications for success/error (pipeline started, export complete, etc.)
@@ -243,9 +395,10 @@ _Build over months 2-3. These create defensibility, lock-in, and justify higher 
 - [ ] API key generation in Settings page (create/revoke)
 - [ ] Store hashed keys in `api_keys` table
 - [ ] Auth middleware: accept `Authorization: Bearer hunt_sk_xxx`
-- [ ] Documented endpoints: `/api/v1/search`, `/api/v1/qualify`, `/api/v1/leads`, `/api/v1/enrich`
+- [ ] Documented endpoints: `/api/v1/pipeline/create`, `/api/v1/pipeline/status`, `/api/v1/leads`, `/api/v1/enrich`
 - [ ] Rate limiting per API key (tied to plan)
 - [ ] API docs page (simple Swagger or custom)
+- [ ] **This is the "programmatic" entry point** — enables integrations, Zapier, n8n, custom workflows
 
 ### 3.3 Team Workspaces
 **Effort:** 3-4 days
@@ -253,15 +406,15 @@ _Build over months 2-3. These create defensibility, lock-in, and justify higher 
 - [ ] `workspaces` table (id, name, owner_id, plan)
 - [ ] `workspace_members` table (workspace_id, user_id, role: owner/admin/member/viewer)
 - [ ] Invite flow: email invite → accept → join workspace
-- [ ] All searches/leads scoped to workspace, not user
+- [ ] All pipelines/leads scoped to workspace, not user
 - [ ] Lead assignments: assign a lead to a team member
-- [ ] Activity feed: "Sarah qualified 12 leads from the CNC search"
+- [ ] Activity feed: "Sarah's pipeline qualified 12 hot leads from the CNC search"
 - [ ] Shared database: all team members contribute to the same lead pool
 
-### 3.4 Shareable Hunt Links
+### 3.4 Shareable Pipeline Links
 **Effort:** 1 day
 
-- [ ] Generate unique share token per search
+- [ ] Generate unique share token per pipeline
 - [ ] Public route `/share/[token]` — read-only view of results (no auth required)
 - [ ] Shows: summary stats, tier breakdown, company list (no enrichment data — that's paid)
 - [ ] "Share Results" button in pipeline header
@@ -270,7 +423,7 @@ _Build over months 2-3. These create defensibility, lock-in, and justify higher 
 **Effort:** 1 day
 
 - [ ] `webhooks` table (user_id, url, events[], secret, is_active)
-- [ ] Events: `hunt.complete`, `lead.qualified.hot`, `lead.status_changed`
+- [ ] Events: `pipeline.complete`, `lead.qualified.hot`, `lead.status_changed`
 - [ ] HMAC signature verification
 - [ ] Delivery logs with retry
 
@@ -278,13 +431,13 @@ _Build over months 2-3. These create defensibility, lock-in, and justify higher 
 
 ## SaaS Plans (Updated)
 
-| Plan | Price | Hunts/mo | Leads/hunt | Hunter Enrichments | LinkedIn Lookups | Deep Research | AI Email Drafts | Recurring Hunts | CRM Push |
-|------|-------|----------|------------|-------------------|-----------------|---------------|-----------------|-----------------|----------|
+| Plan | Price | Pipelines/mo | Leads/pipeline | Hunter Enrichments | LinkedIn Lookups | Deep Research | AI Email Drafts | Scheduled Pipelines | CRM Push |
+|------|-------|------------|------------|-------------------|-----------------|---------------|-----------------|-----------------|----------|
 | **Free** | $0 | 3 | 25 | 10 | ❌ | ❌ | ❌ | ❌ | ❌ |
 | **Pro** | $49/mo | 20 | 100 | 200 | 50 | ✅ | ✅ | 2 schedules | ❌ |
 | **Enterprise** | $199/mo | Unlimited | 500 | 1,000 | 500 | ✅ + priority | ✅ | Unlimited | ✅ |
 
-**Unit economics per lead (Pro user, 100 leads/hunt):**
+**Unit economics per lead (Pro user, 100 leads/pipeline):**
 - Layer 1 (crawl + qualify): $0.01
 - Layer 2 (Hunter, ~20% of leads): $0.004
 - Layer 3 (PDL/RocketReach, ~10% hot leads): $0.001-0.005
@@ -300,10 +453,10 @@ _Build over months 2-3. These create defensibility, lock-in, and justify higher 
 | **Production deployment** | Railway / Fly.io / Render (not Docker on a laptop) | Before launch |
 | **Environment separation** | Staging + production Supabase projects | Before launch |
 | **Error monitoring** | Sentry (backend + frontend) | Before launch |
-| **Analytics** | PostHog or Mixpanel — track funnel: signup → first hunt → qualified leads → upgrade | Before launch |
+| **Analytics** | PostHog or Mixpanel — track funnel: signup → first pipeline → qualified leads → upgrade | Before launch |
 | **Uptime monitoring** | BetterUptime or similar | Before launch |
 | **SOC 2 / privacy policy** | At minimum a privacy policy + terms of service page | Before launch |
-| **Transactional email** | Resend or Postmark (welcome, hunt complete, billing) | Week 1 |
+| **Transactional email** | Resend or Postmark (welcome, pipeline complete, billing) | Week 1 |
 | **CDN / edge** | Vercel for frontend (if separating from Docker) | Nice-to-have |
 
 ---
@@ -311,23 +464,30 @@ _Build over months 2-3. These create defensibility, lock-in, and justify higher 
 ## Build Sequence
 
 ```
-NOW — Tier 1 (Internal Power + SaaS Core):
-  Day 1-2:   Contact page scraper → structured people extraction
-  Day 2-3:   Bulk domain import (paste domains → qualify all)
-  Day 3:     Saved search templates / ICP presets
-  Day 4-5:   LinkedIn enrichment via PDL or RocketReach (hot leads only)
-  Day 5-6:   Data persistence + global dedup across hunts
+NOW — Tier 1 (Pipeline-First Restructure):
+  Day 1-2:   Pipeline-first architecture refactor
+               - Backend: POST /api/pipeline/create endpoint, pipeline status model
+               - Backend: Move Exa search into pipeline engine (discovery stage)
+               - Frontend: Dashboard as landing, + New Pipeline button
+               - Frontend: Pipeline config form (manual entry, template picker)
+               - Frontend: Refactor HuntContext → PipelineContext
+               - Frontend: Pipeline list view with live progress
+               - Frontend: Chat becomes one option under "New Pipeline → Guided"
+  Day 3:     Contact page scraper → structured people extraction
+  Day 3-4:   Saved search templates / ICP presets
+  Day 4-5:   LinkedIn enrichment via PDL or RocketReach (as pipeline stage)
+  Day 5-6:   Data persistence + global dedup across pipelines
 
-WEEK 3-4 — Tier 2 (Engagement):
-  Day 7-8:   AI email drafts (draft outreach for hot leads)
-  Day 9-10:  Scheduled / recurring hunts
+WEEK 3-4 — Tier 2 (Automation):
+  Day 7-8:   Scheduled / recurring pipelines (the killer feature)
+  Day 9-10:  AI email drafts (draft outreach for hot leads)
   Day 10-11: Re-qualification alerts (re-crawl + score change detection)
-  Day 12:    Email notifications (hunt complete, alerts)
+  Day 12:    Email notifications (pipeline complete, alerts)
   Day 13:    Empty states + error UX polish
 
 MONTH 2 — Tier 3 (SaaS Scale):
   Week 5-6:  CRM push (HubSpot + Pipedrive)
-  Week 6-7:  Public API + API keys
+  Week 6-7:  Public API + API keys (programmatic entry point)
   Week 7-8:  Team workspaces
   Week 8:    Shareable links + webhooks
 

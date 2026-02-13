@@ -101,14 +101,21 @@ async function proxyRequest(
       });
     }
 
-    // Forward JSON / text responses
+    // Forward JSON / text / CSV responses
+    const contentType = backendRes.headers.get("content-type") || "application/json";
+    const responseHeaders: Record<string, string> = {
+      "Content-Type": contentType,
+    };
+    // Forward Content-Disposition for file downloads (CSV export, etc.)
+    const disposition = backendRes.headers.get("content-disposition");
+    if (disposition) {
+      responseHeaders["Content-Disposition"] = disposition;
+    }
+
     const body = await backendRes.text();
     return new NextResponse(body, {
       status: backendRes.status,
-      headers: {
-        "Content-Type":
-          backendRes.headers.get("content-type") || "application/json",
-      },
+      headers: responseHeaders,
     });
   } catch (error) {
     console.error(`Proxy error [${request.method} ${backendPath}]:`, error);

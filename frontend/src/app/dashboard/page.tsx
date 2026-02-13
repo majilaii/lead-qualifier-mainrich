@@ -119,21 +119,12 @@ export default function DashboardPage() {
             Overview of your lead discovery pipeline
           </p>
         </div>
-        <div className="flex gap-2">
-          <Link
-            href="/dashboard/bulk"
-            className="inline-flex items-center gap-2 border border-border text-text-muted hover:text-secondary hover:border-secondary/30 font-mono text-xs uppercase tracking-[0.15em] px-4 py-3 rounded-lg transition-colors"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
-            Bulk Import
-          </Link>
-          <Link
-            href="/chat"
-            className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-white/85 transition-colors"
-          >
-            + New Hunt
-          </Link>
-        </div>
+        <Link
+          href="/dashboard/new"
+          className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-white/85 transition-colors"
+        >
+          + New Pipeline
+        </Link>
       </div>
 
       {/* Stats cards */}
@@ -272,13 +263,13 @@ export default function DashboardPage() {
         {recentSearches.length === 0 ? (
           <div className="px-5 py-12 text-center">
             <p className="font-mono text-xs text-text-dim mb-4">
-              No hunts yet. Start your first search!
+              No pipelines yet. Create your first one!
             </p>
             <Link
-              href="/chat"
+              href="/dashboard/new"
               className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-secondary/20 transition-colors"
             >
-              Start Hunting
+              + New Pipeline
             </Link>
           </div>
         ) : (
@@ -302,15 +293,23 @@ export default function DashboardPage() {
                   )}
                 </Link>
                 <div className="flex items-center gap-3 ml-4">
-                  <span className="font-mono text-[10px] text-hot">
-                    {s.hot} hot
-                  </span>
-                  <span className="font-mono text-[10px] text-review">
-                    {s.review} review
-                  </span>
-                  <span className="font-mono text-[10px] text-text-dim">
-                    {s.rejected} rejected
-                  </span>
+                  {s.hot + s.review + s.rejected === 0 ? (
+                    <span className="font-mono text-[10px] text-secondary/60 bg-secondary/10 px-2 py-0.5 rounded">
+                      Chat
+                    </span>
+                  ) : (
+                    <>
+                      <span className="font-mono text-[10px] text-hot">
+                        {s.hot} hot
+                      </span>
+                      <span className="font-mono text-[10px] text-review">
+                        {s.review} review
+                      </span>
+                      <span className="font-mono text-[10px] text-text-dim">
+                        {s.rejected} rejected
+                      </span>
+                    </>
+                  )}
                   {s.created_at && (
                     <span className="font-mono text-[9px] text-text-dim">
                       {new Date(s.created_at).toLocaleDateString()}
