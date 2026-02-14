@@ -510,6 +510,7 @@ function SearchResultsCard({
             <div key={c.domain} className="px-5 py-3 hover:bg-surface-3/50 transition-colors">
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="font-mono text-[10px] text-text-dim min-w-[1.2rem] text-right">{i + 1}.</span>
+                <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
                 <span className="font-mono text-[11px] text-secondary/60">{c.domain}</span>
                 {c.score != null && (
                   <span className="font-mono text-[9px] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{(c.score * 100).toFixed(0)}%</span>
@@ -673,6 +674,7 @@ function LiveResultsView({
                     className="w-full px-5 py-3 flex items-center gap-3 hover:bg-surface-3/50 transition-colors cursor-pointer text-left"
                   >
                     <span className={`font-mono text-xs font-bold min-w-[2rem] text-right ${style.color}`}>{c.score}/10</span>
+                    <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
                     <span className="font-mono text-[11px] text-text-secondary flex-1 truncate">{c.domain}</span>
                     <span className={`font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded ${style.bg} ${style.color} ${style.border} border`}>
                       {style.label}
@@ -739,6 +741,7 @@ function LiveResultsView({
             {searchCompanies.slice(done + (progress ? 1 : 0)).map((c, i) => (
               <div key={c.domain} className="px-5 py-2.5 flex items-center gap-3 opacity-40">
                 <span className="font-mono text-[10px] min-w-[2rem] text-right text-text-dim">{done + (progress ? 1 : 0) + i + 1}</span>
+                <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
                 <span className="font-mono text-[11px] text-text-dim flex-1 truncate">{c.domain}</span>
               </div>
             ))}
@@ -918,6 +921,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                       <div key={c.domain} className="px-5 py-3">
                         <div className="flex items-center gap-3 mb-1">
                           <span className={`font-mono text-xs font-bold ${style.color}`}>{c.score}/10</span>
+                          <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
                           <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-secondary/60 hover:text-secondary transition-colors">
                             {c.domain} ↗
                           </a>

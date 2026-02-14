@@ -626,13 +626,25 @@ export default function LeadsPage() {
                       className="hover:bg-surface-3/50 transition-colors cursor-pointer"
                     >
                       <td className="px-5 py-3.5">
-                        <div>
-                          <p className="font-mono text-xs text-text-primary font-medium truncate max-w-[200px]">
-                            {lead.company_name}
-                          </p>
-                          <p className="font-mono text-[10px] text-text-dim truncate max-w-[200px]">
-                            {lead.domain}
-                          </p>
+                        <div className="flex items-center gap-2.5">
+                          {lead.domain && (
+                            <img
+                              src={`https://www.google.com/s2/favicons?domain=${lead.domain}&sz=32`}
+                              alt=""
+                              width={16}
+                              height={16}
+                              className="rounded-sm flex-shrink-0"
+                              loading="lazy"
+                            />
+                          )}
+                          <div>
+                            <p className="font-mono text-xs text-text-primary font-medium truncate max-w-[200px]">
+                              {lead.company_name}
+                            </p>
+                            <p className="font-mono text-[10px] text-text-dim truncate max-w-[200px]">
+                              {lead.domain}
+                            </p>
+                          </div>
                         </div>
                       </td>
                       <td className="px-5 py-3.5">

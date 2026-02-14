@@ -370,6 +370,7 @@ export default function BulkImportPage() {
                 >
                   {r.score}
                 </span>
+                <img src={`https://www.google.com/s2/favicons?domain=${r.domain}&sz=32`} alt="" width={16} height={16} className="rounded-sm flex-shrink-0" loading="lazy" />
                 <div className="flex-1 min-w-0">
                   <p className="font-mono text-xs text-text-primary truncate">{r.title}</p>
                   <p className="font-mono text-[10px] text-text-dim truncate">{r.domain}</p>

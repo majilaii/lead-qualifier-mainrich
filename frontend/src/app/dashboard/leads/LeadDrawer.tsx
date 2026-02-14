@@ -240,16 +240,28 @@ export default function LeadDrawer({
         ) : (
           <div className="px-6 py-6 space-y-6">
             {/* Company info */}
-            <div>
-              <h2 className="font-mono text-base font-bold text-text-primary mb-1">
-                {lead.company_name}
-              </h2>
-              <p className="font-mono text-xs text-text-muted">{lead.domain}</p>
-              {lead.country && (
-                <p className="font-mono text-[10px] text-text-dim mt-1">
-                  {lead.country}
-                </p>
+            <div className="flex items-start gap-3">
+              {lead.domain && (
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${lead.domain}&sz=64`}
+                  alt=""
+                  width={24}
+                  height={24}
+                  className="rounded flex-shrink-0 mt-0.5"
+                  loading="lazy"
+                />
               )}
+              <div>
+                <h2 className="font-mono text-base font-bold text-text-primary mb-1">
+                  {lead.company_name}
+                </h2>
+                <p className="font-mono text-xs text-text-muted">{lead.domain}</p>
+                {lead.country && (
+                  <p className="font-mono text-[10px] text-text-dim mt-1">
+                    {lead.country}
+                  </p>
+                )}
+              </div>
             </div>
 
             {/* Score gauge */}
