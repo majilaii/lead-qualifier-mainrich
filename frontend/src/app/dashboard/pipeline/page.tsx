@@ -107,7 +107,7 @@ export default function PipelinePage() {
             resetHunt();
             router.push("/dashboard/new");
           }}
-          className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg hover:bg-white/85 transition-colors cursor-pointer"
+          className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-[12px] font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg hover:bg-white/85 transition-colors cursor-pointer"
         >
           + New Pipeline
         </button>
@@ -138,7 +138,7 @@ export default function PipelinePage() {
             </svg>
             Active
             {activeCount > 0 && (
-              <span className="bg-secondary text-void text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
+              <span className="bg-secondary text-void text-[12px] font-bold w-4 h-4 rounded-full flex items-center justify-center">
                 {activeCount}
               </span>
             )}
@@ -167,7 +167,7 @@ export default function PipelinePage() {
           </svg>
           History
           {completedRuns.length > 0 && (
-            <span className="text-text-dim text-[9px]">
+            <span className="text-text-dim text-[12px]">
               ({completedRuns.length})
             </span>
           )}
@@ -312,12 +312,12 @@ export default function PipelinePage() {
                         </p>
                         <div className="flex items-center gap-2 mt-0.5">
                           {run.technology_focus && (
-                            <span className="font-mono text-[10px] text-text-dim truncate">
+                            <span className="font-mono text-[12px] text-text-dim truncate">
                               {run.technology_focus}
                             </span>
                           )}
                           {run.mode && (
-                            <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim/60 bg-surface-3 px-1.5 py-0.5 rounded">
+                            <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim/60 bg-surface-3 px-1.5 py-0.5 rounded">
                               {run.mode === "qualify_only"
                                   ? "bulk"
                                   : "discover"}
@@ -350,16 +350,16 @@ export default function PipelinePage() {
                             )}
                           </div>
                           <div className="flex gap-3">
-                            <span className="font-mono text-[10px] text-hot">
+                            <span className="font-mono text-[12px] text-hot">
                               {run.hot} hot
                             </span>
-                            <span className="font-mono text-[10px] text-review">
+                            <span className="font-mono text-[12px] text-review">
                               {run.review} review
                             </span>
-                            <span className="font-mono text-[10px] text-text-dim">
+                            <span className="font-mono text-[12px] text-text-dim">
                               {run.rejected} rejected
                             </span>
-                            <span className="font-mono text-[10px] text-text-dim ml-auto">
+                            <span className="font-mono text-[12px] text-text-dim ml-auto">
                               {run.total_found} found
                             </span>
                           </div>
@@ -370,12 +370,12 @@ export default function PipelinePage() {
                       {Object.keys(run.search_context || {}).length > 0 && (
                         <div className="flex flex-wrap gap-1.5 pt-1">
                           {run.search_context.industry && (
-                            <span className="font-mono text-[9px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
+                            <span className="font-mono text-[12px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
                               {run.search_context.industry.slice(0, 30)}
                             </span>
                           )}
                           {run.search_context.geographic_region && (
-                            <span className="font-mono text-[9px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
+                            <span className="font-mono text-[12px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
                               📍{" "}
                               {run.search_context.geographic_region.slice(
                                 0,
@@ -390,7 +390,7 @@ export default function PipelinePage() {
                     {/* Right side: date + actions */}
                     <div className="flex flex-col items-end gap-2 flex-shrink-0">
                       {run.created_at && (
-                        <span className="font-mono text-[10px] text-text-dim">
+                        <span className="font-mono text-[12px] text-text-dim">
                           {new Date(run.created_at).toLocaleDateString()}
                         </span>
                       )}
@@ -398,7 +398,7 @@ export default function PipelinePage() {
                         {/* View leads */}
                         <Link
                           href={`/dashboard/leads?search_id=${run.id}`}
-                          className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors"
+                          className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors"
                           onClick={(e) => e.stopPropagation()}
                         >
                           Leads →
@@ -408,7 +408,7 @@ export default function PipelinePage() {
                         <button
                           onClick={() => handleRerun(run)}
                           disabled={isRerunning}
-                          className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-border text-text-muted hover:text-secondary hover:border-secondary/30 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                          className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-border text-text-muted hover:text-secondary hover:border-secondary/30 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                           title="Re-run this pipeline with the same configuration"
                         >
                           {isRerunning ? (
@@ -446,7 +446,7 @@ export default function PipelinePage() {
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") handleDelete(run.id);
                               }}
-                              className="font-mono text-[10px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
+                              className="font-mono text-[12px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
                             >
                               {isDeleting ? "…" : "Confirm"}
                             </span>
@@ -458,7 +458,7 @@ export default function PipelinePage() {
                                 if (e.key === "Enter")
                                   setConfirmDeleteId(null);
                               }}
-                              className="font-mono text-[10px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
+                              className="font-mono text-[12px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
                             >
                               Cancel
                             </span>
@@ -536,7 +536,7 @@ function ActivePipelineCard({
           <p className="font-mono text-xs text-text-primary font-medium truncate">
             {run.name || run.industry || "Pipeline"}
           </p>
-          <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-secondary/50">
+          <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-secondary/50">
             {run.mode === "chat_pipeline" ? "Chat" : run.mode === "qualify_only" ? "Bulk Import" : "Discovery"} · Running
           </span>
         </div>
@@ -547,7 +547,7 @@ function ActivePipelineCard({
               await onStop();
             }}
             disabled={stopping}
-            className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+            className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
             title="Stop this pipeline"
           >
             {stopping ? (
@@ -562,14 +562,14 @@ function ActivePipelineCard({
           {run.mode === "chat_pipeline" && (
             <Link
               href={`/chat?session=${run.id}`}
-              className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
+              className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
             >
               Chat →
             </Link>
           )}
           <Link
             href={`/dashboard/leads?search_id=${run.id}`}
-            className="font-mono text-[10px] uppercase tracking-[0.15em] text-secondary hover:text-secondary/80 transition-colors"
+            className="font-mono text-[12px] uppercase tracking-[0.15em] text-secondary hover:text-secondary/80 transition-colors"
           >
             View →
           </Link>
@@ -578,7 +578,7 @@ function ActivePipelineCard({
 
       {/* Currently processing */}
       {company && (
-        <p className="font-mono text-[10px] text-text-dim truncate">
+        <p className="font-mono text-[12px] text-text-dim truncate">
           {phase === "crawling" ? "🌐 Crawling" : "🔍 Analyzing"}{" "}
           <span className="text-text-muted">{company}</span>
         </p>
@@ -594,10 +594,10 @@ function ActivePipelineCard({
             />
           </div>
           <div className="flex justify-between">
-            <span className="font-mono text-[9px] text-text-dim">
+            <span className="font-mono text-[12px] text-text-dim">
               {processed} / {total} companies
             </span>
-            <span className="font-mono text-[9px] text-text-dim">{pct}%</span>
+            <span className="font-mono text-[12px] text-text-dim">{pct}%</span>
           </div>
         </div>
       )}
@@ -608,7 +608,7 @@ function ActivePipelineCard({
           <div className="h-1.5 bg-surface-3 rounded-full overflow-hidden">
             <div className="h-full bg-secondary/60 rounded-full animate-pulse w-full" />
           </div>
-          <p className="font-mono text-[9px] text-text-dim">
+          <p className="font-mono text-[12px] text-text-dim">
             Discovering companies…
           </p>
         </div>
@@ -617,13 +617,13 @@ function ActivePipelineCard({
       {/* Live result counts */}
       {(hotCount > 0 || reviewCount > 0 || rejectedCount > 0) && (
         <div className="flex gap-3 pt-1 border-t border-border/50">
-          <span className="font-mono text-[10px] text-hot">
+          <span className="font-mono text-[12px] text-hot">
             {hotCount} hot
           </span>
-          <span className="font-mono text-[10px] text-review">
+          <span className="font-mono text-[12px] text-review">
             {reviewCount} review
           </span>
-          <span className="font-mono text-[10px] text-text-dim">
+          <span className="font-mono text-[12px] text-text-dim">
             {rejectedCount} rejected
           </span>
         </div>
@@ -677,11 +677,11 @@ function ChatHistoryCard({
               {run.name || run.industry || "Chat Session"}
             </p>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-blue-400/60">
+              <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-blue-400/60">
                 Chat · {run.run_status === "error" ? "Error" : "Complete"}
               </span>
               {run.technology_focus && (
-                <span className="font-mono text-[10px] text-text-dim truncate">
+                <span className="font-mono text-[12px] text-text-dim truncate">
                   {run.technology_focus}
                 </span>
               )}
@@ -691,7 +691,7 @@ function ChatHistoryCard({
           {/* Date + actions */}
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             {run.created_at && (
-              <span className="font-mono text-[9px] text-text-dim">
+              <span className="font-mono text-[12px] text-text-dim">
                 {new Date(run.created_at).toLocaleDateString()}
               </span>
             )}
@@ -700,7 +700,7 @@ function ChatHistoryCard({
               {total > 0 && (
                 <Link
                   href={`/dashboard/leads?search_id=${run.id}`}
-                  className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors"
+                  className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors"
                   onClick={(e) => e.stopPropagation()}
                 >
                   Leads →
@@ -710,7 +710,7 @@ function ChatHistoryCard({
               {/* Resume chat */}
               <Link
                 href={`/chat?session=${run.id}`}
-                className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
                 onClick={(e) => e.stopPropagation()}
               >
                 Resume Chat
@@ -720,7 +720,7 @@ function ChatHistoryCard({
               <button
                 onClick={onRerun}
                 disabled={isRerunning}
-                className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-border text-text-muted hover:text-secondary hover:border-secondary/30 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+                className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md border border-border text-text-muted hover:text-secondary hover:border-secondary/30 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
                 title="Re-run this pipeline with the same configuration"
               >
                 {isRerunning ? (
@@ -747,7 +747,7 @@ function ChatHistoryCard({
                     tabIndex={0}
                     onClick={onDelete}
                     onKeyDown={(e) => { if (e.key === "Enter") onDelete(); }}
-                    className="font-mono text-[10px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
+                    className="font-mono text-[12px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
                   >
                     {isDeleting ? "…" : "Confirm"}
                   </span>
@@ -756,7 +756,7 @@ function ChatHistoryCard({
                     tabIndex={0}
                     onClick={onCancelDelete}
                     onKeyDown={(e) => { if (e.key === "Enter") onCancelDelete(); }}
-                    className="font-mono text-[10px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
+                    className="font-mono text-[12px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
                   >
                     Cancel
                   </span>
@@ -792,10 +792,10 @@ function ChatHistoryCard({
               )}
             </div>
             <div className="flex gap-3">
-              <span className="font-mono text-[10px] text-hot">{run.hot} hot</span>
-              <span className="font-mono text-[10px] text-review">{run.review} review</span>
-              <span className="font-mono text-[10px] text-text-dim">{run.rejected} rejected</span>
-              <span className="font-mono text-[10px] text-text-dim ml-auto">{run.total_found} found</span>
+              <span className="font-mono text-[12px] text-hot">{run.hot} hot</span>
+              <span className="font-mono text-[12px] text-review">{run.review} review</span>
+              <span className="font-mono text-[12px] text-text-dim">{run.rejected} rejected</span>
+              <span className="font-mono text-[12px] text-text-dim ml-auto">{run.total_found} found</span>
             </div>
           </div>
         )}
@@ -803,17 +803,17 @@ function ChatHistoryCard({
         {/* Context tags */}
         <div className="flex flex-wrap gap-1.5">
           {run.industry && (
-            <span className="font-mono text-[9px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
+            <span className="font-mono text-[12px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
               {run.industry.slice(0, 40)}
             </span>
           )}
           {(run.search_context?.geographic_region) && (
-            <span className="font-mono text-[9px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
+            <span className="font-mono text-[12px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
               📍 {run.search_context.geographic_region.slice(0, 25)}
             </span>
           )}
           {!run.industry && !run.technology_focus && total === 0 && (
-            <span className="font-mono text-[9px] text-text-dim/50 italic">
+            <span className="font-mono text-[12px] text-text-dim/50 italic">
               Chat session — no leads generated
             </span>
           )}
@@ -852,11 +852,11 @@ function ChatSessionCard({
             {chat.name || chat.industry || "Chat Session"}
           </p>
           <div className="flex items-center gap-2 mt-0.5">
-            <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-blue-400/60">
+            <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-blue-400/60">
               Chat · In progress
             </span>
             {chat.created_at && (
-              <span className="font-mono text-[9px] text-text-dim">
+              <span className="font-mono text-[12px] text-text-dim">
                 {new Date(chat.created_at).toLocaleDateString()}
               </span>
             )}
@@ -866,7 +866,7 @@ function ChatSessionCard({
         <div className="flex items-center gap-2 flex-shrink-0">
           <Link
             href={`/chat?session=${chat.id}`}
-            className="font-mono text-[10px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
+            className="font-mono text-[12px] uppercase tracking-[0.12em] px-2.5 py-1.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400 hover:bg-blue-500/20 transition-colors"
           >
             Resume →
           </Link>
@@ -877,7 +877,7 @@ function ChatSessionCard({
                 tabIndex={0}
                 onClick={onDelete}
                 onKeyDown={(e) => { if (e.key === "Enter") onDelete(); }}
-                className="font-mono text-[10px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
+                className="font-mono text-[12px] text-red-400 hover:text-red-300 cursor-pointer px-1.5 py-1"
               >
                 Confirm
               </span>
@@ -886,7 +886,7 @@ function ChatSessionCard({
                 tabIndex={0}
                 onClick={() => setConfirming(false)}
                 onKeyDown={(e) => { if (e.key === "Enter") setConfirming(false); }}
-                className="font-mono text-[10px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
+                className="font-mono text-[12px] text-text-dim hover:text-text-muted cursor-pointer px-1.5 py-1"
               >
                 Cancel
               </span>
@@ -909,17 +909,17 @@ function ChatSessionCard({
       {/* Context tags */}
       <div className="flex flex-wrap gap-1.5">
         {chat.industry && (
-          <span className="font-mono text-[9px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
+          <span className="font-mono text-[12px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
             {chat.industry.slice(0, 40)}
           </span>
         )}
         {chat.technology_focus && (
-          <span className="font-mono text-[9px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
+          <span className="font-mono text-[12px] text-text-dim/80 bg-surface-3 px-2 py-0.5 rounded-full">
             {chat.technology_focus.slice(0, 40)}
           </span>
         )}
         {!chat.industry && !chat.technology_focus && (
-          <span className="font-mono text-[9px] text-text-dim/50 italic">
+          <span className="font-mono text-[12px] text-text-dim/50 italic">
             Conversation started — no ICP defined yet
           </span>
         )}

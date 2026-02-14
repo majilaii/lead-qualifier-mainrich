@@ -101,7 +101,7 @@ export default function OnboardingOverlay({
             {step < STEPS.length - 1 && (
               <button
                 onClick={onComplete}
-                className="font-mono text-[10px] text-text-dim hover:text-text-muted transition-colors cursor-pointer"
+                className="font-mono text-[12px] text-text-dim hover:text-text-muted transition-colors cursor-pointer"
               >
                 Skip intro
               </button>
@@ -109,7 +109,7 @@ export default function OnboardingOverlay({
             {onDemo && step === STEPS.length - 1 && (
               <button
                 onClick={onDemo}
-                className="font-mono text-[10px] text-secondary/60 hover:text-secondary transition-colors cursor-pointer"
+                className="font-mono text-[12px] text-secondary/60 hover:text-secondary transition-colors cursor-pointer"
               >
                 Try with sample data
               </button>
@@ -119,7 +119,7 @@ export default function OnboardingOverlay({
 
         {/* Welcome badge */}
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="bg-secondary text-void font-mono text-[8px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full">
+          <span className="bg-secondary text-void font-mono text-[12px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full">
             Welcome to Hunt
           </span>
         </div>

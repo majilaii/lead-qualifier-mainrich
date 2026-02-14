@@ -108,7 +108,7 @@ export default function LiveMapPanel() {
       <div className="flex items-center justify-center h-full bg-surface-1 text-text-dim">
         <div className="text-center px-6">
           <p className="font-mono text-xs mb-1">Map unavailable</p>
-          <p className="font-mono text-[10px] text-text-dim/60">
+          <p className="font-mono text-[12px] text-text-dim/60">
             Set NEXT_PUBLIC_MAPBOX_TOKEN
           </p>
         </div>
@@ -185,36 +185,36 @@ export default function LiveMapPanel() {
               {/* Header */}
               <div className="flex items-start justify-between gap-2 mb-2">
                 <h3 className="font-mono text-xs font-bold text-text-primary truncate flex-1">{selectedLead.company_name}</h3>
-                <span className={`font-mono text-[9px] uppercase tracking-[0.1em] px-2 py-0.5 rounded flex-shrink-0 ${TIER_STYLES[selectedLead.tier]?.bg || ""} ${TIER_STYLES[selectedLead.tier]?.color || ""} ${TIER_STYLES[selectedLead.tier]?.border || ""} border`}>
+                <span className={`font-mono text-[12px] uppercase tracking-[0.1em] px-2 py-0.5 rounded flex-shrink-0 ${TIER_STYLES[selectedLead.tier]?.bg || ""} ${TIER_STYLES[selectedLead.tier]?.color || ""} ${TIER_STYLES[selectedLead.tier]?.border || ""} border`}>
                   {TIER_STYLES[selectedLead.tier]?.label || selectedLead.tier}
                 </span>
               </div>
 
               {/* Domain + Score */}
               <div className="flex items-center gap-2 mb-2">
-                <a href={selectedLead.website_url || `https://${selectedLead.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[10px] text-secondary/60 hover:text-secondary transition-colors truncate">{selectedLead.domain} ↗</a>
+                <a href={selectedLead.website_url || `https://${selectedLead.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[12px] text-secondary/60 hover:text-secondary transition-colors truncate">{selectedLead.domain} ↗</a>
                 <span className="font-mono text-xs font-bold ml-auto" style={{ color: DOT_COLORS[selectedLead.tier] }}>{selectedLead.score}/100</span>
               </div>
 
               {/* Tags */}
               <div className="flex flex-wrap gap-1 mb-2">
-                {selectedLead.hardware_type && <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.hardware_type}</span>}
-                {selectedLead.industry_category && <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.industry_category}</span>}
-                {selectedLead.country && <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.country}</span>}
+                {selectedLead.hardware_type && <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.hardware_type}</span>}
+                {selectedLead.industry_category && <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.industry_category}</span>}
+                {selectedLead.country && <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.country}</span>}
               </div>
 
               {/* Reasoning */}
               {selectedLead.reasoning && (
-                <p className="font-sans text-[10px] text-text-muted leading-relaxed mb-2 line-clamp-3">{selectedLead.reasoning}</p>
+                <p className="font-sans text-[12px] text-text-muted leading-relaxed mb-2 line-clamp-3">{selectedLead.reasoning}</p>
               )}
 
               {/* Key signals */}
               {selectedLead.key_signals && selectedLead.key_signals.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {selectedLead.key_signals.slice(0, 4).map((s, i) => (
-                    <span key={i} className="font-mono text-[8px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">{s}</span>
+                    <span key={i} className="font-mono text-[12px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">{s}</span>
                   ))}
-                  {selectedLead.key_signals.length > 4 && <span className="font-mono text-[8px] text-text-dim">+{selectedLead.key_signals.length - 4}</span>}
+                  {selectedLead.key_signals.length > 4 && <span className="font-mono text-[12px] text-text-dim">+{selectedLead.key_signals.length - 4}</span>}
                 </div>
               )}
 
@@ -222,7 +222,7 @@ export default function LiveMapPanel() {
               {selectedLead.red_flags && selectedLead.red_flags.length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
                   {selectedLead.red_flags.slice(0, 3).map((f, i) => (
-                    <span key={i} className="font-mono text-[8px] text-red-400/60 bg-red-400/5 border border-red-400/10 rounded px-1.5 py-0.5">{f}</span>
+                    <span key={i} className="font-mono text-[12px] text-red-400/60 bg-red-400/5 border border-red-400/10 rounded px-1.5 py-0.5">{f}</span>
                   ))}
                 </div>
               )}
@@ -236,16 +236,16 @@ export default function LiveMapPanel() {
         <span
           className={`w-2 h-2 rounded-full ${isPipelineRunning ? "bg-green-400 animate-pulse" : "bg-text-dim"}`}
         />
-        <span className="font-mono text-[9px] text-text-primary">
+        <span className="font-mono text-[12px] text-text-primary">
           {leads.length} leads
         </span>
         {tierCounts.hot > 0 && (
-          <span className="font-mono text-[9px] text-hot">
+          <span className="font-mono text-[12px] text-hot">
             {tierCounts.hot} hot
           </span>
         )}
         {tierCounts.review > 0 && (
-          <span className="font-mono text-[9px] text-review">
+          <span className="font-mono text-[12px] text-review">
             {tierCounts.review} review
           </span>
         )}
@@ -255,7 +255,7 @@ export default function LiveMapPanel() {
       {isPipelineRunning && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-surface-1/90 backdrop-blur-md border border-green-500/30 rounded-full px-4 py-1.5 flex items-center gap-2 z-10">
           <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="font-mono text-[10px] text-green-400">
+          <span className="font-mono text-[12px] text-green-400">
             Leads appearing live
           </span>
         </div>

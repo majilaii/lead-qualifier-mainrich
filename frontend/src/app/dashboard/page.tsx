@@ -139,7 +139,7 @@ export default function DashboardPage() {
                 {card.value}
               </span>
             </div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted">
+            <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted">
               {card.label}
             </p>
           </div>
@@ -178,7 +178,7 @@ export default function DashboardPage() {
                         title={`${s.label}: ${count}`}
                       >
                         {pct > 12 && (
-                          <span className="font-mono text-[9px] text-void font-bold truncate px-1">
+                          <span className="font-mono text-[12px] text-void font-bold truncate px-1">
                             {s.label} ({count})
                           </span>
                         )}
@@ -200,7 +200,7 @@ export default function DashboardPage() {
               ].map((s) => (
                 <div key={s.key} className="flex items-center gap-1.5">
                   <span className={`w-2 h-2 rounded-full ${s.dot}`} />
-                  <span className="font-mono text-[9px] text-text-muted">
+                  <span className="font-mono text-[12px] text-text-muted">
                     {s.label}: {funnel.stages[s.key] || 0}
                   </span>
                 </div>
@@ -214,7 +214,7 @@ export default function DashboardPage() {
               <span className="font-mono text-2xl font-bold text-text-primary">
                 ${funnel.total_pipeline_value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-3">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-3">
                 Pipeline Value
               </p>
             </div>
@@ -222,7 +222,7 @@ export default function DashboardPage() {
               <span className="font-mono text-2xl font-bold text-green-400">
                 ${funnel.won_value.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-3">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-3">
                 Won Revenue
               </p>
             </div>
@@ -230,7 +230,7 @@ export default function DashboardPage() {
               <span className="font-mono text-2xl font-bold text-text-primary">
                 {funnel.conversion_rate}%
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-3">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-3">
                 Conversion Rate
               </p>
             </div>
@@ -238,7 +238,7 @@ export default function DashboardPage() {
               <span className="font-mono text-2xl font-bold text-text-primary">
                 {funnel.avg_days_to_close}
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-3">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-3">
                 Avg Days to Close
               </p>
             </div>
@@ -254,7 +254,7 @@ export default function DashboardPage() {
           </h2>
           <Link
             href="/dashboard/pipeline"
-            className="font-mono text-[10px] text-secondary/60 hover:text-secondary uppercase tracking-[0.15em] transition-colors"
+            className="font-mono text-[12px] text-secondary/60 hover:text-secondary uppercase tracking-[0.15em] transition-colors"
           >
             View All →
           </Link>
@@ -287,31 +287,31 @@ export default function DashboardPage() {
                     {s.industry || "Untitled Search"}
                   </p>
                   {s.technology_focus && (
-                    <p className="font-mono text-[10px] text-text-dim truncate mt-0.5">
+                    <p className="font-mono text-[12px] text-text-dim truncate mt-0.5">
                       {s.technology_focus}
                     </p>
                   )}
                 </Link>
                 <div className="flex items-center gap-3 ml-4">
                   {s.hot + s.review + s.rejected === 0 ? (
-                    <span className="font-mono text-[10px] text-secondary/60 bg-secondary/10 px-2 py-0.5 rounded">
+                    <span className="font-mono text-[12px] text-secondary/60 bg-secondary/10 px-2 py-0.5 rounded">
                       Chat
                     </span>
                   ) : (
                     <>
-                      <span className="font-mono text-[10px] text-hot">
+                      <span className="font-mono text-[12px] text-hot">
                         {s.hot} hot
                       </span>
-                      <span className="font-mono text-[10px] text-review">
+                      <span className="font-mono text-[12px] text-review">
                         {s.review} review
                       </span>
-                      <span className="font-mono text-[10px] text-text-dim">
+                      <span className="font-mono text-[12px] text-text-dim">
                         {s.rejected} rejected
                       </span>
                     </>
                   )}
                   {s.created_at && (
-                    <span className="font-mono text-[9px] text-text-dim">
+                    <span className="font-mono text-[12px] text-text-dim">
                       {new Date(s.created_at).toLocaleDateString()}
                     </span>
                   )}

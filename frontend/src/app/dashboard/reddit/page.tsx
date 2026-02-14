@@ -131,7 +131,7 @@ export default function RedditPulsePage() {
       <div className="bg-surface-2 border border-border rounded-xl p-5 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-1.5">
+            <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-1.5">
               Industry
             </label>
             <input
@@ -143,7 +143,7 @@ export default function RedditPulsePage() {
             />
           </div>
           <div>
-            <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-1.5">
+            <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-1.5">
               Technology / Product
             </label>
             <input
@@ -155,7 +155,7 @@ export default function RedditPulsePage() {
             />
           </div>
           <div>
-            <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-1.5">
+            <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-1.5">
               Custom Search
             </label>
             <input
@@ -175,7 +175,7 @@ export default function RedditPulsePage() {
               <button
                 key={t.value}
                 onClick={() => setTimeRange(t.value)}
-                className={`font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
+                className={`font-mono text-[12px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
                   timeRange === t.value
                     ? "bg-secondary/15 text-secondary border border-secondary/30"
                     : "text-text-dim hover:text-text-muted border border-transparent"
@@ -189,7 +189,7 @@ export default function RedditPulsePage() {
           <button
             onClick={handleSearch}
             disabled={loading || (!industry && !technology && !customQuery)}
-            className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-6 py-2.5 rounded-lg hover:bg-white/85 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-[12px] font-bold uppercase tracking-[0.15em] px-6 py-2.5 rounded-lg hover:bg-white/85 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {loading ? (
               <>
@@ -238,7 +238,7 @@ export default function RedditPulsePage() {
               <span className="font-mono text-2xl font-bold text-text-primary">
                 {pulse.total_posts_found}
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-2">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-2">
                 Posts Found
               </p>
             </div>
@@ -246,7 +246,7 @@ export default function RedditPulsePage() {
               <span className="font-mono text-2xl font-bold text-green-400">
                 {pulse.buying_intent_count}
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-2">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-2">
                 Buying Intent
               </p>
             </div>
@@ -254,14 +254,14 @@ export default function RedditPulsePage() {
               <span className="font-mono text-2xl font-bold text-text-primary">
                 {pulse.subreddits_searched.length}
               </span>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mt-2">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mt-2">
                 Subreddits
               </p>
             </div>
 
             {/* Sentiment bar */}
             <div className="bg-surface-2 border border-border rounded-xl p-4 col-span-2">
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mb-2">
+              <p className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mb-2">
                 Sentiment
               </p>
               <div className="flex h-4 rounded-md overflow-hidden bg-surface-3 mb-2">
@@ -285,7 +285,7 @@ export default function RedditPulsePage() {
                 {Object.entries(pulse.sentiment_breakdown).map(([key, val]) => (
                   <div key={key} className="flex items-center gap-1">
                     <span className={`w-2 h-2 rounded-full ${SENTIMENT_COLORS[key]?.dot ?? "bg-gray-500"}`} />
-                    <span className="font-mono text-[9px] text-text-dim">
+                    <span className="font-mono text-[12px] text-text-dim">
                       {SENTIMENT_COLORS[key]?.label}: {val}
                     </span>
                   </div>
@@ -297,13 +297,13 @@ export default function RedditPulsePage() {
           {/* Top Themes */}
           {pulse.top_themes.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted self-center mr-1">
+              <span className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted self-center mr-1">
                 Themes:
               </span>
               {pulse.top_themes.map((theme) => (
                 <span
                   key={theme}
-                  className="bg-secondary/10 border border-secondary/20 text-secondary font-mono text-[10px] px-2.5 py-1 rounded-md"
+                  className="bg-secondary/10 border border-secondary/20 text-secondary font-mono text-[12px] px-2.5 py-1 rounded-md"
                 >
                   {theme}
                 </span>
@@ -313,12 +313,12 @@ export default function RedditPulsePage() {
 
           {/* Signal Type Filter */}
           <div className="flex items-center gap-2 border-b border-border-dim pb-3">
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted mr-1">
+            <span className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted mr-1">
               Filter:
             </span>
             <button
               onClick={() => setFilter("all")}
-              className={`font-mono text-[10px] px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+              className={`font-mono text-[12px] px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
                 filter === "all"
                   ? "bg-white/10 text-text-primary"
                   : "text-text-dim hover:text-text-muted"
@@ -333,7 +333,7 @@ export default function RedditPulsePage() {
                 <button
                   key={key}
                   onClick={() => setFilter(key)}
-                  className={`font-mono text-[10px] px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                  className={`font-mono text-[12px] px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
                     filter === key
                       ? `${val.bg} ${val.text}`
                       : "text-text-dim hover:text-text-muted"
@@ -369,19 +369,19 @@ export default function RedditPulsePage() {
                       <div className="flex-1 min-w-0">
                         {/* Header row */}
                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                          <span className={`${signalStyle.bg} ${signalStyle.text} font-mono text-[9px] uppercase tracking-[0.1em] px-2 py-0.5 rounded`}>
+                          <span className={`${signalStyle.bg} ${signalStyle.text} font-mono text-[12px] uppercase tracking-[0.1em] px-2 py-0.5 rounded`}>
                             {signalStyle.label}
                           </span>
                           <span className="flex items-center gap-1">
                             <span className={`w-1.5 h-1.5 rounded-full ${sentimentStyle.dot}`} />
-                            <span className="font-mono text-[9px] text-text-dim">
+                            <span className="font-mono text-[12px] text-text-dim">
                               {sentimentStyle.label}
                             </span>
                           </span>
-                          <span className="font-mono text-[9px] text-secondary/60">
+                          <span className="font-mono text-[12px] text-secondary/60">
                             {signal.subreddit}
                           </span>
-                          <span className="font-mono text-[9px] text-text-dim">
+                          <span className="font-mono text-[12px] text-text-dim">
                             {signal.age_days}d ago
                           </span>
                         </div>
@@ -394,7 +394,7 @@ export default function RedditPulsePage() {
                         )}
 
                         {/* Summary */}
-                        <p className="font-sans text-[11px] text-text-muted leading-relaxed">
+                        <p className="font-sans text-[12px] text-text-muted leading-relaxed">
                           {signal.summary || signal.body.slice(0, 200)}
                         </p>
 
@@ -404,7 +404,7 @@ export default function RedditPulsePage() {
                             {signal.key_phrases.map((phrase) => (
                               <span
                                 key={phrase}
-                                className="bg-surface-3 text-text-dim font-mono text-[9px] px-1.5 py-0.5 rounded"
+                                className="bg-surface-3 text-text-dim font-mono text-[12px] px-1.5 py-0.5 rounded"
                               >
                                 {phrase}
                               </span>
@@ -418,7 +418,7 @@ export default function RedditPulsePage() {
                         <span className="font-mono text-xs text-text-primary">
                           ↑{signal.score}
                         </span>
-                        <span className="font-mono text-[9px] text-text-dim">
+                        <span className="font-mono text-[12px] text-text-dim">
                           {signal.num_comments} comments
                         </span>
                         <div
@@ -452,7 +452,7 @@ export default function RedditPulsePage() {
             buying intent signals, pain points, competitor mentions, and market sentiment from
             thousands of Reddit discussions.
           </p>
-          <p className="font-mono text-[10px] text-text-dim mt-4">
+          <p className="font-mono text-[12px] text-text-dim mt-4">
             Free • No Reddit account needed • Powered by PullPush + Reddit API
           </p>
         </div>

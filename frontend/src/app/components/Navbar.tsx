@@ -67,7 +67,7 @@ export default function Navbar() {
               className="inline-flex items-center gap-2 bg-text-primary text-void text-xs font-semibold uppercase tracking-[0.15em] px-5 py-2.5 rounded hover:bg-white/85 transition-colors duration-200"
             >
               Dashboard
-              <span className="text-[10px]">&#x2192;</span>
+              <span className="text-[12px]">&#x2192;</span>
             </Link>
             </div>
           ) : (
@@ -83,7 +83,7 @@ export default function Navbar() {
                 className="inline-flex items-center gap-2 bg-text-primary text-void text-xs font-semibold uppercase tracking-[0.15em] px-5 py-2.5 rounded hover:bg-white/85 transition-colors duration-200"
               >
                 Get Started Free
-                <span className="text-[10px]">&#x2192;</span>
+                <span className="text-[12px]">&#x2192;</span>
               </Link>
             </>
           )}

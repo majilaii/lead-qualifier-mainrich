@@ -327,7 +327,7 @@ export default function LeadsPage() {
           <button
             onClick={() => setExportMenuOpen((v) => !v)}
             disabled={exporting || leads.length === 0}
-            className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer disabled:opacity-30"
+            className="inline-flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer disabled:opacity-30"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
@@ -345,61 +345,61 @@ export default function LeadsPage() {
               {/* Backdrop to close menu */}
               <div className="fixed inset-0 z-40" onClick={() => setExportMenuOpen(false)} />
               <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-surface-2 border border-border rounded-xl shadow-xl py-1.5 animate-in fade-in slide-in-from-top-1 duration-150">
-                <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+                <p className="px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim">
                   Export as CSV
                 </p>
 
                 <button
                   onClick={() => handleExport()}
-                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left px-3 py-2 font-mono text-[12px] text-text-primary hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>All Leads</span>
-                  <span className="text-text-dim text-[10px]">{leads.length}</span>
+                  <span className="text-text-dim text-[12px]">{leads.length}</span>
                 </button>
 
                 <button
                   onClick={() => handleExport({ tier: "hot" })}
-                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-hot hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left px-3 py-2 font-mono text-[12px] text-hot hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>🔥 Hot Leads Only</span>
-                  <span className="text-text-dim text-[10px]">{tierCounts.hot}</span>
+                  <span className="text-text-dim text-[12px]">{tierCounts.hot}</span>
                 </button>
 
                 <button
                   onClick={() => handleExport({ tier: "review" })}
-                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-review hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left px-3 py-2 font-mono text-[12px] text-review hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>🔍 Review Leads Only</span>
-                  <span className="text-text-dim text-[10px]">{tierCounts.review}</span>
+                  <span className="text-text-dim text-[12px]">{tierCounts.review}</span>
                 </button>
 
                 <button
                   onClick={() => handleExport({ tier: "rejected" })}
-                  className="w-full text-left px-3 py-2 font-mono text-[11px] text-text-muted hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                  className="w-full text-left px-3 py-2 font-mono text-[12px] text-text-muted hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
                 >
                   <span>❌ Rejected Leads Only</span>
-                  <span className="text-text-dim text-[10px]">{tierCounts.rejected}</span>
+                  <span className="text-text-dim text-[12px]">{tierCounts.rejected}</span>
                 </button>
 
                 {selectedPipeline && selectedSearchInfo && (
                   <>
                     <div className="border-t border-border my-1" />
-                    <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+                    <p className="px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim">
                       Current Pipeline
                     </p>
                     <button
                       onClick={() => handleExport({ search_id: selectedPipeline })}
-                      className="w-full text-left px-3 py-2 font-mono text-[11px] text-secondary hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                      className="w-full text-left px-3 py-2 font-mono text-[12px] text-secondary hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
                     >
                       <span className="truncate pr-2">{selectedSearchInfo.name || selectedSearchInfo.industry || "Pipeline"} — All</span>
-                      <span className="text-text-dim text-[10px] flex-shrink-0">{pipelineLeads.length}</span>
+                      <span className="text-text-dim text-[12px] flex-shrink-0">{pipelineLeads.length}</span>
                     </button>
                     <button
                       onClick={() => handleExport({ search_id: selectedPipeline, tier: "hot" })}
-                      className="w-full text-left px-3 py-2 font-mono text-[11px] text-hot hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
+                      className="w-full text-left px-3 py-2 font-mono text-[12px] text-hot hover:bg-surface-3 transition-colors flex items-center justify-between cursor-pointer"
                     >
                       <span className="truncate pr-2">{selectedSearchInfo.name || selectedSearchInfo.industry || "Pipeline"} — Hot</span>
-                      <span className="text-text-dim text-[10px] flex-shrink-0">{pipelineLeads.filter(l => l.tier === "hot").length}</span>
+                      <span className="text-text-dim text-[12px] flex-shrink-0">{pipelineLeads.filter(l => l.tier === "hot").length}</span>
                     </button>
                   </>
                 )}
@@ -412,7 +412,7 @@ export default function LeadsPage() {
       {/* ═══ Pipeline cards ═══ */}
       {searches.length > 0 && (
         <div>
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.15em] text-text-dim mb-3">
+          <h2 className="font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim mb-3">
             Filter by Pipeline
           </h2>
           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
@@ -434,14 +434,14 @@ export default function LeadsPage() {
                     <rect x="14" y="14" width="7" height="7" rx="1" />
                   </svg>
                 </div>
-                <span className="font-mono text-[10px] font-semibold text-text-primary uppercase tracking-[0.1em]">
+                <span className="font-mono text-[12px] font-semibold text-text-primary uppercase tracking-[0.1em]">
                   All
                 </span>
               </div>
               <span className="font-mono text-lg font-bold text-text-primary">
                 {leads.length}
               </span>
-              <span className="font-mono text-[10px] text-text-dim ml-1.5">
+              <span className="font-mono text-[12px] text-text-dim ml-1.5">
                 leads
               </span>
             </button>
@@ -467,11 +467,11 @@ export default function LeadsPage() {
                       : "border-border bg-surface-2 hover:border-border-bright"
                   }`}
                 >
-                  <p className="font-mono text-[11px] font-semibold text-text-primary truncate mb-1.5 leading-tight">
+                  <p className="font-mono text-[12px] font-semibold text-text-primary truncate mb-1.5 leading-tight">
                     {displayName}
                   </p>
                   {s.qualifying_criteria && (
-                    <p className="font-sans text-[10px] text-text-dim truncate mb-2 leading-tight">
+                    <p className="font-sans text-[12px] text-text-dim truncate mb-2 leading-tight">
                       {s.qualifying_criteria}
                     </p>
                   )}
@@ -479,11 +479,11 @@ export default function LeadsPage() {
                     <span className="font-mono text-lg font-bold text-text-primary">
                       {counts.total}
                     </span>
-                    <span className="font-mono text-[10px] text-text-dim">
+                    <span className="font-mono text-[12px] text-text-dim">
                       leads
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 font-mono text-[9px]">
+                  <div className="flex items-center gap-2 font-mono text-[12px]">
                     <span className="text-hot">{counts.hot} hot</span>
                     <span className="text-text-dim">·</span>
                     <span className="text-review">{counts.review} review</span>
@@ -491,7 +491,7 @@ export default function LeadsPage() {
                     <span className="text-text-dim">{counts.rejected} rej</span>
                   </div>
                   {s.created_at && (
-                    <p className="font-mono text-[9px] text-text-dim mt-2">
+                    <p className="font-mono text-[12px] text-text-dim mt-2">
                       {new Date(s.created_at).toLocaleDateString()}
                     </p>
                   )}
@@ -524,7 +524,7 @@ export default function LeadsPage() {
           <button
             onClick={handleDbSearch}
             disabled={dbSearching || !dbSearchQuery.trim()}
-            className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-30 cursor-pointer"
+            className="font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors disabled:opacity-30 cursor-pointer"
           >
             {dbSearching ? "…" : "Search DB"}
           </button>
@@ -534,7 +534,7 @@ export default function LeadsPage() {
                 setDbSearchResults(null);
                 setDbSearchQuery("");
               }}
-              className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+              className="font-mono text-[12px] uppercase tracking-[0.15em] px-3 py-2 rounded-lg border border-border text-text-muted hover:text-text-primary transition-colors cursor-pointer"
             >
               Clear
             </button>
@@ -549,7 +549,7 @@ export default function LeadsPage() {
                 <button
                   key={t}
                   onClick={() => setTierFilter(t)}
-                  className={`font-mono text-[10px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md transition-all cursor-pointer ${
+                  className={`font-mono text-[12px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md transition-all cursor-pointer ${
                     tierFilter === t
                       ? "bg-secondary/10 text-secondary"
                       : "text-text-muted hover:text-text-primary"
@@ -570,7 +570,7 @@ export default function LeadsPage() {
 
           <button
             onClick={() => setHasContactsFilter((v) => !v)}
-            className={`font-mono text-[10px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md border transition-all cursor-pointer flex items-center gap-1.5 ${
+            className={`font-mono text-[12px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md border transition-all cursor-pointer flex items-center gap-1.5 ${
               hasContactsFilter
                 ? "bg-green-400/10 border-green-400/30 text-green-400"
                 : "border-border text-text-muted hover:text-text-primary hover:border-border-bright"
@@ -598,7 +598,7 @@ export default function LeadsPage() {
           {selectedPipeline && (
             <button
               onClick={() => setSelectedPipeline(null)}
-              className="font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-md border border-secondary/20 text-secondary hover:bg-secondary/10 transition-colors cursor-pointer flex items-center gap-1.5"
+              className="font-mono text-[12px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-md border border-secondary/20 text-secondary hover:bg-secondary/10 transition-colors cursor-pointer flex items-center gap-1.5"
             >
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
@@ -621,12 +621,12 @@ export default function LeadsPage() {
       {selectedLeadIds.size > 0 && (
         <div className="bg-surface-2 border border-secondary/20 rounded-xl px-5 py-3 flex items-center justify-between sticky top-0 z-30">
           <div className="flex items-center gap-3">
-            <span className="font-mono text-[11px] text-text-primary font-semibold">
+            <span className="font-mono text-[12px] text-text-primary font-semibold">
               {selectedLeadIds.size} lead{selectedLeadIds.size > 1 ? "s" : ""} selected
             </span>
             <button
               onClick={() => setSelectedLeadIds(new Set())}
-              className="font-mono text-[10px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+              className="font-mono text-[12px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
             >
               Clear
             </button>
@@ -635,7 +635,7 @@ export default function LeadsPage() {
             <button
               onClick={() => setBatchMenuOpen((v) => !v)}
               disabled={!!activeJob && (activeJob.status === "running" || activeJob.status === "pending")}
-              className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors cursor-pointer disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors cursor-pointer disabled:opacity-40"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
@@ -653,36 +653,36 @@ export default function LeadsPage() {
               <>
                 <div className="fixed inset-0 z-40" onClick={() => setBatchMenuOpen(false)} />
                 <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-surface-2 border border-border rounded-xl shadow-xl py-1.5">
-                  <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+                  <p className="px-3 py-1.5 font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim">
                     Batch Action ({selectedLeadIds.size} leads)
                   </p>
                   <button
                     onClick={() => handleBatchEnrich("recrawl_contacts")}
-                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                    className="w-full text-left px-3 py-2.5 font-mono text-[12px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
                   >
                     <span className="text-secondary">↻</span> Re-crawl for Contacts
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">Crawl websites for contact info</p>
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">Crawl websites for contact info</p>
                   </button>
                   <button
                     onClick={() => handleBatchEnrich("linkedin")}
-                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                    className="w-full text-left px-3 py-2.5 font-mono text-[12px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
                   >
                     <span className="text-blue-400">in</span> Find Decision Makers (LinkedIn)
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">LinkedIn lookup for key contacts</p>
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">LinkedIn lookup for key contacts</p>
                   </button>
                   <button
                     onClick={() => handleBatchEnrich("requalify")}
-                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                    className="w-full text-left px-3 py-2.5 font-mono text-[12px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
                   >
                     <span className="text-amber-400">✎</span> Re-qualify All
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">Re-crawl &amp; re-score with AI</p>
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">Re-crawl &amp; re-score with AI</p>
                   </button>
                   <button
                     onClick={() => handleBatchEnrich("full_recrawl")}
-                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                    className="w-full text-left px-3 py-2.5 font-mono text-[12px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
                   >
                     <span className="text-purple-400">⚙</span> Full Re-crawl (Score + Contacts)
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">Complete re-crawl of everything</p>
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">Complete re-crawl of everything</p>
                   </button>
                 </div>
               </>
@@ -700,7 +700,7 @@ export default function LeadsPage() {
           {selectedPipeline && (
             <button
               onClick={() => setSelectedPipeline(null)}
-              className="mt-3 font-mono text-[10px] uppercase tracking-[0.15em] text-secondary hover:text-secondary/80 cursor-pointer"
+              className="mt-3 font-mono text-[12px] uppercase tracking-[0.15em] text-secondary hover:text-secondary/80 cursor-pointer"
             >
               Show all pipelines →
             </button>
@@ -722,41 +722,41 @@ export default function LeadsPage() {
                   </th>
                   <th
                     onClick={() => handleSort("company_name")}
-                    className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
+                    className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
                   >
                     Company
                     <SortArrow field="company_name" />
                   </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3">
+                  <th className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3">
                     Tier
                   </th>
                   <th
                     onClick={() => handleSort("score")}
-                    className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
+                    className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
                   >
                     Score
                     <SortArrow field="score" />
                   </th>
-                  <th className="text-center font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-3 py-3 hidden md:table-cell">
+                  <th className="text-center font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-3 py-3 hidden md:table-cell">
                     Contacts
                   </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden md:table-cell">
+                  <th className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden md:table-cell">
                     Industry
                   </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
+                  <th className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
                     Country
                   </th>
-                  <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
+                  <th className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden lg:table-cell">
                     Status
                   </th>
                   {!selectedPipeline && (
-                    <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden xl:table-cell">
+                    <th className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden xl:table-cell">
                       Pipeline
                     </th>
                   )}
                   <th
                     onClick={() => handleSort("created_at")}
-                    className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors hidden sm:table-cell"
+                    className="text-left font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors hidden sm:table-cell"
                   >
                     Date
                     <SortArrow field="created_at" />
@@ -809,11 +809,11 @@ export default function LeadsPage() {
                               {lead.company_name}
                             </p>
                             <div className="flex items-center gap-1.5">
-                              <p className="font-mono text-[10px] text-text-dim truncate max-w-[180px]">
+                              <p className="font-mono text-[12px] text-text-dim truncate max-w-[180px]">
                                 {lead.domain}
                               </p>
                               {(lead.contact_count || 0) > 0 && (
-                                <span className="inline-flex items-center gap-0.5 font-mono text-[9px] text-green-400 bg-green-400/10 border border-green-400/20 rounded px-1 py-px flex-shrink-0">
+                                <span className="inline-flex items-center gap-0.5 font-mono text-[12px] text-green-400 bg-green-400/10 border border-green-400/20 rounded px-1 py-px flex-shrink-0">
                                   <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                                     <circle cx="9" cy="7" r="4" />
@@ -827,7 +827,7 @@ export default function LeadsPage() {
                       </td>
                       <td className="px-5 py-3.5">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-mono border ${badge.bg}`}
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[12px] font-mono border ${badge.bg}`}
                         >
                           {badge.label}
                         </span>
@@ -839,7 +839,7 @@ export default function LeadsPage() {
                       </td>
                       <td className="px-3 py-3.5 hidden md:table-cell text-center">
                         {(lead.contact_count || 0) > 0 ? (
-                          <span className="inline-flex items-center gap-1 font-mono text-[10px] text-green-400 bg-green-400/10 border border-green-400/20 rounded-md px-2 py-0.5">
+                          <span className="inline-flex items-center gap-1 font-mono text-[12px] text-green-400 bg-green-400/10 border border-green-400/20 rounded-md px-2 py-0.5">
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                               <circle cx="9" cy="7" r="4" />
@@ -847,21 +847,21 @@ export default function LeadsPage() {
                             {lead.contact_count}
                           </span>
                         ) : (
-                          <span className="font-mono text-[10px] text-text-dim">—</span>
+                          <span className="font-mono text-[12px] text-text-dim">—</span>
                         )}
                       </td>
                       <td className="px-5 py-3.5 hidden md:table-cell">
-                        <span className="font-mono text-[10px] text-text-muted truncate max-w-[140px] block">
+                        <span className="font-mono text-[12px] text-text-muted truncate max-w-[140px] block">
                           {lead.industry_category || "—"}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 hidden lg:table-cell">
-                        <span className="font-mono text-[10px] text-text-muted">
+                        <span className="font-mono text-[12px] text-text-muted">
                           {lead.country || "—"}
                         </span>
                       </td>
                       <td className="px-5 py-3.5 hidden lg:table-cell">
-                        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] text-text-muted capitalize">
+                        <span className="inline-flex items-center gap-1.5 font-mono text-[12px] text-text-muted capitalize">
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${statusDot}`}
                           />
@@ -875,7 +875,7 @@ export default function LeadsPage() {
                               e.stopPropagation();
                               setSelectedPipeline(lead.search_id);
                             }}
-                            className="font-mono text-[10px] text-text-dim hover:text-secondary truncate max-w-[120px] block transition-colors"
+                            className="font-mono text-[12px] text-text-dim hover:text-secondary truncate max-w-[120px] block transition-colors"
                             title={pipelineName || "Unknown pipeline"}
                           >
                             {pipelineName || "—"}
@@ -883,7 +883,7 @@ export default function LeadsPage() {
                         </td>
                       )}
                       <td className="px-5 py-3.5 hidden sm:table-cell">
-                        <span className="font-mono text-[10px] text-text-dim">
+                        <span className="font-mono text-[12px] text-text-dim">
                           {lead.created_at
                             ? new Date(lead.created_at).toLocaleDateString()
                             : "—"}

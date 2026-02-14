@@ -55,7 +55,7 @@ export default function DashboardLayout({
           {/* Logo */}
           <div className="h-14 flex items-center px-5 border-b border-border-dim">
             <Link href="/" className="flex items-center gap-2.5 group">
-              <span className="text-secondary text-base font-bold">◈</span>
+              <span className="text-secondary text-xs font-bold">◈</span>
               <span className="text-text-primary text-xs font-semibold tracking-[0.12em] uppercase group-hover:text-secondary transition-colors">
                 Hunt
               </span>
@@ -99,7 +99,7 @@ export default function DashboardLayout({
                   <span className="text-secondary text-xs flex-shrink-0">◈</span>
                 )}
                 <div className="flex-1 min-w-0">
-                  <span className="font-mono text-[10px] text-secondary block truncate">
+                  <span className="font-mono text-[12px] text-secondary block truncate">
                     {phase === "discovering" && "Discovering companies..."}
                     {phase === "searching" && "Searching..."}
                     {phase === "search-complete" && `${searchCompanies.length} found — pick batch`}
@@ -107,7 +107,7 @@ export default function DashboardLayout({
                     {phase === "complete" && `Done — ${qualifiedCompanies.filter(c => c.tier === "hot").length} hot leads`}
                   </span>
                   {pipelineProgress && (
-                    <span className="font-mono text-[9px] text-secondary/50 block truncate">
+                    <span className="font-mono text-[12px] text-secondary/50 block truncate">
                       {pipelineProgress.phase === "crawling" ? "Crawling" : "Analyzing"} {pipelineProgress.company}
                     </span>
                   )}
@@ -123,7 +123,7 @@ export default function DashboardLayout({
           <div className="px-3 pb-3">
             <button
               onClick={() => { resetHunt(); router.push("/dashboard/new"); }}
-              className="flex items-center justify-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:bg-white/85 transition-colors w-full cursor-pointer"
+              className="flex items-center justify-center gap-2 bg-text-primary text-void font-mono text-[12px] font-bold uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:bg-white/85 transition-colors w-full cursor-pointer"
             >
               + New Pipeline
             </button>
@@ -146,7 +146,7 @@ export default function DashboardLayout({
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[9px] font-mono uppercase tracking-[0.1em] transition-colors ${
+                className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[12px] font-mono uppercase tracking-[0.1em] transition-colors ${
                   isActive ? "text-secondary" : "text-text-dim"
                 }`}
               >
@@ -168,14 +168,14 @@ export default function DashboardLayout({
             ) : (
               <span className="text-secondary text-xs flex-shrink-0">◈</span>
             )}
-            <span className="font-mono text-[10px] text-secondary flex-1 truncate">
+            <span className="font-mono text-[12px] text-secondary flex-1 truncate">
               {phase === "discovering" && "Discovering companies..."}
               {phase === "searching" && "Searching the web..."}
               {phase === "search-complete" && `${searchCompanies.length} companies found`}
               {phase === "qualifying" && `Qualifying ${qualifiedCompanies.length}/${searchCompanies.length}`}
               {phase === "complete" && `Done — ${qualifiedCompanies.filter(c => c.tier === "hot").length} hot leads`}
             </span>
-            <span className="font-mono text-[9px] text-secondary/50 uppercase tracking-[0.15em] flex-shrink-0">View →</span>
+            <span className="font-mono text-[12px] text-secondary/50 uppercase tracking-[0.15em] flex-shrink-0">View →</span>
           </Link>
         )}
 

@@ -91,7 +91,7 @@ function StepCard({
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <span className="text-3xl">{step.icon}</span>
-          <span className="font-mono text-[10px] tracking-[0.3em] text-text-dim">
+          <span className="font-mono text-[12px] tracking-[0.3em] text-text-dim">
             {step.num}
           </span>
         </div>
@@ -111,7 +111,7 @@ function StepCard({
           {step.detail.split(" · ").map((chip) => (
             <span
               key={chip}
-              className="inline-block font-mono text-[9px] tracking-wider uppercase px-2 py-0.5 rounded border border-border-dim text-text-dim"
+              className="inline-block font-mono text-[12px] tracking-wider uppercase px-2 py-0.5 rounded border border-border-dim text-text-dim"
             >
               {chip}
             </span>
@@ -131,7 +131,7 @@ export default function Pipeline() {
       <div className="max-w-7xl mx-auto">
         {/* Section Header */}
         <div className="text-center mb-16">
-          <span className="font-mono text-[10px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
+          <span className="font-mono text-[12px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
             The Pipeline
           </span>
           <h2 className="font-mono text-2xl md:text-3xl font-bold text-text-primary tracking-tight mb-4">
@@ -152,7 +152,7 @@ export default function Pipeline() {
 
         {/* Output visualization */}
         <div className="mt-16 bg-surface-1 border border-border rounded-xl p-6 md:p-8 max-w-3xl mx-auto">
-          <p className="font-mono text-[10px] tracking-[0.3em] uppercase text-secondary/50 mb-4">
+          <p className="font-mono text-[12px] tracking-[0.3em] uppercase text-secondary/50 mb-4">
             Output
           </p>
           <div className="space-y-3">
@@ -188,12 +188,12 @@ export default function Pipeline() {
                   <p className="font-mono text-xs text-text-primary truncate">
                     {bucket.file}
                   </p>
-                  <p className="font-mono text-[10px] text-text-dim">
+                  <p className="font-mono text-[12px] text-text-dim">
                     {bucket.action}
                   </p>
                 </div>
                 <span
-                  className="font-mono text-[10px] font-bold px-2 py-0.5 rounded"
+                  className="font-mono text-[12px] font-bold px-2 py-0.5 rounded"
                   style={{
                     color: bucket.color,
                     border: `1px solid ${bucket.color}33`,

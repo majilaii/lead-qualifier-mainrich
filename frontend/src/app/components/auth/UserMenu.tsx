@@ -27,13 +27,13 @@ export default function UserMenu() {
       <div className="flex items-center gap-2">
         <Link
           href="/login"
-          className="font-mono text-[10px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] transition-colors px-3 py-1.5"
+          className="font-mono text-[12px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] transition-colors px-3 py-1.5"
         >
           Log in
         </Link>
         <Link
           href="/signup"
-          className="font-mono text-[10px] text-void bg-text-primary hover:bg-white/85 uppercase tracking-[0.15em] transition-colors px-3 py-1.5 rounded-lg"
+          className="font-mono text-[12px] text-void bg-text-primary hover:bg-white/85 uppercase tracking-[0.15em] transition-colors px-3 py-1.5 rounded-lg"
         >
           Sign up
         </Link>
@@ -65,7 +65,7 @@ export default function UserMenu() {
     <div className="relative" ref={menuRef}>
       <button
         onClick={() => setOpen(!open)}
-        className="w-8 h-8 rounded-full bg-secondary/20 border border-secondary/30 flex items-center justify-center text-secondary font-mono text-[10px] font-bold hover:bg-secondary/30 transition-colors cursor-pointer"
+        className="w-8 h-8 rounded-full bg-secondary/20 border border-secondary/30 flex items-center justify-center text-secondary font-mono text-[12px] font-bold hover:bg-secondary/30 transition-colors cursor-pointer"
       >
         {initials}
       </button>
@@ -76,7 +76,7 @@ export default function UserMenu() {
             <p className="font-mono text-xs text-text-primary truncate">
               {displayName}
             </p>
-            <p className="font-mono text-[10px] text-text-dim truncate">
+            <p className="font-mono text-[12px] text-text-dim truncate">
               {user.email}
             </p>
           </div>
@@ -84,13 +84,13 @@ export default function UserMenu() {
             <Link
               href="/dashboard"
               onClick={() => setOpen(false)}
-              className="block px-4 py-2 font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
+              className="block px-4 py-2 font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
             >
               Dashboard
             </Link>
             <button
               onClick={handleSignOut}
-              className="w-full text-left px-4 py-2 font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted hover:text-red-400 hover:bg-surface-3 transition-colors cursor-pointer"
+              className="w-full text-left px-4 py-2 font-mono text-[12px] uppercase tracking-[0.15em] text-text-muted hover:text-red-400 hover:bg-surface-3 transition-colors cursor-pointer"
             >
               Sign out
             </button>

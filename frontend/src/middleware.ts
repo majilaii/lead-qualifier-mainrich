@@ -1,7 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
+// import { createServerClient } from "@supabase/ssr";
 
 export async function middleware(request: NextRequest) {
+  // Temporary bypass: allow all routes while backend/auth is disabled.
+  return NextResponse.next({ request });
+
+  /*
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -50,6 +54,7 @@ export async function middleware(request: NextRequest) {
   }
 
   return supabaseResponse;
+  */
 }
 
 export const config = {

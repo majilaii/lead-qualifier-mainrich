@@ -25,19 +25,33 @@ const AuthCtx = createContext<AuthContext>({
 export const useAuth = () => useContext(AuthCtx);
 
 export default function SessionProvider({ children }: { children: ReactNode }) {
+  const hasSupabaseConfig = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL &&
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  );
+
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(hasSupabaseConfig);
 
   useEffect(() => {
+    // Allow frontend-only landing page mode when backend/auth isn't configured.
+    if (!hasSupabaseConfig) {
+      return;
+    }
     const supabase = createClient();
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session: s } }) => {
-      setSession(s);
-      setUser(s?.user ?? null);
-      setLoading(false);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data: { session: s } }) => {
+        setSession(s);
+        setUser(s?.user ?? null);
+        setLoading(false);
+      })
+      .catch(() => {
+        setLoading(false);
+      });
 
     // Listen for auth state changes
     const {
@@ -49,7 +63,7 @@ export default function SessionProvider({ children }: { children: ReactNode }) {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [hasSupabaseConfig]);
 
   return (
     <AuthCtx.Provider value={{ user, session, loading }}>

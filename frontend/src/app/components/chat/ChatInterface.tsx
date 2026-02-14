@@ -125,7 +125,7 @@ function DownloadButton({
     <button
       onClick={() => exportToCsv(companies, undefined, enrichedContacts)}
       disabled={companies.length === 0}
-      className={`inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+      className={`inline-flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.15em] px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
         variant === "primary"
           ? "bg-text-primary text-void hover:bg-white/85"
           : "border border-border-dim text-text-muted hover:text-text-secondary hover:border-border"
@@ -172,7 +172,7 @@ function ReadinessTracker({ readiness }: { readiness: Readiness }) {
             )}
             <div className="flex items-center gap-1">
               <div className={`w-1.5 h-1.5 rounded-full transition-all duration-500 ${done ? "bg-secondary shadow-[0_0_6px_rgba(129,140,248,0.4)]" : "bg-border"}`} />
-              <span className={`font-mono text-[9px] uppercase tracking-[0.15em] transition-colors duration-500 ${done ? "text-secondary/70" : "text-text-dim"}`}>
+              <span className={`font-mono text-[12px] uppercase tracking-[0.15em] transition-colors duration-500 ${done ? "text-secondary/70" : "text-text-dim"}`}>
                 {step.label}
               </span>
             </div>
@@ -270,13 +270,13 @@ function QuotaCTACard({ payload }: { payload: string }) {
                 <span className="font-mono text-xs font-bold text-secondary tracking-wide">PRO</span>
                 <span className="font-mono text-xs text-text-muted">$20<span className="text-text-muted/50">/mo</span></span>
               </div>
-              <ul className="space-y-1 text-[11px] text-text-muted">
+              <ul className="space-y-1 text-[12px] text-text-muted">
                 <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> 20 hunts / month</li>
                 <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> 100 leads per hunt</li>
                 <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> 200 enrichments</li>
                 <li className="flex items-center gap-1.5"><span className="text-secondary">✓</span> Deep research</li>
               </ul>
-              <div className="mt-2.5 text-center text-[11px] font-mono font-medium text-secondary group-hover:underline tracking-wide">
+              <div className="mt-2.5 text-center text-[12px] font-mono font-medium text-secondary group-hover:underline tracking-wide">
                 Upgrade to Pro →
               </div>
             </button>
@@ -290,13 +290,13 @@ function QuotaCTACard({ payload }: { payload: string }) {
                 <span className="font-mono text-xs font-bold text-amber-400 tracking-wide">ENTERPRISE</span>
                 <span className="font-mono text-xs text-text-muted">$50<span className="text-text-muted/50">/mo</span></span>
               </div>
-              <ul className="space-y-1 text-[11px] text-text-muted">
+              <ul className="space-y-1 text-[12px] text-text-muted">
                 <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> Unlimited hunts</li>
                 <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> 500 leads per hunt</li>
                 <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> 1,000 enrichments</li>
                 <li className="flex items-center gap-1.5"><span className="text-amber-400">✓</span> Priority support</li>
               </ul>
-              <div className="mt-2.5 text-center text-[11px] font-mono font-medium text-amber-400 group-hover:underline tracking-wide">
+              <div className="mt-2.5 text-center text-[12px] font-mono font-medium text-amber-400 group-hover:underline tracking-wide">
                 Upgrade to Enterprise →
               </div>
             </button>
@@ -352,7 +352,7 @@ function WelcomeScreen({ onSuggestionClick, templates, onSelectTemplate }: {
         {/* Saved ICP Templates */}
         {templates && templates.length > 0 && onSelectTemplate && (
           <div className="w-full max-w-lg mb-6">
-            <p className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2.5">Saved ICP Templates</p>
+            <p className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em] mb-2.5">Saved ICP Templates</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {templates.map((t) => (
                 <button
@@ -361,7 +361,7 @@ function WelcomeScreen({ onSuggestionClick, templates, onSelectTemplate }: {
                   className="text-left bg-secondary/5 border border-secondary/15 hover:border-secondary/30 hover:bg-secondary/10 rounded-xl px-4 py-3 transition-all duration-200 group cursor-pointer"
                 >
                   <p className="font-mono text-xs text-secondary font-medium truncate">{t.name}</p>
-                  <p className="font-sans text-[10px] text-text-dim mt-0.5 truncate">
+                  <p className="font-sans text-[12px] text-text-dim mt-0.5 truncate">
                     {[t.search_context.industry, t.search_context.technologyFocus || t.search_context.technology_focus].filter(Boolean).join(" · ") || "Custom template"}
                   </p>
                 </button>
@@ -418,7 +418,7 @@ function ChatInput({ onSend, isLoading }: { onSend: (text: string) => void; isLo
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
           </button>
         </div>
-        <p className="font-mono text-[10px] text-text-dim mt-2 text-center select-none">Enter to send · Shift+Enter for newline</p>
+        <p className="font-mono text-[12px] text-text-dim mt-2 text-center select-none">Enter to send · Shift+Enter for newline</p>
       </div>
     </div>
   );
@@ -434,7 +434,7 @@ function SearchActionCard({ onLaunch, onSaveTemplate }: { onLaunch: () => void; 
       <div className="bg-surface-2 border border-secondary/20 rounded-2xl p-5 mt-4">
         <div className="flex items-center gap-2 mb-3">
           <span className="text-secondary text-sm">◈</span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-secondary/60">Ready to search</span>
+          <span className="font-mono text-[12px] uppercase tracking-[0.2em] text-secondary/60">Ready to search</span>
         </div>
         <p className="font-sans text-sm text-text-secondary mb-4">
           I have enough context to find matching companies. Click below to generate search queries and scan the web.
@@ -445,7 +445,7 @@ function SearchActionCard({ onLaunch, onSaveTemplate }: { onLaunch: () => void; 
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
           </button>
           {onSaveTemplate && (
-            <button onClick={onSaveTemplate} className="inline-flex items-center gap-1.5 border border-border-dim hover:border-secondary/30 text-text-muted hover:text-secondary font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-3 rounded-xl transition-colors cursor-pointer">
+            <button onClick={onSaveTemplate} className="inline-flex items-center gap-1.5 border border-border-dim hover:border-secondary/30 text-text-muted hover:text-secondary font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-3 rounded-xl transition-colors cursor-pointer">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>
               Save as ICP Template
             </button>
@@ -501,7 +501,7 @@ function SearchResultsCard({
             <span className="text-secondary text-sm">◈</span>
             <span className="font-mono text-xs text-text-primary">Found {companies.length} companies</span>
           </div>
-          <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-text-dim">Exa AI · sorted by relevance</span>
+          <span className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-dim">Exa AI · sorted by relevance</span>
         </div>
 
         {/* Company list */}
@@ -509,11 +509,11 @@ function SearchResultsCard({
           {shown.map((c, i) => (
             <div key={c.domain} className="px-5 py-3 hover:bg-surface-3/50 transition-colors">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className="font-mono text-[10px] text-text-dim min-w-[1.2rem] text-right">{i + 1}.</span>
+                <span className="font-mono text-[12px] text-text-dim min-w-[1.2rem] text-right">{i + 1}.</span>
                 <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
-                <span className="font-mono text-[11px] text-secondary/60">{c.domain}</span>
+                <span className="font-mono text-[12px] text-secondary/60">{c.domain}</span>
                 {c.score != null && (
-                  <span className="font-mono text-[9px] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{(c.score * 100).toFixed(0)}%</span>
+                  <span className="font-mono text-[12px] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{(c.score * 100).toFixed(0)}%</span>
                 )}
               </div>
               <p className="font-sans text-xs text-text-secondary leading-relaxed line-clamp-2 pl-[1.7rem]">
@@ -524,7 +524,7 @@ function SearchResultsCard({
         </div>
 
         {remaining > 0 && !expanded && (
-          <button onClick={() => setExpanded(true)} className="w-full px-5 py-2 text-center font-mono text-[10px] text-text-muted hover:text-text-secondary border-t border-border-dim hover:bg-surface-3/50 transition-colors cursor-pointer">
+          <button onClick={() => setExpanded(true)} className="w-full px-5 py-2 text-center font-mono text-[12px] text-text-muted hover:text-text-secondary border-t border-border-dim hover:bg-surface-3/50 transition-colors cursor-pointer">
             + {remaining} more companies
           </button>
         )}
@@ -553,7 +553,7 @@ function SearchResultsCard({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
             </button>
           </div>
-          <p className="font-mono text-[10px] text-text-dim mt-2">Crawls each website &amp; scores with AI · highest relevance processed first</p>
+          <p className="font-mono text-[12px] text-text-dim mt-2">Crawls each website &amp; scores with AI · highest relevance processed first</p>
         </div>
       </div>
     </div>
@@ -622,10 +622,10 @@ function LiveResultsView({
               <span className="font-mono text-xs text-text-primary">Qualifying leads</span>
             </div>
             <div className="flex items-center gap-3">
-              {hotCount > 0 && <span className="font-mono text-[10px] text-hot">{hotCount} hot</span>}
-              {reviewCount > 0 && <span className="font-mono text-[10px] text-review">{reviewCount} review</span>}
+              {hotCount > 0 && <span className="font-mono text-[12px] text-hot">{hotCount} hot</span>}
+              {reviewCount > 0 && <span className="font-mono text-[12px] text-review">{reviewCount} review</span>}
               <span className="font-mono text-xs text-text-muted">{done}/{total}</span>
-              <span className="font-mono text-[10px] text-text-dim">{etaStr}</span>
+              <span className="font-mono text-[12px] text-text-dim">{etaStr}</span>
               {done >= 2 && <DownloadButton companies={qualifiedCompanies} label="CSV" />}
             </div>
           </div>
@@ -638,7 +638,7 @@ function LiveResultsView({
         <div className="flex border-b border-border-dim">
           <button
             onClick={() => setActiveTab("results")}
-            className={`flex-1 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors cursor-pointer ${
+            className={`flex-1 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.15em] transition-colors cursor-pointer ${
               activeTab === "results"
                 ? "text-secondary border-b-2 border-secondary bg-secondary/5"
                 : "text-text-dim hover:text-text-muted"
@@ -648,7 +648,7 @@ function LiveResultsView({
           </button>
           <button
             onClick={() => setActiveTab("queue")}
-            className={`flex-1 px-4 py-2 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors cursor-pointer ${
+            className={`flex-1 px-4 py-2 font-mono text-[12px] uppercase tracking-[0.15em] transition-colors cursor-pointer ${
               activeTab === "queue"
                 ? "text-secondary border-b-2 border-secondary bg-secondary/5"
                 : "text-text-dim hover:text-text-muted"
@@ -665,7 +665,7 @@ function LiveResultsView({
               <div className="px-5 py-8 text-center">
                 <p className="font-mono text-xs text-text-dim">Results will appear here as companies are qualified...</p>
                 {progress && (
-                  <p className="font-mono text-[10px] text-secondary/60 mt-2">
+                  <p className="font-mono text-[12px] text-secondary/60 mt-2">
                     Currently {progress.phase === "crawling" ? "crawling" : "analyzing"} {progress.company}
                   </p>
                 )}
@@ -682,8 +682,8 @@ function LiveResultsView({
                   >
                     <span className={`font-mono text-xs font-bold min-w-[2rem] text-right ${style.color}`}>{c.score}/100</span>
                     <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
-                    <span className="font-mono text-[11px] text-text-secondary flex-1 truncate">{c.domain}</span>
-                    <span className={`font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded ${style.bg} ${style.color} ${style.border} border`}>
+                    <span className="font-mono text-[12px] text-text-secondary flex-1 truncate">{c.domain}</span>
+                    <span className={`font-mono text-[12px] uppercase tracking-[0.15em] px-2 py-0.5 rounded ${style.bg} ${style.color} ${style.border} border`}>
                       {style.label}
                     </span>
                     <svg
@@ -697,28 +697,28 @@ function LiveResultsView({
                     <div className="px-5 pb-3 bg-surface-3/30 border-t border-border-dim">
                       <div className="pl-[2.5rem] pt-2.5 space-y-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-secondary/60 hover:text-secondary transition-colors">
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-[12px] text-secondary/60 hover:text-secondary transition-colors">
                             {c.url} ↗
                           </a>
                           {c.hardware_type && (
-                            <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{c.hardware_type}</span>
+                            <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{c.hardware_type}</span>
                           )}
                           {c.industry_category && (
-                            <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{c.industry_category}</span>
+                            <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{c.industry_category}</span>
                           )}
                         </div>
                         <p className="font-sans text-xs text-text-muted leading-relaxed">{c.reasoning}</p>
                         {c.key_signals.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {c.key_signals.map((s, i) => (
-                              <span key={i} className="font-mono text-[9px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">{s}</span>
+                              <span key={i} className="font-mono text-[12px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">{s}</span>
                             ))}
                           </div>
                         )}
                         {c.red_flags.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {c.red_flags.map((f, i) => (
-                              <span key={i} className="font-mono text-[9px] text-red-400/60 bg-red-400/5 border border-red-400/10 rounded px-1.5 py-0.5">{f}</span>
+                              <span key={i} className="font-mono text-[12px] text-red-400/60 bg-red-400/5 border border-red-400/10 rounded px-1.5 py-0.5">{f}</span>
                             ))}
                           </div>
                         )}
@@ -738,8 +738,8 @@ function LiveResultsView({
             {progress && (
               <div className="px-5 py-2.5 flex items-center gap-3 bg-secondary/5">
                 <div className="w-3 h-3 border-2 border-secondary/40 border-t-secondary rounded-full animate-spin min-w-[2rem] flex items-center justify-center" />
-                <span className="font-mono text-[11px] text-secondary flex-1 truncate">{progress.company}</span>
-                <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-secondary/50">
+                <span className="font-mono text-[12px] text-secondary flex-1 truncate">{progress.company}</span>
+                <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-secondary/50">
                   {progress.phase === "crawling" ? "Crawling..." : "Qualifying..."}
                 </span>
               </div>
@@ -747,9 +747,9 @@ function LiveResultsView({
             {/* Pending */}
             {searchCompanies.slice(done + (progress ? 1 : 0)).map((c, i) => (
               <div key={c.domain} className="px-5 py-2.5 flex items-center gap-3 opacity-40">
-                <span className="font-mono text-[10px] min-w-[2rem] text-right text-text-dim">{done + (progress ? 1 : 0) + i + 1}</span>
+                <span className="font-mono text-[12px] min-w-[2rem] text-right text-text-dim">{done + (progress ? 1 : 0) + i + 1}</span>
                 <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
-                <span className="font-mono text-[11px] text-text-dim flex-1 truncate">{c.domain}</span>
+                <span className="font-mono text-[12px] text-text-dim flex-1 truncate">{c.domain}</span>
               </div>
             ))}
             {remaining === 0 && !progress && (
@@ -946,11 +946,11 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                         <div className="flex items-center gap-3 mb-1">
                           <span className={`font-mono text-xs font-bold ${style.color}`}>{c.score}/100</span>
                           <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
-                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-secondary/60 hover:text-secondary transition-colors">
+                          <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-[12px] text-secondary/60 hover:text-secondary transition-colors">
                             {c.domain} ↗
                           </a>
                           {c.hardware_type && (
-                            <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">
+                            <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">
                               {c.hardware_type}
                             </span>
                           )}
@@ -959,7 +959,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                         {c.key_signals.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {c.key_signals.slice(0, 4).map((s, i) => (
-                              <span key={i} className="font-mono text-[9px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">
+                              <span key={i} className="font-mono text-[12px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">
                                 {s}
                               </span>
                             ))}
@@ -968,27 +968,27 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                         {/* Enriched contact info */}
                         {contact && contact.found && (
                           <div className="mt-2 flex flex-wrap items-center gap-2 bg-secondary/5 border border-secondary/10 rounded-lg px-3 py-2">
-                            <span className="font-mono text-[9px] text-secondary/40 uppercase tracking-[0.15em]">Contact</span>
+                            <span className="font-mono text-[12px] text-secondary/40 uppercase tracking-[0.15em]">Contact</span>
                             {contact.job_title && (
-                              <span className="font-mono text-[10px] text-text-secondary">{contact.job_title}</span>
+                              <span className="font-mono text-[12px] text-text-secondary">{contact.job_title}</span>
                             )}
                             {contact.email && (
-                              <a href={`mailto:${contact.email}`} className="font-mono text-[10px] text-secondary hover:text-secondary/80 transition-colors">
+                              <a href={`mailto:${contact.email}`} className="font-mono text-[12px] text-secondary hover:text-secondary/80 transition-colors">
                                 {contact.email}
                               </a>
                             )}
                             {contact.phone && (
-                              <span className="font-mono text-[10px] text-text-secondary">{contact.phone}</span>
+                              <span className="font-mono text-[12px] text-text-secondary">{contact.phone}</span>
                             )}
                             {contact.source && (
-                              <span className={`font-mono text-[8px] px-1 py-0.5 rounded ${contact.source === "website" ? "text-green-400/60 bg-green-500/10" : "text-text-dim bg-surface-3"}`}>
+                              <span className={`font-mono text-[12px] px-1 py-0.5 rounded ${contact.source === "website" ? "text-green-400/60 bg-green-500/10" : "text-text-dim bg-surface-3"}`}>
                                 {contact.source === "website" ? "✓ scraped free" : contact.source === "hunter" ? "via Hunter.io" : `via ${contact.source}`}
                               </span>
                             )}
                           </div>
                         )}
                         {contact && !contact.found && (
-                          <div className="mt-2 font-mono text-[9px] text-text-dim">No contact info found</div>
+                          <div className="mt-2 font-mono text-[12px] text-text-dim">No contact info found</div>
                         )}
                       </div>
                       );
@@ -1025,11 +1025,11 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                 <div className="px-5 py-3 border-t border-border-dim bg-green-500/5">
                   <div className="flex items-center gap-2">
                     <span className="text-green-400 text-xs">✓</span>
-                    <span className="font-mono text-[10px] text-green-400/70">
+                    <span className="font-mono text-[12px] text-green-400/70">
                       {scrapedContacts.length} contact{scrapedContacts.length > 1 ? "s" : ""} found via website scraping (free)
                     </span>
                     {hotMissingContacts.length > 0 && (
-                      <span className="font-mono text-[10px] text-text-dim ml-1">
+                      <span className="font-mono text-[12px] text-text-dim ml-1">
                         · {hotMissingContacts.length} still missing
                       </span>
                     )}
@@ -1068,16 +1068,16 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                       {nonRejectedMissing.length > hotMissingContacts.length && (
                         <button
                           onClick={() => enrichLeads(nonRejectedMissing)}
-                          className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
+                          className="inline-flex items-center gap-2 font-mono text-[12px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
                         >
                           Or all {nonRejectedMissing.length} qualified
                         </button>
                       )}
-                      <span className="font-mono text-[10px] text-text-dim">via Hunter.io (paid)</span>
+                      <span className="font-mono text-[12px] text-text-dim">via Hunter.io (paid)</span>
                     </div>
                   )}
                   {enrichError && (
-                    <div className="mt-2 font-mono text-[10px] text-red-400">
+                    <div className="mt-2 font-mono text-[12px] text-red-400">
                       ⚠ {enrichError}
                     </div>
                   )}
@@ -1089,7 +1089,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                 <div className="px-5 py-3 border-t border-border-dim bg-secondary/5">
                   <div className="flex items-center gap-2">
                     <span className="text-secondary text-xs">✓</span>
-                    <span className="font-mono text-[10px] text-secondary/70">
+                    <span className="font-mono text-[12px] text-secondary/70">
                       Contacts enriched — {Array.from(enrichedContacts.values()).filter((c) => c.found).length} found
                       {Array.from(enrichedContacts.values()).filter((c) => !c.found).length > 0 &&
                         `, ${Array.from(enrichedContacts.values()).filter((c) => !c.found).length} not found`}
@@ -1113,7 +1113,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                 Continue with remaining {remainingCount}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
               </button>
-              <span className="font-mono text-[10px] text-text-dim">~{Math.ceil(remainingCount * 0.6)} min · results will be merged</span>
+              <span className="font-mono text-[12px] text-text-dim">~{Math.ceil(remainingCount * 0.6)} min · results will be merged</span>
             </div>
           </div>
         )}
@@ -1459,7 +1459,7 @@ export default function ChatInterface() {
             <div className={`animate-slide-up ${splitMode ? "" : "max-w-3xl mx-auto"}`}>
               <button
                 onClick={forceSearch}
-                className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 mt-2 cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
+                className="inline-flex items-center gap-2 font-mono text-[12px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 mt-2 cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
               >
                 Skip questions &amp; search now →
               </button>
@@ -1531,14 +1531,14 @@ export default function ChatInterface() {
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => { setShowSaveTemplateDialog(false); setTemplateName(""); }}
-                className="font-mono text-[10px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border hover:border-border-bright transition-colors cursor-pointer"
+                className="font-mono text-[12px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border hover:border-border-bright transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={saveTemplate}
                 disabled={!templateName.trim() || templateSaving}
-                className="font-mono text-[10px] text-void bg-text-primary hover:bg-white/85 font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
+                className="font-mono text-[12px] text-void bg-text-primary hover:bg-white/85 font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
               >
                 {templateSaving ? "Saving…" : "Save Template"}
               </button>
@@ -1551,13 +1551,13 @@ export default function ChatInterface() {
       <header className="flex items-center justify-between px-4 md:px-6 h-14 border-b border-border-dim bg-surface-1/80 backdrop-blur-md flex-shrink-0 z-20">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2.5 group">
-            <span className="text-secondary text-base font-bold">◈</span>
+            <span className="text-secondary text-xs font-bold">◈</span>
             <span className="text-text-primary text-xs font-semibold tracking-[0.12em] uppercase group-hover:text-secondary transition-colors duration-200">Hunt</span>
           </Link>
           {/* Back to dashboard — always visible */}
           <button
             onClick={() => router.push(localStorage.getItem("lastDashboardTab") || "/dashboard")}
-            className="flex items-center gap-1.5 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-secondary/30 rounded-lg px-2.5 py-1.5 cursor-pointer ml-1"
+            className="flex items-center gap-1.5 font-mono text-[12px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-secondary/30 rounded-lg px-2.5 py-1.5 cursor-pointer ml-1"
           >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5" /><path d="M12 19l-7-7 7-7" /></svg>
             Dashboard
@@ -1567,7 +1567,7 @@ export default function ChatInterface() {
         <div className="flex items-center gap-3">
           {messages.length > 0 && phase === "chat" && <ReadinessTracker readiness={readiness} />}
           {phase !== "chat" && (
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-secondary/50">
+            <span className="font-mono text-[12px] uppercase tracking-[0.2em] text-secondary/50">
               {phase === "searching" && "Searching..."}
               {phase === "search-complete" && `${searchCompanies.length} found — ready to qualify`}
               {phase === "qualifying" && "Qualifying..."}
@@ -1579,7 +1579,7 @@ export default function ChatInterface() {
           {(phase === "search-complete" || phase === "qualifying" || phase === "complete") && (
             <button
               onClick={() => setShowMap((v) => !v)}
-              className={`hidden md:flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors duration-200 border rounded-lg px-2.5 py-1.5 cursor-pointer ${
+              className={`hidden md:flex items-center gap-1.5 font-mono text-[12px] uppercase tracking-[0.15em] transition-colors duration-200 border rounded-lg px-2.5 py-1.5 cursor-pointer ${
                 showMap
                   ? "text-secondary border-secondary/30 bg-secondary/5"
                   : "text-text-muted border-border-dim hover:border-secondary/30 hover:text-secondary"
@@ -1596,7 +1596,7 @@ export default function ChatInterface() {
         </div>
 
         {messages.length > 0 && (
-          <button onClick={resetChat} className="font-mono text-[10px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-border rounded-lg px-3 py-1.5 cursor-pointer">
+          <button onClick={resetChat} className="font-mono text-[12px] text-text-muted hover:text-text-primary uppercase tracking-[0.15em] transition-colors duration-200 border border-border-dim hover:border-border rounded-lg px-3 py-1.5 cursor-pointer">
             + New Hunt
           </button>
         )}
@@ -1623,13 +1623,13 @@ export default function ChatInterface() {
             {/* Status bar */}
             <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-2 flex-shrink-0">
               <div className="flex items-center justify-between">
-                <p className="font-mono text-[10px] text-text-dim">
+                <p className="font-mono text-[12px] text-text-dim">
                   {phase === "search-complete" && `${searchCompanies.length} companies found — qualify them`}
                   {phase === "qualifying" && `Qualifying ${searchCompanies.length} companies`}
                   {phase === "complete" && `Done — ${pipelineSummary?.hot || 0} hot leads found`}
                 </p>
                 {phase === "complete" && (
-                  <button onClick={resetChat} className="font-mono text-[10px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
+                  <button onClick={resetChat} className="font-mono text-[12px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
                     New Hunt →
                   </button>
                 )}
@@ -1700,13 +1700,13 @@ export default function ChatInterface() {
           {phase !== "chat" && phase !== "searching" && (
             <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-2 flex-shrink-0">
               <div className="max-w-3xl mx-auto flex items-center justify-between">
-                <p className="font-mono text-[10px] text-text-dim">
+                <p className="font-mono text-[12px] text-text-dim">
                   {phase === "search-complete" && "Review the results above, then qualify them"}
                   {phase === "qualifying" && `Qualifying ${searchCompanies.length} companies — browse results above while you wait`}
                   {phase === "complete" && `Done — ${pipelineSummary?.hot || 0} hot leads found`}
                 </p>
                 {phase === "complete" && (
-                  <button onClick={resetChat} className="font-mono text-[10px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
+                  <button onClick={resetChat} className="font-mono text-[12px] text-secondary hover:text-secondary/80 uppercase tracking-[0.15em] cursor-pointer">
                     New Hunt →
                   </button>
                 )}

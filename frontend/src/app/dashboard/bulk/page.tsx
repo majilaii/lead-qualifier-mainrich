@@ -202,7 +202,7 @@ export default function BulkImportPage() {
       {/* Template selector */}
       {templates.length > 0 && (
         <div className="bg-surface-2 border border-border rounded-xl p-5 space-y-3">
-          <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em]">
+          <h2 className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">
             Apply ICP Template
           </h2>
           <div className="flex flex-wrap gap-2">
@@ -213,7 +213,7 @@ export default function BulkImportPage() {
                 setTechFocus("");
                 setCriteria("");
               }}
-              className={`font-mono text-[10px] px-3 py-1.5 rounded-md border transition-all cursor-pointer ${
+              className={`font-mono text-[12px] px-3 py-1.5 rounded-md border transition-all cursor-pointer ${
                 !selectedTemplate
                   ? "bg-secondary/10 border-secondary/30 text-secondary"
                   : "border-border text-text-muted hover:border-border-bright"
@@ -225,7 +225,7 @@ export default function BulkImportPage() {
               <button
                 key={t.id}
                 onClick={() => applyTemplate(t.id)}
-                className={`font-mono text-[10px] px-3 py-1.5 rounded-md border transition-all cursor-pointer ${
+                className={`font-mono text-[12px] px-3 py-1.5 rounded-md border transition-all cursor-pointer ${
                   selectedTemplate === t.id
                     ? "bg-secondary/10 border-secondary/30 text-secondary"
                     : "border-border text-text-muted hover:border-border-bright"
@@ -241,7 +241,7 @@ export default function BulkImportPage() {
       {/* Domain input */}
       <div className="bg-surface-2 border border-border rounded-xl p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em]">
+          <h2 className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">
             Domains
           </h2>
           <div className="flex gap-2">
@@ -254,7 +254,7 @@ export default function BulkImportPage() {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="font-mono text-[10px] text-secondary/60 hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer"
+              className="font-mono text-[12px] text-secondary/60 hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer"
             >
               Upload CSV
             </button>
@@ -267,19 +267,19 @@ export default function BulkImportPage() {
           className="w-full bg-surface-3 border border-border rounded-lg p-4 font-mono text-xs text-text-primary placeholder:text-text-dim resize-none focus:outline-none focus:border-secondary/40 min-h-[160px]"
           disabled={running}
         />
-        <p className="font-mono text-[9px] text-text-dim">
+        <p className="font-mono text-[12px] text-text-dim">
           {domains.split(/[\n,;]+/).filter((d) => d.trim() && d.includes(".")).length} valid domains
         </p>
       </div>
 
       {/* Optional ICP context */}
       <details className="bg-surface-2 border border-border rounded-xl overflow-hidden">
-        <summary className="px-5 py-4 font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] cursor-pointer hover:text-text-primary transition-colors">
+        <summary className="px-5 py-4 font-mono text-[12px] text-text-muted uppercase tracking-[0.15em] cursor-pointer hover:text-text-primary transition-colors">
           Optional: Set ICP Context (for smarter qualification)
         </summary>
         <div className="px-5 pb-5 space-y-3 border-t border-border-dim pt-4">
           <div>
-            <label className="font-mono text-[9px] text-text-dim uppercase tracking-wider mb-1 block">Industry</label>
+            <label className="font-mono text-[12px] text-text-dim uppercase tracking-wider mb-1 block">Industry</label>
             <input
               value={industry}
               onChange={(e) => setIndustry(e.target.value)}
@@ -288,7 +288,7 @@ export default function BulkImportPage() {
             />
           </div>
           <div>
-            <label className="font-mono text-[9px] text-text-dim uppercase tracking-wider mb-1 block">Technology Focus</label>
+            <label className="font-mono text-[12px] text-text-dim uppercase tracking-wider mb-1 block">Technology Focus</label>
             <input
               value={techFocus}
               onChange={(e) => setTechFocus(e.target.value)}
@@ -297,7 +297,7 @@ export default function BulkImportPage() {
             />
           </div>
           <div>
-            <label className="font-mono text-[9px] text-text-dim uppercase tracking-wider mb-1 block">Qualifying Criteria</label>
+            <label className="font-mono text-[12px] text-text-dim uppercase tracking-wider mb-1 block">Qualifying Criteria</label>
             <input
               value={criteria}
               onChange={(e) => setCriteria(e.target.value)}
@@ -328,7 +328,7 @@ export default function BulkImportPage() {
       {running && progress.total > 0 && (
         <div className="bg-surface-2 border border-border rounded-xl p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">
+            <span className="font-mono text-[12px] text-text-muted uppercase tracking-wider">
               {progress.phase === "crawling" ? "Crawling" : "Qualifying"}{" "}
               {progress.company}
             </span>
@@ -354,9 +354,9 @@ export default function BulkImportPage() {
             </h2>
             {summary && (
               <div className="flex gap-3">
-                <span className="font-mono text-[10px] text-hot">{summary.hot} hot</span>
-                <span className="font-mono text-[10px] text-review">{summary.review} review</span>
-                <span className="font-mono text-[10px] text-text-dim">{summary.rejected} rejected</span>
+                <span className="font-mono text-[12px] text-hot">{summary.hot} hot</span>
+                <span className="font-mono text-[12px] text-review">{summary.review} review</span>
+                <span className="font-mono text-[12px] text-text-dim">{summary.rejected} rejected</span>
               </div>
             )}
           </div>
@@ -373,10 +373,10 @@ export default function BulkImportPage() {
                 <img src={`https://www.google.com/s2/favicons?domain=${r.domain}&sz=32`} alt="" width={16} height={16} className="rounded-sm flex-shrink-0" loading="lazy" />
                 <div className="flex-1 min-w-0">
                   <p className="font-mono text-xs text-text-primary truncate">{r.title}</p>
-                  <p className="font-mono text-[10px] text-text-dim truncate">{r.domain}</p>
+                  <p className="font-mono text-[12px] text-text-dim truncate">{r.domain}</p>
                 </div>
                 <span
-                  className={`font-mono text-[9px] uppercase tracking-wider ${
+                  className={`font-mono text-[12px] uppercase tracking-wider ${
                     r.tier === "hot" ? "text-hot" : r.tier === "review" ? "text-review" : "text-text-dim"
                   }`}
                 >
