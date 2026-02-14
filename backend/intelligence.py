@@ -2,7 +2,7 @@
 Intelligence Module — LLM-based Lead Qualification (Core Value)
 
 This is the brain of the pipeline. Given website content + optional screenshot,
-it uses an LLM to score the company 1-10 on how likely they match the user's
+it uses an LLM to score the company 0-100 on how likely they match the user's
 search criteria (fully dynamic, industry-agnostic).
 
 Model priority:
@@ -142,9 +142,9 @@ class LeadQualifier:
             self._system_prompt = (
                 "You are a B2B lead qualification assistant. Evaluate whether a company "
                 "is a legitimate business that could be a potential B2B customer or partner.\n\n"
-                "HIGH SCORE (8-10): Company clearly manufactures products or provides B2B services.\n"
-                "MEDIUM SCORE (4-7): Company might be relevant but evidence is unclear.\n"
-                "LOW SCORE (1-3): Pure software/SaaS, consulting, or unrelated services.\n\n"
+                "HIGH SCORE (70-100): Company clearly manufactures products or provides B2B services.\n"
+                "MEDIUM SCORE (40-69): Company might be relevant but evidence is unclear.\n"
+                "LOW SCORE (0-39): Pure software/SaaS, consulting, or unrelated services.\n\n"
                 "IMPORTANT: Be objective. Score based ONLY on website content."
             )
             self._user_prompt_template = (
@@ -190,14 +190,14 @@ class LeadQualifier:
             parts.append(f"TECHNOLOGY/PRODUCT FOCUS: {tech}")
         if geographic_region:
             parts.append(f"\nGEOGRAPHIC CONSTRAINT: The client is looking for companies in/near: {geographic_region}")
-            parts.append("If the company is clearly NOT located in or serving this area, reduce the score by 3-4 points. Location is a HARD requirement for this search.")
+            parts.append("If the company is clearly NOT located in or serving this area, reduce the score by 30-40 points. Location is a HARD requirement for this search.")
             parts.append("Check the company's address, phone number, service area, or 'About Us' page for location clues.")
 
         parts.append("")
         parts.append("SCORING GUIDELINES:")
-        parts.append("HIGH SCORE (8-10): Company clearly matches the search criteria. Strong signals on their website.")
-        parts.append("MEDIUM SCORE (4-7): Company might match but evidence is unclear or partial.")
-        parts.append("LOW SCORE (1-3): Company clearly does not match the criteria.")
+        parts.append("HIGH SCORE (70-100): Company clearly matches the search criteria. Strong signals on their website.")
+        parts.append("MEDIUM SCORE (40-69): Company might match but evidence is unclear or partial.")
+        parts.append("LOW SCORE (0-39): Company clearly does not match the criteria.")
 
         if criteria:
             parts.append(f"\nQUALIFYING SIGNALS (score higher): {criteria}")
@@ -206,7 +206,8 @@ class LeadQualifier:
 
         parts.append("")
         parts.append("IMPORTANT: Be objective. Score based ONLY on what the website content shows, not assumptions.")
-        parts.append("If the website content is empty, just a loading screen, or has very little information, score 4-5 (review). Do NOT reject (score 1-3) just because the site couldn't be read — rejection means you found POSITIVE evidence the company does NOT match.")
+        parts.append("If the website content is empty, just a loading screen, or has very little information, score 40-50 (review). Do NOT reject (score 0-39) just because the site couldn't be read — rejection means you found POSITIVE evidence the company does NOT match.")
+        parts.append("If the content is from a search index (marked with ⚠️), score based on available signals — do NOT penalize for the crawl failure itself. These companies may be excellent matches whose websites simply block automated crawlers.")
         parts.append("If the website is in a foreign language, still analyze the content — look for relevant products, services, and signals.")
 
         return "\n".join(parts)
@@ -245,7 +246,7 @@ class LeadQualifier:
 Respond with a JSON object in this exact format:
 {{
     "is_qualified": boolean,
-    "confidence_score": integer from 1-10,
+    "confidence_score": integer from 0-100,
     "company_type": string or null (what kind of company is this, e.g. "Dental Clinic", "Robotics Startup", "Motor Manufacturer"),
     "industry_category": string or null (their industry sector),
     "reasoning": string (2-3 sentences explaining how well they match the search for: {industry}),
@@ -273,28 +274,42 @@ Respond with a JSON object in this exact format:
         Returns:
             QualificationResult with score and reasoning
         """
-        # If crawl failed or returned no content, send to REVIEW — not rejected.
-        # "Rejected" means we positively determined the company doesn't match.
-        # Empty content just means we couldn't determine either way.
-        if not crawl_result.success or not crawl_result.markdown_content:
+        # ── Blend Exa + crawl content ──
+        # Exa text is often the primary content source (Exa-first pipeline).
+        # If we also have crawled markdown, use whichever is richer.
+        # If only Exa text is available, use that directly as markdown_content
+        # so the normal LLM qualification path works without special-casing.
+        has_exa_content = bool(crawl_result.exa_text and len(crawl_result.exa_text.strip()) > 50)
+        has_crawl_content = bool(crawl_result.markdown_content and len(crawl_result.markdown_content.strip()) > 100)
+
+        # Pick the best content to qualify on
+        if has_crawl_content and has_exa_content:
+            # Both available — use the longer one, append highlights from Exa
+            if len(crawl_result.markdown_content.strip()) >= len(crawl_result.exa_text.strip()):
+                effective_content = crawl_result.markdown_content
+            else:
+                effective_content = crawl_result.exa_text
+            # Append Exa highlights as supplementary signal
+            if crawl_result.exa_highlights:
+                effective_content += f"\n\n=== SEARCH ENGINE HIGHLIGHTS ===\n{crawl_result.exa_highlights}"
+        elif has_crawl_content:
+            effective_content = crawl_result.markdown_content
+        elif has_exa_content:
+            effective_content = crawl_result.exa_text
+            if crawl_result.exa_highlights:
+                effective_content += f"\n\n=== SEARCH ENGINE HIGHLIGHTS ===\n{crawl_result.exa_highlights}"
+        else:
+            # No content from either source — genuine blind spot
             return QualificationResult(
                 is_qualified=False,
-                confidence_score=5,
-                reasoning="Website content could not be loaded — needs manual review. The company may still be a match.",
+                confidence_score=50,
+                reasoning="No website content available from either direct crawl or search index — needs manual review. The company may still be a match.",
                 red_flags=["Website content unavailable — manual review needed"]
             )
 
-        # If the crawl "succeeded" but content is too thin (e.g. JS loading screen),
-        # route to review instead of wasting LLM tokens on garbage input.
-        stripped = crawl_result.markdown_content.strip()
-        if len(stripped) < 100:
-            return QualificationResult(
-                is_qualified=False,
-                confidence_score=5,
-                reasoning="Website returned very little content (likely a JavaScript app or loading screen). Needs manual review.",
-                red_flags=["Minimal website content — manual review needed"]
-            )
-        
+        # Swap in the best content for the normal qualification path
+        crawl_result = crawl_result.model_copy(update={"markdown_content": effective_content})
+
         # Quick keyword pre-check for obvious rejections
         quick_result = self._quick_keyword_check(crawl_result.markdown_content)
         if quick_result:
@@ -385,7 +400,7 @@ Respond with a JSON object in this exact format:
             if not positive_found:
                 return QualificationResult(
                     is_qualified=False,
-                    confidence_score=2,
+                    confidence_score=15,
                     reasoning="Website clearly indicates non-hardware business (software/services/consulting)",
                     red_flags=[f"Multiple negative signals: SaaS/consulting/services company"]
                 )
@@ -472,7 +487,7 @@ Respond with a JSON object in this exact format:
         logger.error("Kimi vision failed after 4 attempts: %s", last_error)
         return QualificationResult(
             is_qualified=False,
-            confidence_score=3,
+            confidence_score=25,
             reasoning=f"LLM analysis failed: {last_error}",
             red_flags=["Could not complete AI analysis"]
         )
@@ -538,7 +553,7 @@ Respond with a JSON object in this exact format:
         logger.error("Kimi text failed after 4 attempts: %s", last_error)
         return QualificationResult(
             is_qualified=False,
-            confidence_score=3,
+            confidence_score=25,
             reasoning=f"LLM analysis failed: {last_error}",
             red_flags=["Could not complete AI analysis"]
         )
@@ -602,6 +617,122 @@ Respond with a JSON object in this exact format:
         
         return self._parse_llm_response(response.choices[0].message.content)
     
+    async def _qualify_with_exa_metadata(
+        self,
+        company_name: str,
+        website_url: str,
+        crawl_result: CrawlResult,
+    ) -> QualificationResult:
+        """
+        Legacy waterfall fallback: qualify using Exa search-index metadata.
+
+        With the Exa-first pipeline, this method is rarely called directly
+        because qualify_lead() now blends Exa text into the normal path.
+        Kept as a safety net for edge cases where markdown_content is empty
+        but exa_text/exa_highlights exist (shouldn't happen in normal flow).
+        """
+        # Build a synthetic content block from Exa metadata
+        parts: list[str] = []
+        if crawl_result.title:
+            parts.append(f"Page Title: {crawl_result.title}")
+        if crawl_result.exa_text:
+            parts.append(f"Website Text (from search index):\n{crawl_result.exa_text}")
+        if crawl_result.exa_highlights:
+            parts.append(f"Key Highlights (from search index):\n{crawl_result.exa_highlights}")
+        if crawl_result.exa_score is not None:
+            parts.append(f"Search Relevance Score: {crawl_result.exa_score:.3f}")
+
+        exa_content = "\n\n".join(parts)
+
+        # Thin crawl content may still have *some* text — append it
+        if crawl_result.markdown_content and crawl_result.markdown_content.strip():
+            exa_content += f"\n\nPartial Website Content (from direct crawl — may be incomplete):\n{crawl_result.markdown_content.strip()}"
+
+        json_schema = self._json_schema or self._get_json_schema_instruction()
+
+        # Build the waterfall-specific prompt
+        waterfall_context = (
+            "⚠️ IMPORTANT CONTEXT: The company's website could NOT be fully crawled "
+            "(it may block bots, use heavy JavaScript, or have security protections). "
+            "The content below is from a search engine's cached index — it may be "
+            "incomplete but is still genuine content from the company's website.\n\n"
+            "SCORING GUIDANCE FOR UNCRAWLABLE SITES:\n"
+            "- Score based on whatever signals ARE available — do NOT penalize for the crawl failure itself.\n"
+            "- If the search-index text shows clear signals of a match, score 70-90 (cap at 90 since content is incomplete).\n"
+            "- If the text shows the company exists in the right industry but details are thin, score 50-69.\n"
+            "- Only score 0-39 if you find POSITIVE evidence they don't match (wrong industry, clearly unrelated).\n"
+            "- Add 'Scored from search-index data (website uncrawlable)' to red_flags so the user knows.\n"
+        )
+
+        prompt = (
+            waterfall_context
+            + self._user_prompt_template.format(
+                company_name=company_name,
+                website_url=website_url,
+                markdown_content=exa_content,
+            )
+        )
+
+        # Try Kimi text → OpenAI → keyword fallback (same cascade as normal path)
+        kimi_available = self.kimi_client and not _kimi_tpd_tracker.is_exhausted
+
+        if kimi_available:
+            try:
+                await self.rate_limiter.acquire()
+                response = await self.kimi_client.chat.completions.create(
+                    model="kimi-k2-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": self._system_prompt + json_schema + " Respond with ONLY the JSON object."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.3,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"},
+                )
+                if response.usage:
+                    self.total_input_tokens += response.usage.prompt_tokens
+                    self.total_output_tokens += response.usage.completion_tokens
+                response_text = self._extract_kimi_response(response.choices[0].message)
+                result = self._parse_llm_response(response_text)
+                logger.info(
+                    "Waterfall qualification for %s: score=%d (via Exa metadata + Kimi)",
+                    company_name, result.confidence_score,
+                )
+                return result
+            except Exception as e:
+                logger.warning("Waterfall Kimi failed for %s: %s — trying OpenAI", company_name, e)
+
+        if self.openai_client:
+            try:
+                response = await self.openai_client.chat.completions.create(
+                    model=TEXT_MODEL,
+                    messages=[
+                        {"role": "system", "content": self._system_prompt + json_schema},
+                        {"role": "user", "content": prompt}
+                    ],
+                    response_format={"type": "json_object"},
+                    temperature=0.3,
+                    max_tokens=1000,
+                )
+                if response.usage:
+                    self.total_input_tokens += response.usage.prompt_tokens
+                    self.total_output_tokens += response.usage.completion_tokens
+                result = self._parse_llm_response(response.choices[0].message.content)
+                logger.info(
+                    "Waterfall qualification for %s: score=%d (via Exa metadata + OpenAI)",
+                    company_name, result.confidence_score,
+                )
+                return result
+            except Exception as e:
+                logger.warning("Waterfall OpenAI failed for %s: %s", company_name, e)
+
+        # Last resort: keyword match against the Exa snippet
+        return self._keyword_only_qualification(
+            company_name,
+            exa_content,
+            error_msg="Waterfall: crawl failed, LLMs unavailable, using Exa text keywords"
+        )
+
     @staticmethod
     def _extract_kimi_response(message) -> str:
         """Extract response text from Kimi thinking model.
@@ -659,7 +790,7 @@ Respond with a JSON object in this exact format:
 Respond with a JSON object in this exact format:
 {
     "is_qualified": boolean,
-    "confidence_score": integer from 1-10,
+    "confidence_score": integer from 0-100,
     "hardware_type": string or null (what kind of company is this, e.g. "Dental Clinic", "SaaS Platform", "Manufacturing"),
     "industry_category": string or null (their industry sector),
     "reasoning": string (2-3 sentences explaining your decision),
@@ -733,23 +864,23 @@ Respond with a JSON object in this exact format:
                 category_match = re.search(r'"(?:category|hardware_type)"\s*:\s*"([^"]+)"', response_text)
                 reasoning_match = re.search(r'"(?:reasoning|assessment)"\s*:\s*"([^"]{10,500})"', response_text)
                 return QualificationResult(
-                    is_qualified=score >= 6,
-                    confidence_score=min(10, max(1, score)),
+                    is_qualified=score >= 60,
+                    confidence_score=min(100, max(0, score)),
                     hardware_type=category_match.group(1) if category_match else None,
-                    reasoning=reasoning_match.group(1) if reasoning_match else f"Score: {score}/10",
+                    reasoning=reasoning_match.group(1) if reasoning_match else f"Score: {score}/100",
                     red_flags=["Partial parsing - some details may be missing"]
                 )
             
             return QualificationResult(
                 is_qualified=False,
-                confidence_score=5,
+                confidence_score=50,
                 reasoning=f"Could not parse LLM response: {response_text[:200]}",
                 red_flags=["Response parsing error"]
             )
         except Exception as e:
             return QualificationResult(
                 is_qualified=False,
-                confidence_score=5,
+                confidence_score=50,
                 reasoning=f"Parse error: {str(e)[:100]}",
                 red_flags=["Response parsing error"]
             )
@@ -757,15 +888,15 @@ Respond with a JSON object in this exact format:
     @staticmethod
     def _build_result(data: dict) -> QualificationResult:
         """Build a QualificationResult from a parsed JSON dict."""
-        score = data.get("confidence_score") or data.get("score") or 5
+        score = data.get("confidence_score") or data.get("score") or 50
         qualified = data.get("is_qualified")
         if qualified is None:
-            qualified = int(score) >= 6
+            qualified = int(score) >= 60
         # Accept both legacy "hardware_type" and dynamic "company_type" field names
         hw_type = data.get("hardware_type") or data.get("company_type") or data.get("category")
         return QualificationResult(
             is_qualified=bool(qualified),
-            confidence_score=min(10, max(1, int(score))),
+            confidence_score=min(100, max(0, int(score))),
             hardware_type=hw_type,
             industry_category=data.get("industry_category") or data.get("industry"),
             reasoning=data.get("reasoning", "No reasoning provided"),
@@ -788,9 +919,9 @@ Respond with a JSON object in this exact format:
             ctx_text = " ".join(v for v in self.search_context.values() if v).lower()
             ctx_words = [w.strip() for w in ctx_text.replace(",", " ").split() if len(w.strip()) > 3]
             matched = [w for w in ctx_words if w in content_lower]
-            score = min(10, max(1, len(matched) * 2 + 3))
+            score = min(100, max(0, len(matched) * 15 + 25))
             return QualificationResult(
-                is_qualified=score >= 6,
+                is_qualified=score >= 60,
                 confidence_score=score,
                 reasoning=f"Keyword analysis (LLM unavailable: {error_msg[:50]}). Found {len(matched)} relevant terms from search context.",
                 key_signals=matched[:10],
@@ -801,13 +932,13 @@ Respond with a JSON object in this exact format:
         negative_count = sum(1 for kw in NEGATIVE_KEYWORDS if kw.lower() in content_lower)
         
         if negative_count >= 2:
-            score = 2
+            score = 15
             qualified = False
         elif negative_count == 1:
-            score = 4
+            score = 35
             qualified = False
         else:
-            score = 5
+            score = 50
             qualified = False
         
         return QualificationResult(
@@ -848,7 +979,7 @@ async def test_qualifier():
             website_url="https://www.bostondynamics.com",
             crawl_result=crawl_result
         )
-        print(f"Score: {result.confidence_score}/10")
+        print(f"Score: {result.confidence_score}/100")
         print(f"Qualified: {result.is_qualified}")
         print(f"Hardware: {result.hardware_type}")
         print(f"Reasoning: {result.reasoning}")

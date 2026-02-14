@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "../../components/auth/SessionProvider";
 import LeadDrawer from "./LeadDrawer";
+import { useEnrichmentJobs, EnrichmentJobBanner } from "./EnrichmentJobTracker";
 
 interface Lead {
   id: string;
@@ -18,6 +19,7 @@ interface Lead {
   status: string | null;
   notes: string | null;
   deal_value: number | null;
+  contact_count: number;
   status_changed_at: string | null;
   created_at: string | null;
 }
@@ -93,6 +95,10 @@ export default function LeadsPage() {
   const [dbSearching, setDbSearching] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [hasContactsFilter, setHasContactsFilter] = useState(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
+  const [batchMenuOpen, setBatchMenuOpen] = useState(false);
+  const { activeJob, liveProgress, liveProcessed, startBatchJob, fetchJobs: refreshJobs } = useEnrichmentJobs();
 
   /* ── Fetch all leads (no search_id filter – we filter client-side) ── */
   const fetchLeads = useCallback(async () => {
@@ -139,6 +145,7 @@ export default function LeadsPage() {
 
   const sourceLeads = dbSearchResults !== null ? dbSearchResults : pipelineLeads;
   const filtered = sourceLeads.filter((l) => {
+    if (hasContactsFilter && (l.contact_count || 0) === 0) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -148,6 +155,11 @@ export default function LeadsPage() {
       (l.industry_category || "").toLowerCase().includes(q)
     );
   });
+
+  const contactsFoundCount = useMemo(
+    () => sourceLeads.filter((l) => (l.contact_count || 0) > 0).length,
+    [sourceLeads]
+  );
 
   /* ── Tier counts scoped to selected pipeline ── */
   const tierCounts = useMemo(() => ({
@@ -238,6 +250,38 @@ export default function LeadsPage() {
       setExporting(false);
     }
   }, [session]);
+
+  const toggleSelectLead = (id: string) => {
+    setSelectedLeadIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedLeadIds.size === filtered.length) {
+      setSelectedLeadIds(new Set());
+    } else {
+      setSelectedLeadIds(new Set(filtered.map((l) => l.id)));
+    }
+  };
+
+  const handleBatchEnrich = async (action: string) => {
+    const ids = Array.from(selectedLeadIds);
+    if (ids.length === 0) return;
+    setBatchMenuOpen(false);
+    await startBatchJob(ids, action);
+    setSelectedLeadIds(new Set());
+  };
+
+  // Refresh leads when a batch job completes
+  useEffect(() => {
+    if (activeJob?.status === "complete") {
+      fetchLeads();
+    }
+  }, [activeJob?.status, fetchLeads]);
 
   const selectedSearchInfo = searches.find((s) => s.id === selectedPipeline);
 
@@ -524,6 +568,23 @@ export default function LeadsPage() {
             )}
           </div>
 
+          <button
+            onClick={() => setHasContactsFilter((v) => !v)}
+            className={`font-mono text-[10px] uppercase tracking-[0.1em] px-3 py-1.5 rounded-md border transition-all cursor-pointer flex items-center gap-1.5 ${
+              hasContactsFilter
+                ? "bg-green-400/10 border-green-400/30 text-green-400"
+                : "border-border text-text-muted hover:text-text-primary hover:border-border-bright"
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+            Has Contacts {contactsFoundCount}
+          </button>
+
           <div className="relative flex-1 max-w-xs">
             <input
               type="text"
@@ -549,6 +610,87 @@ export default function LeadsPage() {
         </div>
       </div>
 
+      {/* ═══ Enrichment Job Progress Banner ═══ */}
+      <EnrichmentJobBanner
+        activeJob={activeJob}
+        liveProgress={liveProgress}
+        liveProcessed={liveProcessed}
+      />
+
+      {/* ═══ Batch Action Bar ═══ */}
+      {selectedLeadIds.size > 0 && (
+        <div className="bg-surface-2 border border-secondary/20 rounded-xl px-5 py-3 flex items-center justify-between sticky top-0 z-30">
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[11px] text-text-primary font-semibold">
+              {selectedLeadIds.size} lead{selectedLeadIds.size > 1 ? "s" : ""} selected
+            </span>
+            <button
+              onClick={() => setSelectedLeadIds(new Set())}
+              className="font-mono text-[10px] text-text-muted hover:text-text-primary transition-colors cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="relative">
+            <button
+              onClick={() => setBatchMenuOpen((v) => !v)}
+              disabled={!!activeJob && (activeJob.status === "running" || activeJob.status === "pending")}
+              className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors cursor-pointer disabled:opacity-40"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+                <path d="M16 16h5v5" />
+              </svg>
+              Batch Enrich
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+
+            {batchMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setBatchMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-surface-2 border border-border rounded-xl shadow-xl py-1.5">
+                  <p className="px-3 py-1.5 font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+                    Batch Action ({selectedLeadIds.size} leads)
+                  </p>
+                  <button
+                    onClick={() => handleBatchEnrich("recrawl_contacts")}
+                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                  >
+                    <span className="text-secondary">↻</span> Re-crawl for Contacts
+                    <p className="font-sans text-[10px] text-text-dim mt-0.5">Crawl websites for contact info</p>
+                  </button>
+                  <button
+                    onClick={() => handleBatchEnrich("linkedin")}
+                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                  >
+                    <span className="text-blue-400">in</span> Find Decision Makers (LinkedIn)
+                    <p className="font-sans text-[10px] text-text-dim mt-0.5">LinkedIn lookup for key contacts</p>
+                  </button>
+                  <button
+                    onClick={() => handleBatchEnrich("requalify")}
+                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                  >
+                    <span className="text-amber-400">✎</span> Re-qualify All
+                    <p className="font-sans text-[10px] text-text-dim mt-0.5">Re-crawl &amp; re-score with AI</p>
+                  </button>
+                  <button
+                    onClick={() => handleBatchEnrich("full_recrawl")}
+                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer"
+                  >
+                    <span className="text-purple-400">⚙</span> Full Re-crawl (Score + Contacts)
+                    <p className="font-sans text-[10px] text-text-dim mt-0.5">Complete re-crawl of everything</p>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ═══ Leads table ═══ */}
       {filtered.length === 0 ? (
         <div className="bg-surface-2 border border-border rounded-xl px-6 py-16 text-center">
@@ -570,6 +712,14 @@ export default function LeadsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border-dim">
+                  <th className="w-10 px-3 py-3">
+                    <input
+                      type="checkbox"
+                      checked={filtered.length > 0 && selectedLeadIds.size === filtered.length}
+                      onChange={toggleSelectAll}
+                      className="w-3.5 h-3.5 accent-secondary cursor-pointer"
+                    />
+                  </th>
                   <th
                     onClick={() => handleSort("company_name")}
                     className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 cursor-pointer hover:text-text-primary transition-colors"
@@ -586,6 +736,9 @@ export default function LeadsPage() {
                   >
                     Score
                     <SortArrow field="score" />
+                  </th>
+                  <th className="text-center font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-3 py-3 hidden md:table-cell">
+                    Contacts
                   </th>
                   <th className="text-left font-mono text-[10px] uppercase tracking-[0.15em] text-text-muted px-5 py-3 hidden md:table-cell">
                     Industry
@@ -623,8 +776,22 @@ export default function LeadsPage() {
                     <tr
                       key={lead.id}
                       onClick={() => setSelectedLeadId(lead.id)}
-                      className="hover:bg-surface-3/50 transition-colors cursor-pointer"
+                      className={`hover:bg-surface-3/50 transition-colors cursor-pointer ${
+                        selectedLeadIds.has(lead.id) ? "bg-secondary/5" : ""
+                      }`}
                     >
+                      <td className="px-3 py-3.5">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeadIds.has(lead.id)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            toggleSelectLead(lead.id);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="w-3.5 h-3.5 accent-secondary cursor-pointer"
+                        />
+                      </td>
                       <td className="px-5 py-3.5">
                         <div className="flex items-center gap-2.5">
                           {lead.domain && (
@@ -641,9 +808,20 @@ export default function LeadsPage() {
                             <p className="font-mono text-xs text-text-primary font-medium truncate max-w-[200px]">
                               {lead.company_name}
                             </p>
-                            <p className="font-mono text-[10px] text-text-dim truncate max-w-[200px]">
-                              {lead.domain}
-                            </p>
+                            <div className="flex items-center gap-1.5">
+                              <p className="font-mono text-[10px] text-text-dim truncate max-w-[180px]">
+                                {lead.domain}
+                              </p>
+                              {(lead.contact_count || 0) > 0 && (
+                                <span className="inline-flex items-center gap-0.5 font-mono text-[9px] text-green-400 bg-green-400/10 border border-green-400/20 rounded px-1 py-px flex-shrink-0">
+                                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                    <circle cx="9" cy="7" r="4" />
+                                  </svg>
+                                  {lead.contact_count}
+                                </span>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </td>
@@ -658,6 +836,19 @@ export default function LeadsPage() {
                         <span className="font-mono text-sm font-bold text-text-primary">
                           {lead.score}
                         </span>
+                      </td>
+                      <td className="px-3 py-3.5 hidden md:table-cell text-center">
+                        {(lead.contact_count || 0) > 0 ? (
+                          <span className="inline-flex items-center gap-1 font-mono text-[10px] text-green-400 bg-green-400/10 border border-green-400/20 rounded-md px-2 py-0.5">
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                              <circle cx="9" cy="7" r="4" />
+                            </svg>
+                            {lead.contact_count}
+                          </span>
+                        ) : (
+                          <span className="font-mono text-[10px] text-text-dim">—</span>
+                        )}
                       </td>
                       <td className="px-5 py-3.5 hidden md:table-cell">
                         <span className="font-mono text-[10px] text-text-muted truncate max-w-[140px] block">

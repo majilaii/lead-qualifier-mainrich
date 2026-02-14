@@ -37,13 +37,14 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, delete
 
-from auth import require_auth
+from auth import require_auth, get_current_user
 from chat_engine import ChatEngine, ExtractedContext
 from logging_config import setup_logging
 from pipeline_engine import process_companies as _process_companies_core, run_discovery
 from stripe_billing import is_stripe_configured
 from contact_extraction import extract_contacts_from_content
 from linkedin_enrichment import enrich_linkedin, get_linkedin_status
+from reddit_signals import get_reddit_pulse
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -270,6 +271,10 @@ class SearchResponseModel(BaseModel):
 engine: Optional[ChatEngine] = None
 rate_limiter = RateLimiter(max_requests=120, window_seconds=60)
 
+# Tight limiter for anonymous /api/chat trial — 5 messages per hour per IP
+# Authenticated users bypass this entirely
+anon_chat_limiter = RateLimiter(max_requests=5, window_seconds=3600)
+
 
 # ── Read-only routes exempt from rate limiting ──
 _RATE_LIMIT_EXEMPT = {
@@ -483,14 +488,30 @@ async def billing_status(user=Depends(require_auth)):
 
 
 @app.post("/api/chat", response_model=ChatResponseModel)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, req: Request, user=Depends(get_current_user)):
     """
     Process a chat message.
     Sends the conversation to the conversation LLM, which asks follow-up
     questions and extracts structured search parameters.
+
+    Open to anonymous visitors as a capped trial (5 msgs/hour per IP).
+    Authenticated users have no extra limit beyond the global rate limiter.
     """
     if not engine:
         raise HTTPException(status_code=503, detail="Chat engine not initialized")
+
+    # Anonymous users get a tight trial cap to prevent credit abuse
+    if not user:
+        client_ip = req.client.host if req.client else "unknown"
+        if not anon_chat_limiter.check(client_ip):
+            remaining = anon_chat_limiter.remaining(client_ip)
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "You've used all 5 free trial messages this hour. "
+                    "Sign up for unlimited access!"
+                ),
+            )
 
     # Convert to dicts for the engine
     messages = [{"role": m.role, "content": m.content} for m in request.messages]
@@ -609,6 +630,52 @@ async def enrich_contacts(request: EnrichRequest, user=Depends(require_auth)):
         )
 
     companies = [c.model_dump() for c in request.companies]
+    user_id = user.id  # capture for use inside generator
+
+    async def _persist_hunter_contact(domain: str, enriched: dict):
+        """Save a Hunter.io contact to LeadContact table for the matching lead."""
+        try:
+            from db import get_db as _get_db2
+            from db.models import QualifiedLead, LeadContact, Search
+
+            async for db2 in _get_db2():
+                # Find the lead by domain + user
+                lead = (await db2.execute(
+                    select(QualifiedLead)
+                    .join(Search, QualifiedLead.search_id == Search.id)
+                    .where(Search.user_id == user_id, QualifiedLead.domain == domain)
+                    .order_by(QualifiedLead.created_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+
+                if not lead:
+                    return
+
+                # Check for existing contact with same email to avoid duplicates
+                if enriched.get("email"):
+                    existing = (await db2.execute(
+                        select(LeadContact).where(
+                            LeadContact.lead_id == lead.id,
+                            LeadContact.email == enriched["email"],
+                        )
+                    )).scalar_one_or_none()
+                    if existing:
+                        return
+
+                lc = LeadContact(
+                    lead_id=lead.id,
+                    full_name=enriched.get("title"),  # company title as fallback
+                    job_title=enriched.get("job_title"),
+                    email=enriched.get("email"),
+                    phone=enriched.get("phone"),
+                    linkedin_url=None,
+                    source=enriched.get("source", "hunter"),
+                )
+                db2.add(lc)
+                await db2.commit()
+                logger.debug("Saved Hunter.io contact for %s (lead %s)", domain, lead.id)
+        except Exception as e:
+            logger.error("Failed to persist Hunter.io contact for %s: %s", domain, e)
 
     async def generate():
         total = len(companies)
@@ -644,6 +711,8 @@ async def enrich_contacts(request: EnrichRequest, user=Depends(require_auth)):
 
                 if enriched["found"]:
                     results_found += 1
+                    # Persist Hunter.io contact to database
+                    await _persist_hunter_contact(company["domain"], enriched)
 
                 yield sse_event({
                     "type": "result",
@@ -688,6 +757,45 @@ async def enrich_contacts(request: EnrichRequest, user=Depends(require_auth)):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ──────────────────────────────────────────────
+# Reddit Market Signals
+# ──────────────────────────────────────────────
+
+class RedditPulseRequest(BaseModel):
+    industry: Optional[str] = Field(None, max_length=200)
+    technology: Optional[str] = Field(None, max_length=200)
+    company_profile: Optional[str] = Field(None, max_length=200)
+    custom_query: Optional[str] = Field(None, max_length=300)
+    time_range: str = Field("month", pattern="^(day|week|month|year)$")
+
+
+@app.post("/api/reddit/pulse")
+async def reddit_pulse(request: RedditPulseRequest, user=Depends(require_auth)):
+    """Get market sentiment and buying intent signals from Reddit.
+    
+    Searches relevant subreddits based on the user's industry/technology
+    context and returns analyzed signals with sentiment, buying intent,
+    and a market pulse summary.
+    
+    Cost: $0 (Reddit API is free). Only LLM cost for sentiment analysis.
+    """
+    if not any([request.industry, request.technology, request.company_profile, request.custom_query]):
+        raise HTTPException(status_code=400, detail="At least one search parameter required")
+    
+    try:
+        pulse = await get_reddit_pulse(
+            industry=request.industry,
+            technology=request.technology,
+            company_profile=request.company_profile,
+            custom_query=request.custom_query,
+            time_range=request.time_range,
+        )
+        return pulse
+    except Exception as e:
+        logger.error("Reddit pulse error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch Reddit signals: {str(e)}")
 
 
 # ──────────────────────────────────────────────
@@ -770,6 +878,8 @@ class PipelineCompany(BaseModel):
     domain: str = Field(..., max_length=200)
     title: str = Field(..., max_length=300)
     score: Optional[float] = None  # Exa relevance score for prioritization
+    exa_text: Optional[str] = None  # Full page text from Exa's index (up to 10k chars)
+    highlights: Optional[str] = None  # Exa search highlights
 
 
 class SearchContext(BaseModel):
@@ -1498,7 +1608,9 @@ async def rerun_search(search_id: str, user=Depends(require_auth)):
 
         # Reconstruct the PipelineCreateRequest from stored data
         queries_ctx = original.queries_used if isinstance(original.queries_used, dict) else {}
-        mode = queries_ctx.get("_mode", "discover")
+        stored_mode = queries_ctx.get("_mode", "discover")
+        # chat_pipeline / chat_session are functionally "discover" — map them
+        mode = stored_mode if stored_mode in ("discover", "qualify_only") else "discover"
         pipeline_name = queries_ctx.get("_pipeline_name", original.industry or "Pipeline")
 
         search_context = SearchContext(
@@ -1588,13 +1700,15 @@ async def list_leads(
 ):
     """List all user's leads across all searches."""
     from db import get_db as _get_db
-    from db.models import Search, QualifiedLead
+    from db.models import Search, QualifiedLead, LeadContact
+    from sqlalchemy.orm import selectinload
 
     async for db in _get_db():
         query = (
             select(QualifiedLead)
             .join(Search, QualifiedLead.search_id == Search.id)
             .where(Search.user_id == user.id)
+            .options(selectinload(QualifiedLead.contacts))
         )
 
         if tier:
@@ -1629,6 +1743,7 @@ async def list_leads(
                 "status": l.status,
                 "notes": l.notes,
                 "deal_value": l.deal_value,
+                "contact_count": len(l.contacts) if l.contacts else 0,
                 "status_changed_at": l.status_changed_at.isoformat() if l.status_changed_at else None,
                 "created_at": l.created_at.isoformat() if l.created_at else None,
             }
@@ -2088,6 +2203,644 @@ async def linkedin_enrich_lead(lead_id: str, user=Depends(require_auth)):
 
 
 # ──────────────────────────────────────────────
+# Lead Re-crawl / Re-qualify Endpoint
+# ──────────────────────────────────────────────
+
+class RecrawlRequest(BaseModel):
+    """Options for re-crawling a lead."""
+    action: str = Field(
+        "recrawl_contacts",
+        description="One of: recrawl_contacts, requalify, full_recrawl",
+    )
+
+@app.post("/api/leads/{lead_id}/recrawl")
+async def recrawl_lead(lead_id: str, body: RecrawlRequest, user=Depends(require_auth)):
+    """Re-crawl a single lead's website to find contacts, re-qualify, or both.
+
+    Actions:
+      - recrawl_contacts: Re-crawl the website + contact/about pages and
+        extract contacts via LLM.  Keeps existing contacts, de-dupes by email.
+      - requalify: Re-crawl and re-run the qualification LLM to update
+        score, tier, signals, reasoning.
+      - full_recrawl: Does both — re-qualify + re-extract contacts.
+    """
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact
+    from scraper import CrawlerPool, crawl_company
+    from intelligence import LeadQualifier
+    from utils import determine_tier
+
+    if body.action not in ("recrawl_contacts", "requalify", "full_recrawl"):
+        raise HTTPException(status_code=400, detail="Invalid action. Use: recrawl_contacts, requalify, full_recrawl")
+
+    async for db in _get_db():
+        # Verify lead belongs to user
+        lead = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id == lead_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        search = (await db.execute(
+            select(Search).where(Search.id == lead.search_id)
+        )).scalar_one_or_none()
+
+        url = lead.website_url or f"https://{lead.domain}"
+        domain = lead.domain
+
+        # ── Crawl the website ──
+        try:
+            async with CrawlerPool() as pool:
+                crawl_result = await crawl_company(
+                    url,
+                    take_screenshot=False,
+                    crawler_pool=pool,
+                )
+
+                contact_content = ""
+                if crawl_result.success and crawl_result.markdown_content:
+                    contact_content = crawl_result.markdown_content
+
+                # Also crawl /contact, /about, /team pages
+                try:
+                    contact_snippet = await pool.crawl_contact_pages(url)
+                    if contact_snippet:
+                        contact_content += (
+                            "\n\n=== ADDRESS & CONTACT INFO FROM OTHER PAGES ===\n"
+                            + contact_snippet
+                        )
+                except Exception as e:
+                    logger.debug("Contact page crawl failed for %s: %s", domain, e)
+
+        except Exception as e:
+            logger.error("Re-crawl failed for %s: %s", domain, e)
+            raise HTTPException(status_code=500, detail=f"Crawl failed: {str(e)[:200]}")
+
+        result: dict = {"domain": domain, "actions_completed": []}
+
+        # ── Re-qualify if requested ──
+        if body.action in ("requalify", "full_recrawl"):
+            try:
+                search_ctx = None
+                if search:
+                    search_ctx = {
+                        "industry": search.industry,
+                        "company_profile": search.company_profile,
+                        "technology_focus": search.technology_focus,
+                        "qualifying_criteria": search.qualifying_criteria,
+                        "disqualifiers": search.disqualifiers,
+                    }
+
+                qualifier = LeadQualifier(search_context=search_ctx)
+                from scraper import CrawlResult
+                cr = CrawlResult(
+                    url=url,
+                    success=bool(contact_content),
+                    markdown_content=contact_content or "",
+                    title=lead.company_name,
+                )
+                qual_result = await qualifier.qualify_lead(
+                    company_name=lead.company_name,
+                    website_url=url,
+                    crawl_result=cr,
+                    use_vision=False,
+                )
+                new_tier = determine_tier(qual_result.confidence_score)
+
+                lead.score = qual_result.confidence_score
+                lead.tier = new_tier.value
+                lead.reasoning = qual_result.reasoning
+                lead.key_signals = json.dumps(qual_result.key_signals) if qual_result.key_signals else None
+                lead.red_flags = json.dumps(qual_result.red_flags) if qual_result.red_flags else None
+                lead.hardware_type = qual_result.hardware_type
+                lead.industry_category = qual_result.industry_category
+
+                result["new_score"] = qual_result.confidence_score
+                result["new_tier"] = new_tier.value
+                result["reasoning"] = qual_result.reasoning
+                result["key_signals"] = qual_result.key_signals
+                result["red_flags"] = qual_result.red_flags
+                result["actions_completed"].append("requalify")
+            except Exception as e:
+                logger.error("Re-qualify failed for %s: %s", domain, e, exc_info=True)
+                result["requalify_error"] = str(e)[:200]
+
+        # ── Re-extract contacts if requested ──
+        if body.action in ("recrawl_contacts", "full_recrawl") and contact_content:
+            try:
+                people = await extract_contacts_from_content(
+                    company_name=lead.company_name,
+                    domain=domain,
+                    page_content=contact_content,
+                )
+
+                # De-dup against existing contacts
+                existing_contacts = (await db.execute(
+                    select(LeadContact).where(LeadContact.lead_id == lead_id)
+                )).scalars().all()
+                existing_emails = {c.email.lower() for c in existing_contacts if c.email}
+                existing_names = {c.full_name.lower() for c in existing_contacts if c.full_name}
+
+                new_contacts = []
+                for p in people:
+                    if p.email and p.email.lower() in existing_emails:
+                        continue
+                    if not p.email and p.full_name and p.full_name.lower() in existing_names:
+                        continue
+                    lc = LeadContact(
+                        lead_id=lead_id,
+                        full_name=p.full_name,
+                        job_title=p.job_title,
+                        email=p.email,
+                        phone=p.phone,
+                        linkedin_url=p.linkedin_url,
+                        source="website_recrawl",
+                    )
+                    db.add(lc)
+                    new_contacts.append({
+                        "full_name": p.full_name,
+                        "job_title": p.job_title,
+                        "email": p.email,
+                        "phone": p.phone,
+                        "linkedin_url": p.linkedin_url,
+                        "source": "website_recrawl",
+                    })
+
+                result["new_contacts"] = new_contacts
+                result["total_contacts_found"] = len(people)
+                result["actions_completed"].append("recrawl_contacts")
+            except Exception as e:
+                logger.error("Contact extraction failed for %s: %s", domain, e, exc_info=True)
+                result["contacts_error"] = str(e)[:200]
+        elif body.action in ("recrawl_contacts", "full_recrawl"):
+            result["contacts_error"] = "Could not extract page content from website"
+
+        lead.last_seen_at = datetime.now(timezone.utc)
+        await db.commit()
+
+        # Refresh contacts list to return all contacts
+        all_contacts = (await db.execute(
+            select(LeadContact).where(LeadContact.lead_id == lead_id)
+        )).scalars().all()
+        result["contacts"] = [
+            {
+                "id": c.id,
+                "full_name": c.full_name,
+                "job_title": c.job_title,
+                "email": c.email,
+                "phone": c.phone,
+                "linkedin_url": c.linkedin_url,
+                "source": c.source,
+            }
+            for c in all_contacts
+        ]
+
+        return result
+
+
+# ──────────────────────────────────────────────
+# Batch Enrichment / Re-crawl Jobs
+# ──────────────────────────────────────────────
+
+class BatchEnrichRequest(BaseModel):
+    """Start a batch enrichment job."""
+    lead_ids: list[str] = Field(..., min_length=1, max_length=200)
+    action: str = Field(
+        "recrawl_contacts",
+        description="recrawl_contacts | requalify | full_recrawl | linkedin",
+    )
+
+
+# In-memory SSE for enrichment jobs (mirrors PipelineRun pattern)
+class EnrichmentJobRun:
+    """In-memory SSE state for a running enrichment job."""
+
+    def __init__(self, job_id: str, total: int):
+        self.job_id = job_id
+        self.total = total
+        self.events: list[dict] = []
+        self._subscribers: list[asyncio.Queue] = []
+        self._lock = asyncio.Lock()
+        self.created_at = time.time()
+
+    async def emit(self, event: dict):
+        async with self._lock:
+            self.events.append(event)
+            dead: list[asyncio.Queue] = []
+            for q in self._subscribers:
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    dead.append(q)
+            for q in dead:
+                self._subscribers.remove(q)
+
+    async def subscribe(self, after: int = 0):
+        q: asyncio.Queue = asyncio.Queue(maxsize=256)
+        async with self._lock:
+            for ev in self.events[after:]:
+                yield ev
+            if any(ev.get("type") == "complete" for ev in self.events):
+                return
+            self._subscribers.append(q)
+        try:
+            while True:
+                event = await q.get()
+                yield event
+                if event.get("type") == "complete":
+                    return
+        finally:
+            async with self._lock:
+                if q in self._subscribers:
+                    self._subscribers.remove(q)
+
+
+_enrichment_runs: dict[str, EnrichmentJobRun] = {}
+_enrichment_tasks: dict[str, asyncio.Task] = {}
+
+
+async def _run_batch_enrichment(job_id: str, user_id: str, lead_ids: list[str], action: str):
+    """Background task: process each lead and emit SSE events."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact, EnrichmentJob
+    from scraper import CrawlerPool, crawl_company
+    from intelligence import LeadQualifier
+    from utils import determine_tier
+
+    run = _enrichment_runs.get(job_id)
+    if not run:
+        return
+
+    total = len(lead_ids)
+    results: list[dict] = []
+    succeeded = 0
+    failed = 0
+
+    try:
+        async for db in _get_db():
+            # Mark job as running in DB
+            job = (await db.execute(
+                select(EnrichmentJob).where(EnrichmentJob.id == job_id)
+            )).scalar_one_or_none()
+            if job:
+                job.status = "running"
+                job.started_at = datetime.now(timezone.utc)
+                await db.commit()
+
+            await run.emit({"type": "init", "total": total, "action": action, "job_id": job_id})
+
+            for i, lead_id in enumerate(lead_ids):
+                lead_result: dict = {"lead_id": lead_id, "index": i}
+                try:
+                    # Fetch lead
+                    lead = (await db.execute(
+                        select(QualifiedLead)
+                        .join(Search, QualifiedLead.search_id == Search.id)
+                        .where(QualifiedLead.id == lead_id, Search.user_id == user_id)
+                    )).scalar_one_or_none()
+
+                    if not lead:
+                        lead_result["status"] = "skipped"
+                        lead_result["message"] = "Not found or not owned"
+                        failed += 1
+                        results.append(lead_result)
+                        await run.emit({"type": "progress", "index": i, "total": total, "lead_id": lead_id,
+                                        "status": "skipped", "company": "Unknown"})
+                        continue
+
+                    await run.emit({
+                        "type": "progress", "index": i, "total": total,
+                        "lead_id": lead_id, "status": "processing",
+                        "company": lead.company_name, "domain": lead.domain,
+                    })
+
+                    url = lead.website_url or f"https://{lead.domain}"
+                    domain = lead.domain
+
+                    if action == "linkedin":
+                        # LinkedIn enrichment
+                        try:
+                            li_result = await enrich_linkedin(lead.company_name, lead.domain)
+                            if li_result and li_result.get("contacts"):
+                                existing = (await db.execute(
+                                    select(LeadContact).where(LeadContact.lead_id == lead_id)
+                                )).scalars().all()
+                                existing_emails = {c.email.lower() for c in existing if c.email}
+                                new_count = 0
+                                for c in li_result["contacts"]:
+                                    if c.get("email") and c["email"].lower() in existing_emails:
+                                        continue
+                                    db.add(LeadContact(
+                                        lead_id=lead_id,
+                                        full_name=c.get("full_name"),
+                                        job_title=c.get("job_title"),
+                                        email=c.get("email"),
+                                        phone=c.get("phone"),
+                                        linkedin_url=c.get("linkedin_url"),
+                                        source="linkedin",
+                                    ))
+                                    new_count += 1
+                                lead_result["new_contacts"] = new_count
+                                lead_result["message"] = f"{new_count} new contacts"
+                            else:
+                                lead_result["message"] = "No contacts found"
+                            lead_result["status"] = "success"
+                            succeeded += 1
+                        except Exception as e:
+                            lead_result["status"] = "error"
+                            lead_result["message"] = str(e)[:200]
+                            failed += 1
+                    else:
+                        # Crawl-based actions
+                        try:
+                            async with CrawlerPool() as pool:
+                                crawl_result = await crawl_company(url, take_screenshot=False, crawler_pool=pool)
+                                contact_content = ""
+                                if crawl_result.success and crawl_result.markdown_content:
+                                    contact_content = crawl_result.markdown_content
+                                try:
+                                    contact_snippet = await pool.crawl_contact_pages(url)
+                                    if contact_snippet:
+                                        contact_content += "\n\n=== CONTACT PAGES ===\n" + contact_snippet
+                                except Exception:
+                                    pass
+
+                            # Re-qualify
+                            if action in ("requalify", "full_recrawl"):
+                                search = (await db.execute(
+                                    select(Search).where(Search.id == lead.search_id)
+                                )).scalar_one_or_none()
+                                search_ctx = None
+                                if search:
+                                    search_ctx = {
+                                        "industry": search.industry,
+                                        "company_profile": search.company_profile,
+                                        "technology_focus": search.technology_focus,
+                                        "qualifying_criteria": search.qualifying_criteria,
+                                        "disqualifiers": search.disqualifiers,
+                                    }
+                                qualifier = LeadQualifier(search_context=search_ctx)
+                                from scraper import CrawlResult as _CrawlResult
+                                cr = _CrawlResult(
+                                    url=url, success=bool(contact_content),
+                                    markdown_content=contact_content or "", title=lead.company_name,
+                                )
+                                qual_result = await qualifier.qualify_lead(
+                                    company_name=lead.company_name, website_url=url,
+                                    crawl_result=cr, use_vision=False,
+                                )
+                                new_tier = determine_tier(qual_result.confidence_score)
+                                lead.score = qual_result.confidence_score
+                                lead.tier = new_tier.value
+                                lead.reasoning = qual_result.reasoning
+                                lead.key_signals = json.dumps(qual_result.key_signals) if qual_result.key_signals else None
+                                lead.red_flags = json.dumps(qual_result.red_flags) if qual_result.red_flags else None
+                                lead.hardware_type = qual_result.hardware_type
+                                lead.industry_category = qual_result.industry_category
+                                lead_result["new_score"] = qual_result.confidence_score
+                                lead_result["new_tier"] = new_tier.value
+
+                            # Re-extract contacts
+                            if action in ("recrawl_contacts", "full_recrawl") and contact_content:
+                                people = await extract_contacts_from_content(
+                                    company_name=lead.company_name, domain=domain,
+                                    page_content=contact_content,
+                                )
+                                existing = (await db.execute(
+                                    select(LeadContact).where(LeadContact.lead_id == lead_id)
+                                )).scalars().all()
+                                existing_emails = {c.email.lower() for c in existing if c.email}
+                                existing_names = {c.full_name.lower() for c in existing if c.full_name}
+                                new_count = 0
+                                for p in people:
+                                    if p.email and p.email.lower() in existing_emails:
+                                        continue
+                                    if not p.email and p.full_name and p.full_name.lower() in existing_names:
+                                        continue
+                                    db.add(LeadContact(
+                                        lead_id=lead_id,
+                                        full_name=p.full_name, job_title=p.job_title,
+                                        email=p.email, phone=p.phone,
+                                        linkedin_url=p.linkedin_url, source="website_recrawl",
+                                    ))
+                                    new_count += 1
+                                lead_result["new_contacts"] = new_count
+
+                            lead.last_seen_at = datetime.now(timezone.utc)
+                            lead_result["status"] = "success"
+                            lead_result["message"] = "Done"
+                            succeeded += 1
+                        except Exception as e:
+                            lead_result["status"] = "error"
+                            lead_result["message"] = str(e)[:200]
+                            failed += 1
+
+                    results.append(lead_result)
+                    await db.commit()
+
+                    await run.emit({
+                        "type": "result", "index": i, "total": total,
+                        "lead_id": lead_id, "company": lead.company_name if lead else "Unknown",
+                        "domain": lead.domain if lead else "",
+                        **lead_result,
+                    })
+
+                except Exception as e:
+                    logger.error("Batch enrichment error for lead %s: %s", lead_id, e, exc_info=True)
+                    lead_result["status"] = "error"
+                    lead_result["message"] = str(e)[:200]
+                    failed += 1
+                    results.append(lead_result)
+                    await run.emit({
+                        "type": "result", "index": i, "total": total,
+                        "lead_id": lead_id, "status": "error", "message": str(e)[:200],
+                    })
+
+            # Update job in DB
+            job = (await db.execute(
+                select(EnrichmentJob).where(EnrichmentJob.id == job_id)
+            )).scalar_one_or_none()
+            if job:
+                job.status = "complete"
+                job.processed = total
+                job.succeeded = succeeded
+                job.failed = failed
+                job.results = results
+                job.completed_at = datetime.now(timezone.utc)
+                await db.commit()
+
+            await run.emit({
+                "type": "complete", "job_id": job_id,
+                "total": total, "succeeded": succeeded, "failed": failed,
+            })
+
+    except Exception as e:
+        logger.error("Fatal batch enrichment error for job %s: %s", job_id, e, exc_info=True)
+        try:
+            async for db in _get_db():
+                job = (await db.execute(
+                    select(EnrichmentJob).where(EnrichmentJob.id == job_id)
+                )).scalar_one_or_none()
+                if job:
+                    job.status = "error"
+                    job.error = str(e)[:500]
+                    job.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+        except Exception:
+            pass
+        if run:
+            await run.emit({"type": "complete", "job_id": job_id, "error": str(e)[:200],
+                            "total": total, "succeeded": succeeded, "failed": failed})
+
+
+@app.post("/api/leads/batch-enrich")
+async def start_batch_enrichment(body: BatchEnrichRequest, user=Depends(require_auth)):
+    """Start a batch enrichment job. Returns job_id for SSE streaming."""
+    from db import get_db as _get_db
+    from db.models import EnrichmentJob
+
+    if body.action not in ("recrawl_contacts", "requalify", "full_recrawl", "linkedin"):
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    async for db in _get_db():
+        job = EnrichmentJob(
+            user_id=user.id,
+            action=body.action,
+            status="pending",
+            lead_ids=body.lead_ids,
+            total=len(body.lead_ids),
+        )
+        db.add(job)
+        await db.commit()
+        job_id = job.id
+
+    # Create in-memory run
+    run = EnrichmentJobRun(job_id, len(body.lead_ids))
+    _enrichment_runs[job_id] = run
+
+    # Launch background task
+    task = asyncio.create_task(
+        _run_batch_enrichment(job_id, user.id, body.lead_ids, body.action)
+    )
+    _enrichment_tasks[job_id] = task
+    task.add_done_callback(lambda _t: _enrichment_tasks.pop(job_id, None))
+
+    return {"job_id": job_id, "total": len(body.lead_ids), "action": body.action}
+
+
+@app.get("/api/leads/enrich-jobs")
+async def list_enrichment_jobs(user=Depends(require_auth)):
+    """List recent enrichment jobs for this user."""
+    from db import get_db as _get_db
+    from db.models import EnrichmentJob
+
+    async for db in _get_db():
+        jobs = (await db.execute(
+            select(EnrichmentJob)
+            .where(EnrichmentJob.user_id == user.id)
+            .order_by(EnrichmentJob.created_at.desc())
+            .limit(20)
+        )).scalars().all()
+
+        return [
+            {
+                "id": j.id,
+                "action": j.action,
+                "status": j.status,
+                "total": j.total,
+                "processed": j.processed,
+                "succeeded": j.succeeded,
+                "failed": j.failed,
+                "error": j.error,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "started_at": j.started_at.isoformat() if j.started_at else None,
+                "completed_at": j.completed_at.isoformat() if j.completed_at else None,
+            }
+            for j in jobs
+        ]
+
+
+@app.get("/api/leads/enrich-jobs/{job_id}")
+async def get_enrichment_job(job_id: str, user=Depends(require_auth)):
+    """Get enrichment job status + results."""
+    from db import get_db as _get_db
+    from db.models import EnrichmentJob
+
+    async for db in _get_db():
+        job = (await db.execute(
+            select(EnrichmentJob)
+            .where(EnrichmentJob.id == job_id, EnrichmentJob.user_id == user.id)
+        )).scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        return {
+            "id": job.id,
+            "action": job.action,
+            "status": job.status,
+            "total": job.total,
+            "processed": job.processed,
+            "succeeded": job.succeeded,
+            "failed": job.failed,
+            "results": job.results,
+            "error": job.error,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        }
+
+
+@app.get("/api/leads/enrich-jobs/{job_id}/stream")
+async def stream_enrichment_job(job_id: str, request: Request, user=Depends(require_auth)):
+    """SSE stream for enrichment job progress. Reconnectable via ?after=N."""
+    from db import get_db as _get_db
+    from db.models import EnrichmentJob
+
+    # Verify ownership
+    async for db in _get_db():
+        job = (await db.execute(
+            select(EnrichmentJob)
+            .where(EnrichmentJob.id == job_id, EnrichmentJob.user_id == user.id)
+        )).scalar_one_or_none()
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # If job completed and no in-memory run, return completed status from DB
+        if job.status in ("complete", "error") and job_id not in _enrichment_runs:
+            async def _completed_stream():
+                data = json.dumps({
+                    "type": "complete", "job_id": job_id,
+                    "total": job.total, "succeeded": job.succeeded,
+                    "failed": job.failed, "results": job.results,
+                })
+                yield f"data: {data}\n\n"
+            return StreamingResponse(
+                _completed_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+            )
+
+    run = _enrichment_runs.get(job_id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Job stream not available — job may have completed before server restart")
+
+    after = int(request.query_params.get("after", "0"))
+
+    async def _event_stream():
+        async for event in run.subscribe(after):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        _event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+# ──────────────────────────────────────────────
 # Search Templates CRUD
 # ──────────────────────────────────────────────
 
@@ -2394,7 +3147,7 @@ async def bulk_import(request: BulkImportRequest, user=Depends(require_auth)):
 # ──────────────────────────────────────────────
 
 @app.get("/api/linkedin/status")
-async def linkedin_status():
+async def linkedin_status(user=Depends(require_auth)):
     """Check if LinkedIn enrichment APIs are configured."""
     return get_linkedin_status()
 
@@ -2455,6 +3208,7 @@ async def _save_lead_to_db(search_id: str, company: dict, user_id: str = None, c
     """
     from db import get_db as _get_db
     from db.models import QualifiedLead, LeadContact, LeadSnapshot
+    from sqlalchemy.orm import selectinload
 
     domain = company.get("domain", "")
     country = company.get("country") or _guess_country_from_domain(domain)
@@ -2467,7 +3221,9 @@ async def _save_lead_to_db(search_id: str, company: dict, user_id: str = None, c
         # Global dedup: check if we already have this domain for this user
         if user_id and domain:
             existing_lead = (await db.execute(
-                select(QualifiedLead).where(
+                select(QualifiedLead)
+                .options(selectinload(QualifiedLead.contacts))
+                .where(
                     QualifiedLead.user_id == user_id,
                     QualifiedLead.domain == domain,
                 )

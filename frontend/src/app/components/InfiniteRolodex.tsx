@@ -15,185 +15,185 @@ type DataRow = { text: string; tier: Tier };
 
 const DATA_POOL: DataRow[] = [
   {
-    text: "> BOSTON DYNAMICS · ROBOTICS · MARC RAIBERT · CEO · 9/10",
+    text: "> BOSTON DYNAMICS · ROBOTICS · MARC RAIBERT · CEO · 92/100",
     tier: "hot",
   },
   {
-    text: "> FIGURE AI · HUMANOID ROBOTS · BRETT ADCOCK · CEO · 10/10",
+    text: "> FIGURE AI · HUMANOID ROBOTS · BRETT ADCOCK · CEO · 97/100",
     tier: "hot",
   },
   {
-    text: "> AGILITY ROBOTICS · HUMANOIDS · DAMION SHELTON · CEO · 10/10",
+    text: "> AGILITY ROBOTICS · HUMANOIDS · DAMION SHELTON · CEO · 95/100",
     tier: "hot",
   },
   {
-    text: "> UNITREE ROBOTICS · QUADRUPEDS · WANG XINGXING · CEO · 9/10",
+    text: "> UNITREE ROBOTICS · QUADRUPEDS · WANG XINGXING · CEO · 90/100",
     tier: "hot",
   },
   {
-    text: "> MAXON GROUP · PRECISION MOTORS · EUGEN ELMIGER · CEO · 8/10",
+    text: "> MAXON GROUP · PRECISION MOTORS · EUGEN ELMIGER · CEO · 85/100",
     tier: "hot",
   },
   {
-    text: "> TESLA INC · EV AND ENERGY · DREW BAGLINO · SVP ENG · 8/10",
+    text: "> TESLA INC · EV AND ENERGY · DREW BAGLINO · SVP ENG · 82/100",
     tier: "hot",
   },
   {
-    text: "> ABB ROBOTICS · INDUSTRIAL AUTO · SAMI ATIYA · PRES · 8/10",
+    text: "> ABB ROBOTICS · INDUSTRIAL AUTO · SAMI ATIYA · PRES · 80/100",
     tier: "hot",
   },
   {
-    text: "> HARMONIC DRIVE · ACTUATORS · S YAMAZAKI · CTO · 9/10",
+    text: "> HARMONIC DRIVE · ACTUATORS · S YAMAZAKI · CTO · 88/100",
     tier: "hot",
   },
-  { text: "> MOOG INC · MOTION CONTROL · PAT ROCHE · CEO · 9/10", tier: "hot" },
+  { text: "> MOOG INC · MOTION CONTROL · PAT ROCHE · CEO · 87/100", tier: "hot" },
   {
-    text: "> KOLLMORGEN · SERVO SYSTEMS · DAN ST-PIERRE · DIR · 8/10",
-    tier: "hot",
-  },
-  {
-    text: "> SAMSUNG SDI · BATTERY TECH · YOONHO CHOI · VP ENG · 8/10",
+    text: "> KOLLMORGEN · SERVO SYSTEMS · DAN ST-PIERRE · DIR · 78/100",
     tier: "hot",
   },
   {
-    text: "> 1X TECHNOLOGIES · HUMANOIDS · BERNT BORNICH · CEO · 10/10",
+    text: "> SAMSUNG SDI · BATTERY TECH · YOONHO CHOI · VP ENG · 76/100",
     tier: "hot",
   },
-  { text: "- NIDEC CORP · MOTOR MFG · JUN SEKI · COO · 7/10", tier: "review" },
   {
-    text: "- SIEMENS AG · INDUSTRIAL · CEDRIK NEIKE · BOARD · 6/10",
+    text: "> 1X TECHNOLOGIES · HUMANOIDS · BERNT BORNICH · CEO · 96/100",
+    tier: "hot",
+  },
+  { text: "- NIDEC CORP · MOTOR MFG · JUN SEKI · COO · 68/100", tier: "review" },
+  {
+    text: "- SIEMENS AG · INDUSTRIAL · CEDRIK NEIKE · BOARD · 58/100",
     tier: "review",
   },
   {
-    text: "- BOSCH GROUP · AUTOMOTIVE · STEFAN HARTUNG · CEO · 6/10",
+    text: "- BOSCH GROUP · AUTOMOTIVE · STEFAN HARTUNG · CEO · 55/100",
     tier: "review",
   },
   {
-    text: "- FANUC CORP · CNC ROBOTICS · KENJI YAMAGUCHI · CEO · 7/10",
+    text: "- FANUC CORP · CNC ROBOTICS · KENJI YAMAGUCHI · CEO · 65/100",
     tier: "review",
   },
   {
-    text: "- DENSO CORP · AUTO PARTS · KOJI ARIMA · CEO · 6/10",
+    text: "- DENSO CORP · AUTO PARTS · KOJI ARIMA · CEO · 56/100",
     tier: "review",
   },
   {
-    text: "- FESTO SE · PNEUMATICS · DR FRANK MELZER · CTO · 5/10",
+    text: "- FESTO SE · PNEUMATICS · DR FRANK MELZER · CTO · 48/100",
     tier: "review",
   },
   {
-    text: "- YASKAWA ELEC · SERVO MOTORS · H OGASAWARA · CEO · 7/10",
+    text: "- YASKAWA ELEC · SERVO MOTORS · H OGASAWARA · CEO · 64/100",
     tier: "review",
   },
   {
-    text: "- RETHINK ROBOTICS · COBOTS · CONTACT TBD · TBD · 5/10",
+    text: "- RETHINK ROBOTICS · COBOTS · CONTACT TBD · TBD · 45/100",
     tier: "review",
   },
   {
-    text: "- KUKA AG · INDUSTRIAL ROBOTS · PETER MOHNEN · CEO · 6/10",
+    text: "- KUKA AG · INDUSTRIAL ROBOTS · PETER MOHNEN · CEO · 60/100",
     tier: "review",
   },
   {
-    text: "- DELTA ELECTRONICS · POWER SYS · PING CHENG · CEO · 5/10",
+    text: "- DELTA ELECTRONICS · POWER SYS · PING CHENG · CEO · 50/100",
     tier: "review",
   },
   {
-    text: "- SCHAEFFLER AG · BEARINGS · KLAUS ROSENFELD · CEO · 6/10",
+    text: "- SCHAEFFLER AG · BEARINGS · KLAUS ROSENFELD · CEO · 57/100",
     tier: "review",
   },
   {
-    text: "- NSK LTD · BEARINGS · TOSHIHIRO UCHIYAMA · CEO · 5/10",
+    text: "- NSK LTD · BEARINGS · TOSHIHIRO UCHIYAMA · CEO · 46/100",
     tier: "review",
   },
   {
-    text: "- SMC CORP · PNEUMATICS · YOSHIKI TAKADA · PRES · 5/10",
+    text: "- SMC CORP · PNEUMATICS · YOSHIKI TAKADA · PRES · 49/100",
     tier: "review",
   },
   {
-    text: "- OMRON CORP · AUTOMATION · JUNTA TSUJINAGA · CEO · 6/10",
+    text: "- OMRON CORP · AUTOMATION · JUNTA TSUJINAGA · CEO · 55/100",
     tier: "review",
   },
   {
-    text: "- ROCKWELL AUTO · PLC SYSTEMS · BLAKE MORET · CEO · 4/10",
+    text: "- ROCKWELL AUTO · PLC SYSTEMS · BLAKE MORET · CEO · 42/100",
     tier: "review",
   },
   {
-    text: "- COGNEX CORP · VISION SYS · ROBERT WILLETT · CEO · 4/10",
+    text: "- COGNEX CORP · VISION SYS · ROBERT WILLETT · CEO · 40/100",
     tier: "review",
   },
   {
-    text: "- KEYENCE CORP · SENSORS · T TAKIZAKI · CHAIR · 5/10",
+    text: "- KEYENCE CORP · SENSORS · T TAKIZAKI · CHAIR · 52/100",
     tier: "review",
   },
   {
-    text: "- THK CO LTD · LINEAR MOTION · A TERAMACHI · CEO · 7/10",
+    text: "- THK CO LTD · LINEAR MOTION · A TERAMACHI · CEO · 66/100",
     tier: "review",
   },
   {
-    text: "x HUBSPOT INC · SAAS · YAMINI RANGAN · CEO · 2/10",
+    text: "x HUBSPOT INC · SAAS · YAMINI RANGAN · CEO · 18/100",
     tier: "rejected",
   },
   {
-    text: "x SLACK TECH · MESSAGING · DENISE DRESSER · CEO · 1/10",
+    text: "x SLACK TECH · MESSAGING · DENISE DRESSER · CEO · 8/100",
     tier: "rejected",
   },
   {
-    text: "x CANVA PTY · DESIGN TOOL · MELANIE PERKINS · CEO · 1/10",
+    text: "x CANVA PTY · DESIGN TOOL · MELANIE PERKINS · CEO · 5/100",
     tier: "rejected",
   },
   {
-    text: "x STRIPE INC · PAYMENTS · PATRICK COLLISON · CEO · 2/10",
+    text: "x STRIPE INC · PAYMENTS · PATRICK COLLISON · CEO · 12/100",
     tier: "rejected",
   },
   {
-    text: "x NOTION LABS · PRODUCTIVITY · IVAN ZHAO · CEO · 1/10",
+    text: "x NOTION LABS · PRODUCTIVITY · IVAN ZHAO · CEO · 6/100",
     tier: "rejected",
   },
   {
-    text: "x MAILCHIMP · EMAIL MKTG · BEN CHESTNUT · CEO · 2/10",
+    text: "x MAILCHIMP · EMAIL MKTG · BEN CHESTNUT · CEO · 15/100",
     tier: "rejected",
   },
   {
-    text: "x ZENDESK INC · SUPPORT SAAS · TOM EGGEMEIER · CEO · 1/10",
+    text: "x ZENDESK INC · SUPPORT SAAS · TOM EGGEMEIER · CEO · 10/100",
     tier: "rejected",
   },
   {
-    text: "x INTERCOM · CHAT TOOLS · EOGHAN MCCABE · CEO · 2/10",
+    text: "x INTERCOM · CHAT TOOLS · EOGHAN MCCABE · CEO · 14/100",
     tier: "rejected",
   },
   {
-    text: "x AIRTABLE INC · DATABASE · HOWIE LIU · CEO · 1/10",
+    text: "x AIRTABLE INC · DATABASE · HOWIE LIU · CEO · 7/100",
     tier: "rejected",
   },
   {
-    text: "x FIGMA INC · DESIGN TOOL · DYLAN FIELD · CEO · 1/10",
+    text: "x FIGMA INC · DESIGN TOOL · DYLAN FIELD · CEO · 9/100",
     tier: "rejected",
   },
   {
-    text: "x LOOM INC · VIDEO TOOL · JOE THOMAS · CEO · 2/10",
+    text: "x LOOM INC · VIDEO TOOL · JOE THOMAS · CEO · 16/100",
     tier: "rejected",
   },
   {
-    text: "x CALENDLY · SCHEDULING · TOPE AWOTONA · CEO · 1/10",
+    text: "x CALENDLY · SCHEDULING · TOPE AWOTONA · CEO · 5/100",
     tier: "rejected",
   },
   {
-    text: "x ASANA INC · PROJECT MGT · D MOSKOVITZ · CEO · 2/10",
+    text: "x ASANA INC · PROJECT MGT · D MOSKOVITZ · CEO · 13/100",
     tier: "rejected",
   },
   {
-    text: "x TYPEFORM SL · FORMS SAAS · JOAQUIM LECHA · CEO · 1/10",
+    text: "x TYPEFORM SL · FORMS SAAS · JOAQUIM LECHA · CEO · 8/100",
     tier: "rejected",
   },
   {
-    text: "x FRESHWORKS · CRM SAAS · G MATHRUBOOTHAM · CEO · 2/10",
+    text: "x FRESHWORKS · CRM SAAS · G MATHRUBOOTHAM · CEO · 11/100",
     tier: "rejected",
   },
   {
-    text: "x SURVEYMONKEY · SURVEYS · ZANDER LURIE · CEO · 1/10",
+    text: "x SURVEYMONKEY · SURVEYS · ZANDER LURIE · CEO · 6/100",
     tier: "rejected",
   },
   {
-    text: "x DOCUSIGN INC · E-SIGN · ALLAN THYGESEN · CEO · 2/10",
+    text: "x DOCUSIGN INC · E-SIGN · ALLAN THYGESEN · CEO · 14/100",
     tier: "rejected",
   },
 ];

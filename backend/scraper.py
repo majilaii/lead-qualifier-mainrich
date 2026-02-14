@@ -115,13 +115,13 @@ class CrawlerPool:
 
     async def crawl_contact_pages(self, base_url: str) -> Optional[str]:
         """
-        Try to find and crawl contact/about/impressum pages to extract address info.
+        Try to find and crawl contact/about/team pages to extract people & contact info.
         
-        Returns a small markdown snippet with address-relevant content from
-        secondary pages, or None if nothing useful was found.
+        Returns markdown content from secondary pages (contact, about, team)
+        so the LLM can extract people names, emails, and phone numbers.
         
-        This is intentionally lightweight — text-only, no screenshots, small output.
-        We only keep lines that look like they contain address/location data.
+        Passes FULL page content (cleaned of nav junk) to avoid stripping out
+        email/phone data that appears outside address sections.
         """
         if not base_url.startswith(('http://', 'https://')):
             base_url = f"https://{base_url}"
@@ -131,20 +131,20 @@ class CrawlerPool:
         parsed = urlparse(base_url)
         root = f"{parsed.scheme}://{parsed.netloc}"
 
-        # Common paths where addresses live, ordered by likelihood
+        # Paths most likely to contain people with emails/phones.
+        # Team/leadership pages are gold — they list names + emails.
+        # Kept short to avoid wasting crawl time on low-value pages.
         _CONTACT_PATHS = [
-            "/contact", "/contact-us", "/contactus",
-            "/about", "/about-us", "/aboutus",
-            "/impressum", "/imprint",
-            "/locations", "/our-offices",
-            "/company", "/company/profile",
-            "/legal-notice", "/legal",
+            "/contact", "/contact-us",
+            "/about", "/about-us",
+            "/team", "/our-team", "/leadership",
+            "/impressum",
         ]
 
         snippets: list[str] = []
 
         for path in _CONTACT_PATHS:
-            if len(snippets) >= 2:
+            if len(snippets) >= 3:
                 break  # Got enough — don't waste time on more pages
             try:
                 page_url = root + path
@@ -156,11 +156,12 @@ class CrawlerPool:
                 if not result.success or not result.markdown_content:
                     continue
 
-                # Extract only address-relevant lines (keep it small)
-                relevant = _extract_address_lines(result.markdown_content, path)
-                if relevant:
-                    snippets.append(f"--- Content from {path} page ---\n{relevant}")
-                    logger.debug("Found address content on %s%s (%d chars)", root, path, len(relevant))
+                # Clean the full page content (remove nav/footer junk) but keep ALL
+                # people, emails, phones — don't filter to just address lines.
+                cleaned = _clean_page_content(result.markdown_content)
+                if cleaned and len(cleaned) > 30:
+                    snippets.append(f"--- Content from {path} page ---\n{cleaned}")
+                    logger.info("Found contact content on %s%s (%d chars)", root, path, len(cleaned))
 
             except Exception as e:
                 logger.debug("Contact page crawl failed for %s%s: %s", root, path, e)
@@ -171,82 +172,53 @@ class CrawlerPool:
         return "\n\n".join(snippets)
 
 
-def _extract_address_lines(markdown: str, page_path: str) -> Optional[str]:
+def _clean_page_content(markdown: str) -> Optional[str]:
     """
-    Extract lines from a contact/about page that likely contain address info.
+    Clean crawled page markdown by removing navigation, cookie banners, and
+    boilerplate while KEEPING all content that might contain people, emails,
+    phone numbers, and addresses.
     
-    We cast a wide net with keyword matching, then return the surrounding
-    context (±3 lines) so the LLM gets enough signal.
-    Returns None if nothing useful found.
+    Unlike the old _extract_address_lines(), this does NOT filter to only
+    address-adjacent lines. It returns the full useful content so the LLM
+    can find people + their contact details wherever they appear on the page.
     """
     import re as _re
 
-    # Keywords that signal address/location content
-    _ADDRESS_PATTERNS = [
-        # Postal codes (strong signal)
-        r'\b\d{5}(?:[-\s]\d{4})?\b',               # US: 12345 or 12345-6789
-        r'\b[A-Z]{1,2}\d{1,2}\s?\d[A-Z]{2}\b',     # UK: TW8 8DL, SW1A 1AA
-        r'\b\d{4,5}\s+[A-Z]',                       # EU: 80333 Munich, 71254 Ditzingen
-        # Street address words
-        r'\b(?:street|str\.|straße|strasse|road|rd\.|avenue|ave\.|boulevard|blvd|lane|drive|way|place|platz|allee)\b',
-        r'\b(?:suite|floor|level|unit|building|bldg|ste)\s*\.?\s*\d',
-        # Location labels (must have a colon or line with data nearby)
-        r'(?:address|our\s+address|head\s*quarters?|hauptsitz|registered\s+office)\s*[:\-]',
-        # Phone/email patterns (often near addresses)
-        r'(?:tel|phone|fax|telephone|telefon)\s*[:\.]?\s*[\+\(0-9]',
-        r'(?:email|e-mail)\s*[:\.]?\s*[a-zA-Z0-9._%+-]+@',
-    ]
-
-    # Lines to skip: nav links, menu items, generic footer links
+    # Lines to strip: nav/menu items, cookie banners, social media links, etc.
     _SKIP_PATTERNS = [
-        r'^\s*-?\s*\[.*\]\(https?://.*\)\s*$',   # Markdown links: - [text](url)
+        r'^\s*-?\s*\[.*\]\(https?://.*\)\s*$',      # Markdown links: - [text](url)
         r'^\s*(?:NAVIGATION|MENU|RESOURCES|QUICK LINKS|PRODUCTS|SOLUTIONS|SERVICES)\s*$',
-        r'^\s*©\d{4}',                             # Copyright lines
-        r'^#{1,3}\s+(?:We\s+value|Cookie)',         # Cookie banners
-        r'Read\s*More\s*\]',                        # "Read More" links
+        r'^\s*©\s*\d{4}',                             # Copyright lines
+        r'^#{1,3}\s+(?:We\s+value|Cookie|Privacy)',    # Cookie/privacy banners
+        r'Read\s*More\s*\]',                           # "Read More" links
+        r'^\s*\|?\s*\[?\s*(?:Facebook|Twitter|Instagram|YouTube|Pinterest)\s*\]?\s*\|?\s*$',
+        r'^\s*(?:Skip to (?:content|main)|Back to top)\s*$',
+        r'^\s*\*{3,}\s*$',                            # Markdown dividers
+        r'^\s*!\[.*\]\(.*\)\s*$',                      # Image-only lines
     ]
 
     lines = markdown.split('\n')
-    matched_indices: set[int] = set()
+    result_lines: list[str] = []
 
-    for i, line in enumerate(lines):
+    for line in lines:
         stripped = line.strip()
-        # Skip very short, very long, or nav-like lines
-        if len(stripped) < 5 or len(stripped) > 400:
+        # Skip empty, very short, or very long lines
+        if not stripped or len(stripped) < 3 or len(stripped) > 500:
             continue
-        # Skip lines that are clearly navigation/links
+        # Skip navigation/boilerplate
         if any(_re.search(pat, stripped, _re.IGNORECASE) for pat in _SKIP_PATTERNS):
             continue
-        # Check for address patterns
-        for pattern in _ADDRESS_PATTERNS:
-            if _re.search(pattern, stripped, _re.IGNORECASE):
-                # Add this line and ±3 lines of context
-                for j in range(max(0, i - 3), min(len(lines), i + 4)):
-                    matched_indices.add(j)
-                break
+        result_lines.append(stripped)
 
-    if not matched_indices:
+    if not result_lines:
         return None
 
-    # Build output from matched line ranges, filtering out junk
-    sorted_indices = sorted(matched_indices)
-    result_lines: list[str] = []
-    for idx in sorted_indices:
-        line = lines[idx].strip()
-        if not line:
-            continue
-        # Skip nav-like lines in the output too
-        if any(_re.search(pat, line, _re.IGNORECASE) for pat in _SKIP_PATTERNS):
-            continue
-        if line:
-            result_lines.append(line)
-
     result = '\n'.join(result_lines)
-    # Cap at ~2000 chars to avoid bloating the LLM prompt
-    if len(result) > 2000:
-        result = result[:2000] + "\n[truncated]"
+    # Cap at ~4000 chars per page (leaves room for 2-3 pages + homepage in the 8000 char LLM window)
+    if len(result) > 4000:
+        result = result[:4000] + "\n[truncated]"
 
-    return result if len(result) > 20 else None
+    return result if len(result) > 30 else None
 
 
 async def _do_crawl(

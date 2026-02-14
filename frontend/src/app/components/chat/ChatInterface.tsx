@@ -579,19 +579,26 @@ function LiveResultsView({
 }) {
   const [activeTab, setActiveTab] = useState<"results" | "queue">("results");
   const [expandedCompany, setExpandedCompany] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
+
+  // Tick every second so the ETA stays live
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const total = searchCompanies.length;
   const done = qualifiedCompanies.length;
+  const remaining = total - done;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
   // Live ETA calculation
-  const elapsed = (Date.now() - startTime) / 1000;
+  const elapsed = (now - startTime) / 1000;
   const avgPerCompany = done > 0 ? elapsed / done : 35;
-  const remaining = total - done;
-  const etaSeconds = Math.ceil(remaining * avgPerCompany);
+  const etaSeconds = Math.max(0, Math.ceil(remaining * avgPerCompany));
   const etaMin = Math.floor(etaSeconds / 60);
   const etaSec = etaSeconds % 60;
-  const etaStr = etaMin > 0 ? `~${etaMin}m ${etaSec}s` : `~${etaSec}s`;
+  const etaStr = remaining <= 0 ? "finishing…" : etaMin > 0 ? `~${etaMin}m ${etaSec}s` : `~${etaSec}s`;
 
   // Live tier counts
   const hotCount = qualifiedCompanies.filter((c) => c.tier === "hot").length;
@@ -673,7 +680,7 @@ function LiveResultsView({
                     onClick={() => setExpandedCompany(isExpanded ? null : c.domain)}
                     className="w-full px-5 py-3 flex items-center gap-3 hover:bg-surface-3/50 transition-colors cursor-pointer text-left"
                   >
-                    <span className={`font-mono text-xs font-bold min-w-[2rem] text-right ${style.color}`}>{c.score}/10</span>
+                    <span className={`font-mono text-xs font-bold min-w-[2rem] text-right ${style.color}`}>{c.score}/100</span>
                     <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
                     <span className="font-mono text-[11px] text-text-secondary flex-1 truncate">{c.domain}</span>
                     <span className={`font-mono text-[9px] uppercase tracking-[0.15em] px-2 py-0.5 rounded ${style.bg} ${style.color} ${style.border} border`}>
@@ -767,10 +774,12 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
   enrichDone: boolean;
   setEnrichDone: React.Dispatch<React.SetStateAction<boolean>>;
 }) {
+  const { session } = useAuth();
   const [expandedTier, setExpandedTier] = useState<string | null>("hot");
 
   // Enrichment progress (local — fine to reset)
   const [enriching, setEnriching] = useState(false);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
   const [enrichProgress, setEnrichProgress] = useState<{ index: number; total: number } | null>(null);
 
   const hot = qualifiedCompanies.filter((c) => c.tier === "hot").sort((a, b) => b.score - a.score);
@@ -783,12 +792,18 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
     if (companies.length === 0) return;
     setEnriching(true);
     setEnrichDone(false);
+    setEnrichError(null);
     setEnrichProgress({ index: 0, total: companies.length });
 
     try {
       const response = await fetch(`/api/enrich`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(session?.access_token
+            ? { Authorization: `Bearer ${session.access_token}` }
+            : {}),
+        },
         body: JSON.stringify({
           companies: companies.map((c) => ({
             domain: c.domain,
@@ -799,7 +814,15 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
       });
 
       if (!response.ok || !response.body) {
-        console.error("Enrichment failed:", response.status);
+        const errText = await response.text().catch(() => "");
+        console.error("Enrichment failed:", response.status, errText);
+        setEnrichError(
+          response.status === 401
+            ? "Authentication expired — please refresh the page"
+            : response.status === 429
+              ? "Enrichment quota exceeded — upgrade your plan"
+              : `Enrichment failed (${response.status})`
+        );
         setEnriching(false);
         return;
       }
@@ -844,9 +867,10 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
       }
     } catch (err) {
       console.error("Enrichment error:", err);
+      setEnrichError("Network error — check your connection");
       setEnriching(false);
     }
-  }, []);
+  }, [session]);
 
   const tiers = [
     { key: "hot", label: "Hot Leads", companies: hot, count: summary.hot },
@@ -920,7 +944,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                       return (
                       <div key={c.domain} className="px-5 py-3">
                         <div className="flex items-center gap-3 mb-1">
-                          <span className={`font-mono text-xs font-bold ${style.color}`}>{c.score}/10</span>
+                          <span className={`font-mono text-xs font-bold ${style.color}`}>{c.score}/100</span>
                           <img src={`https://www.google.com/s2/favicons?domain=${c.domain}&sz=32`} alt="" width={14} height={14} className="rounded-sm flex-shrink-0" loading="lazy" />
                           <a href={c.url} target="_blank" rel="noopener noreferrer" className="font-mono text-[11px] text-secondary/60 hover:text-secondary transition-colors">
                             {c.domain} ↗
@@ -957,7 +981,9 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
                               <span className="font-mono text-[10px] text-text-secondary">{contact.phone}</span>
                             )}
                             {contact.source && (
-                              <span className="font-mono text-[8px] text-text-dim bg-surface-3 px-1 py-0.5 rounded">via {contact.source}</span>
+                              <span className={`font-mono text-[8px] px-1 py-0.5 rounded ${contact.source === "website" ? "text-green-400/60 bg-green-500/10" : "text-text-dim bg-surface-3"}`}>
+                                {contact.source === "website" ? "✓ scraped free" : contact.source === "hunter" ? "via Hunter.io" : `via ${contact.source}`}
+                              </span>
                             )}
                           </div>
                         )}
@@ -974,57 +1000,107 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
           })}
         </div>
 
-        {/* Find Contacts action */}
-        {hot.length > 0 && !enrichDone && (
-          <div className="px-5 py-4 border-t border-border-dim bg-surface-1/50">
-            {enriching && enrichProgress ? (
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
-                <span className="font-mono text-xs text-text-secondary">
-                  Finding contacts... {enrichProgress.index}/{enrichProgress.total}
-                </span>
-                <div className="flex-1 h-1 bg-surface-3 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-secondary/50 rounded-full transition-all duration-300"
-                    style={{ width: `${Math.round((enrichProgress.index / enrichProgress.total) * 100)}%` }}
-                  />
+        {/* Contact summary & Hunter.io fallback */}
+        {(() => {
+          // Contacts already found via free website scraping (Phase 2)
+          const scrapedContacts = hot.filter((c) => {
+            const contact = enrichedContacts.get(c.domain);
+            return contact && contact.found && contact.source === "website";
+          });
+          // Hot leads still missing contacts
+          const hotMissingContacts = hot.filter((c) => {
+            const contact = enrichedContacts.get(c.domain);
+            return !contact || !contact.found;
+          });
+          // Non-rejected leads still missing contacts (for "or all qualified" button)
+          const nonRejectedMissing = nonRejected.filter((c) => {
+            const contact = enrichedContacts.get(c.domain);
+            return !contact || !contact.found;
+          });
+
+          return (
+            <>
+              {/* Show scraped contacts summary */}
+              {scrapedContacts.length > 0 && (
+                <div className="px-5 py-3 border-t border-border-dim bg-green-500/5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-green-400 text-xs">✓</span>
+                    <span className="font-mono text-[10px] text-green-400/70">
+                      {scrapedContacts.length} contact{scrapedContacts.length > 1 ? "s" : ""} found via website scraping (free)
+                    </span>
+                    {hotMissingContacts.length > 0 && (
+                      <span className="font-mono text-[10px] text-text-dim ml-1">
+                        · {hotMissingContacts.length} still missing
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <button
-                  onClick={() => enrichLeads(hot)}
-                  className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-xl hover:bg-secondary/20 hover:border-secondary/40 transition-colors cursor-pointer"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                    <circle cx="12" cy="7" r="4" />
-                  </svg>
-                  Find contacts for {hot.length} hot lead{hot.length > 1 ? "s" : ""}
-                </button>
-                {nonRejected.length > hot.length && (
-                  <button
-                    onClick={() => enrichLeads(nonRejected)}
-                    className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
-                  >
-                    Or all {nonRejected.length} qualified
-                  </button>
-                )}
-                <span className="font-mono text-[10px] text-text-dim">Hunter.io enrichment</span>
-              </div>
-            )}
-          </div>
-        )}
-        {enrichDone && (
-          <div className="px-5 py-3 border-t border-border-dim bg-secondary/5">
-            <div className="flex items-center gap-2">
-              <span className="text-secondary text-xs">✓</span>
-              <span className="font-mono text-[10px] text-secondary/70">
-                Contacts enriched — {Array.from(enrichedContacts.values()).filter((c) => c.found).length} found, {Array.from(enrichedContacts.values()).filter((c) => !c.found).length} not found
-              </span>
-            </div>
-          </div>
-        )}
+              )}
+
+              {/* Hunter.io fallback — only for leads still missing contacts */}
+              {hotMissingContacts.length > 0 && !enrichDone && (
+                <div className="px-5 py-4 border-t border-border-dim bg-surface-1/50">
+                  {enriching && enrichProgress ? (
+                    <div className="flex items-center gap-3">
+                      <div className="w-5 h-5 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+                      <span className="font-mono text-xs text-text-secondary">
+                        Finding contacts... {enrichProgress.index}/{enrichProgress.total}
+                      </span>
+                      <div className="flex-1 h-1 bg-surface-3 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-secondary/50 rounded-full transition-all duration-300"
+                          style={{ width: `${Math.round((enrichProgress.index / enrichProgress.total) * 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        onClick={() => enrichLeads(hotMissingContacts)}
+                        className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-xl hover:bg-secondary/20 hover:border-secondary/40 transition-colors cursor-pointer"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                          <circle cx="12" cy="7" r="4" />
+                        </svg>
+                        Find contacts for {hotMissingContacts.length} remaining lead{hotMissingContacts.length > 1 ? "s" : ""}
+                      </button>
+                      {nonRejectedMissing.length > hotMissingContacts.length && (
+                        <button
+                          onClick={() => enrichLeads(nonRejectedMissing)}
+                          className="inline-flex items-center gap-2 font-mono text-[10px] text-text-muted hover:text-secondary uppercase tracking-[0.15em] transition-colors cursor-pointer border border-border-dim hover:border-secondary/30 rounded-lg px-3 py-1.5"
+                        >
+                          Or all {nonRejectedMissing.length} qualified
+                        </button>
+                      )}
+                      <span className="font-mono text-[10px] text-text-dim">via Hunter.io (paid)</span>
+                    </div>
+                  )}
+                  {enrichError && (
+                    <div className="mt-2 font-mono text-[10px] text-red-400">
+                      ⚠ {enrichError}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* All contacts found — either from scraping, Hunter.io, or both */}
+              {(enrichDone || (hot.length > 0 && hotMissingContacts.length === 0)) && (
+                <div className="px-5 py-3 border-t border-border-dim bg-secondary/5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-secondary text-xs">✓</span>
+                    <span className="font-mono text-[10px] text-secondary/70">
+                      Contacts enriched — {Array.from(enrichedContacts.values()).filter((c) => c.found).length} found
+                      {Array.from(enrichedContacts.values()).filter((c) => !c.found).length > 0 &&
+                        `, ${Array.from(enrichedContacts.values()).filter((c) => !c.found).length} not found`}
+                      {scrapedContacts.length > 0 && ` (${scrapedContacts.length} via free scraping)`}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {/* Continue with remaining batch */}
         {remainingCount > 0 && (
@@ -1533,11 +1609,11 @@ export default function ChatInterface() {
         <div ref={splitContainerRef} className="flex-1 flex overflow-hidden relative">
           {/* Chat sidebar — left (resizable) */}
           <div
-            className="flex-shrink-0 flex flex-col min-w-0 animate-slide-left md:block"
+            className="flex-shrink-0 flex flex-col min-w-0 overflow-hidden animate-slide-left md:block"
             style={{ width: `${splitPercent}%` }}
           >
             {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               {chatContent}
             </div>
 
@@ -1613,7 +1689,7 @@ export default function ChatInterface() {
         /* ═══ Standard Full-Width Layout ═══ */
         <>
           {/* ─── Content ─── */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 min-h-0 overflow-y-auto">
             {chatContent}
           </div>
 

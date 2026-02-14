@@ -34,7 +34,7 @@ export default function HowItWorks() {
       num: "02",
       title: "AI Finds & Qualifies",
       description:
-        "Our engine scans the web, analyzes company websites with AI vision, scores each prospect 1-10, and sorts them into Hot, Review, and Rejected.",
+        "Our engine scans the web, analyzes company websites with AI vision, scores each prospect 0-100, and sorts them into Hot, Review, and Rejected.",
       detail: "Web scanning · AI scoring · Auto-categorization",
     },
     {

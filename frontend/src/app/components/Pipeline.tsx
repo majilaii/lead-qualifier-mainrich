@@ -23,7 +23,7 @@ const STEPS = [
     num: "03",
     title: "Qualification",
     description:
-      "AI reads each website's content and visuals. Scores 1-10 on customer fit. Returns structured signals, red flags, and reasoning.",
+      "AI reads each website's content and visuals. Scores 0-100 on customer fit. Returns structured signals, red flags, and reasoning.",
     icon: "🧠",
     detail: "Vision + text analysis · Structured output · Pre-filter",
   },
@@ -159,21 +159,21 @@ export default function Pipeline() {
             {[
               {
                 file: "Hot Leads",
-                score: "8-10",
+                score: "70-100",
                 color: "#ef4444",
                 emoji: "🔥",
                 action: "Ready for outreach",
               },
               {
                 file: "Needs Review",
-                score: "4-7",
+                score: "40-69",
                 color: "#f59e0b",
                 emoji: "🔍",
                 action: "Human review recommended",
               },
               {
                 file: "Not a Fit",
-                score: "1-3",
+                score: "0-39",
                 color: "#71717a",
                 emoji: "❌",
                 action: "Auto-rejected with reasoning",

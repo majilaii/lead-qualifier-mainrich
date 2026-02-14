@@ -23,8 +23,8 @@ CLI (legacy, deprecated):
 |------|--------|-------------|
 | **1. Discovery** | `test_exa.py` | Finds company websites matching your ideal customer profile (ICP) using [Exa AI](https://exa.ai) neural search |
 | **2. Crawling** | `scraper.py` | Visits each website with a headless browser, extracts page text as markdown + takes a screenshot |
-| **3. Qualification** | `intelligence.py` | LLM reads the website content + screenshot and scores 1-10 on how likely this company needs your product |
-| **4. Deep Research** | `deep_research.py` | For hot leads (score 8+), crawls multiple pages and generates a sales brief: products they make, who to talk to, what to say |
+| **3. Qualification** | `intelligence.py` | LLM reads the website content + screenshot and scores 0-100 on how likely this company needs your product |
+| **4. Deep Research** | `deep_research.py` | For hot leads (score 70+), crawls multiple pages and generates a sales brief: products they make, who to talk to, what to say |
 | **5. Enrichment** | `enrichment.py` | Looks up contact emails/phones via Apollo.io or Hunter.io (optional, manual mode by default) |
 | **6. Dashboard** | Frontend | Full pipeline view: stats, searchable leads table, detail drawer, interactive map, settings |
 
@@ -503,7 +503,7 @@ Screenshots are resized to 720px wide JPEG to keep vision API costs low.
 This is where the magic happens. The LLM:
 1. Reads the website markdown text
 2. Optionally analyzes the screenshot (vision mode)
-3. Scores the company 1-10 on how well they match the user's ICP
+3. Scores the company 0-100 on how well they match the user's ICP
 4. Returns structured JSON with: `confidence_score`, `hardware_type`, `industry_category`, `headquarters_location`, `reasoning`, `key_signals`, `red_flags`
 
 Qualification prompts are built dynamically from the user's search context (industry, technology focus, qualifying criteria, disqualifiers) — no hardcoded industry assumptions.
@@ -518,7 +518,7 @@ Includes a quick pre-filter that rejects obvious non-fit companies (SaaS-only, a
 
 ### `deep_research.py` — Sales Intelligence
 
-For hot leads (score ≥ 8), crawls up to 5 pages on their site and generates:
+For hot leads (score ≥ 70), crawls up to 5 pages on their site and generates:
 - Products they manufacture or services they provide
 - Technology stack and capabilities
 - Company size and production volume estimates
@@ -600,8 +600,8 @@ All configuration is in `backend/config.py`. Key settings:
 |---------|---------|-----------------|
 | `CONCURRENCY_LIMIT` | 5 | How many websites to crawl in parallel |
 | `MAX_TOKENS_INPUT` | 6000 | Max tokens of website text sent to LLM per lead |
-| `SCORE_HOT_LEAD` | 8 | Minimum score to be classified as a "hot" lead |
-| `SCORE_REVIEW` | 4 | Minimum score for "review" bucket (below this → rejected) |
+| `SCORE_HOT_LEAD` | 70 | Minimum score to be classified as a "hot" lead |
+| `SCORE_REVIEW` | 40 | Minimum score for "review" bucket (below this → rejected) |
 | `TEXT_MODEL` | gpt-4o-mini | LLM for text-only qualification |
 | `VISION_MODEL` | kimi-k2.5-thinking | LLM for vision qualification |
 | `REQUEST_TIMEOUT` | 30 | Seconds before a crawl times out |

@@ -32,6 +32,8 @@ export interface SearchCompany {
   snippet: string;
   score: number | null;
   source_query?: string;
+  exa_text?: string;
+  highlights?: string;
 }
 
 export interface QualifiedCompany {
@@ -48,12 +50,13 @@ export interface QualifiedCompany {
   country?: string | null;
   latitude?: number | null;
   longitude?: number | null;
+  contacts?: { full_name?: string; job_title?: string; email?: string; phone?: string; linkedin_url?: string; source?: string }[];
 }
 
 export interface PipelineProgress {
   index: number;
   total: number;
-  phase: "crawling" | "qualifying";
+  phase: "crawling" | "qualifying" | "enriching";
   company: string;
 }
 
@@ -383,6 +386,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       country: (l.country as string) ?? null,
       latitude: (l.latitude as number) ?? null,
       longitude: (l.longitude as number) ?? null,
+      contacts: (l.contacts as QualifiedCompany["contacts"]) || [],
     }));
 
   /** Helper: build PipelineSummary from qualified companies */
@@ -448,6 +452,26 @@ export function HuntProvider({ children }: { children: ReactNode }) {
               const qualified = mapLeadsToQualified(leads);
               setQualifiedCompanies(qualified);
               setPipelineSummary(buildSummary(qualified));
+              // Populate enrichedContacts from any leads that have contacts from DB
+              setEnrichedContacts((prev) => {
+                const next = new Map(prev);
+                for (const q of qualified) {
+                  if (q.contacts?.length && !next.has(q.domain)) {
+                    const c = q.contacts[0];
+                    next.set(q.domain, {
+                      domain: q.domain,
+                      title: c.full_name || q.title,
+                      url: q.url,
+                      email: c.email || null,
+                      phone: c.phone || null,
+                      job_title: c.job_title || null,
+                      source: c.source || "website",
+                      found: true,
+                    });
+                  }
+                }
+                return next;
+              });
               setMessages((prev) => [
                 ...prev,
                 {
@@ -558,6 +582,51 @@ export function HuntProvider({ children }: { children: ReactNode }) {
                     if (domain && prev.some((c) => c.domain === domain)) return prev;
                     return [...prev, event.company];
                   });
+                  // If the result already includes contacts (e.g. from pipeline crawl), populate enrichedContacts
+                  if (event.company?.contacts?.length > 0) {
+                    const c = event.company.contacts[0];
+                    setEnrichedContacts((prev) => {
+                      const next = new Map(prev);
+                      next.set(event.company.domain, {
+                        domain: event.company.domain,
+                        title: c.full_name || event.company.title,
+                        url: event.company.url,
+                        email: c.email || null,
+                        phone: c.phone || null,
+                        job_title: c.job_title || null,
+                        source: c.source || "website",
+                        found: true,
+                      });
+                      return next;
+                    });
+                  }
+                } else if (event.type === "enrichment") {
+                  // Phase 2: hot lead deep-crawl found contacts
+                  const contacts = event.company?.contacts;
+                  const domain = event.company?.domain;
+                  if (domain && contacts?.length > 0) {
+                    const c = contacts[0]; // Show the top contact inline
+                    setEnrichedContacts((prev) => {
+                      const next = new Map(prev);
+                      next.set(domain, {
+                        domain,
+                        title: c.full_name || event.company.title,
+                        url: event.company.url || "",
+                        email: c.email || null,
+                        phone: c.phone || null,
+                        job_title: c.job_title || null,
+                        source: c.source || "website",
+                        found: true,
+                      });
+                      return next;
+                    });
+                    // Also update the qualified company with contacts
+                    setQualifiedCompanies((prev) =>
+                      prev.map((qc) =>
+                        qc.domain === domain ? { ...qc, contacts } : qc
+                      )
+                    );
+                  }
                 } else if (event.type === "error" && event.fatal) {
                   throw new Error(event.error);
                 } else if (event.type === "complete") {
@@ -859,6 +928,8 @@ export function HuntProvider({ children }: { children: ReactNode }) {
             domain: c.domain,
             title: c.title,
             score: c.score,
+            exa_text: c.exa_text || undefined,
+            highlights: c.highlights || undefined,
           })),
           use_vision: true,
           search_context: ctx

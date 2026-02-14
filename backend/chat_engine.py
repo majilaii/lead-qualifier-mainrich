@@ -567,7 +567,16 @@ class ChatEngine:
         self, query: str, num_results: int = 10, category: str = "company",
         user_location: Optional[str] = None,
     ) -> list[dict]:
-        """Synchronous Exa search (called via asyncio.to_thread)."""
+        """Synchronous Exa search (called via asyncio.to_thread).
+        
+        Requests rich content from Exa's index so we can use it as the
+        PRIMARY signal for lead qualification — no Playwright crawl needed
+        for scoring.  Exa already handles JS-rendered pages, Cloudflare,
+        and bot protection behind the scenes.
+        
+        Cost: ~$0.001/page for text, ~$0.001/page for highlights.
+        Much cheaper and faster than running our own headless browser.
+        """
         from urllib.parse import urlparse
 
         search_kwargs = dict(
@@ -576,8 +585,13 @@ class ChatEngine:
             category=category,
             num_results=num_results,
             contents={
-                "text": {"max_characters": 1500},
-                "highlights": {"max_characters": 500},
+                # 10k chars of clean markdown — same quality as our Playwright crawl
+                # but handles sites that block us. Exa's default is 10k anyway;
+                # we were artificially capping at 1500 before.
+                "text": {"max_characters": 10000},
+                # Key excerpts most relevant to the search query — great
+                # concentrated signal for the LLM qualifier.
+                "highlights": {"max_characters": 1000},
             },
         )
         # Pass ISO country code to Exa for geographic relevance
@@ -594,6 +608,9 @@ class ChatEngine:
                 "url": r.url,
                 "domain": domain,
                 "title": r.title or "",
+                # Full text from Exa's index — primary content for qualification
+                "exa_text": (r.text or "").strip(),
+                # Short snippet for UI display / quick preview
                 "snippet": (r.text or "")[:300].replace("\n", " ").strip(),
                 "highlights": (
                     "; ".join(r.highlights)
