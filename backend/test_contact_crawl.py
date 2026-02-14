@@ -15,7 +15,7 @@ import os
 # Ensure we can import from the backend directory
 sys.path.insert(0, os.path.dirname(__file__))
 
-from scraper import CrawlerPool, _extract_address_lines
+from scraper import CrawlerPool, _clean_page_content
 
 
 # ── Test sites where address is typically on /contact, not homepage ──

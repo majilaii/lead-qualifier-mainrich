@@ -190,7 +190,7 @@ def print_lead_summary(lead: ProcessedLead):
     emoji = tier_emoji.get(lead.qualification_tier, "•")
     
     logger.info("%s %s", emoji, lead.company_name)
-    logger.info("   Score: %d/10 | %s", lead.confidence_score, lead.qualification_tier.value.upper())
+    logger.info("   Score: %d/100 | %s", lead.confidence_score, lead.qualification_tier.value.upper())
     if lead.hardware_type:
         logger.debug("   Hardware: %s", lead.hardware_type)
     if lead.industry_category:

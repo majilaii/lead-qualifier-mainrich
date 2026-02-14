@@ -93,7 +93,7 @@ export default function LiveMapPanel() {
     }
   }, [leads, phase]);
 
-  const dotSize = (score: number) => Math.max(10, Math.min(18, score * 1.6));
+  const dotSize = (score: number) => Math.max(10, Math.min(18, score / 6));
 
   const tierCounts = {
     hot: leads.filter((l) => l.tier === "hot").length,
@@ -193,7 +193,7 @@ export default function LiveMapPanel() {
               {/* Domain + Score */}
               <div className="flex items-center gap-2 mb-2">
                 <a href={selectedLead.website_url || `https://${selectedLead.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[10px] text-secondary/60 hover:text-secondary transition-colors truncate">{selectedLead.domain} ↗</a>
-                <span className="font-mono text-xs font-bold ml-auto" style={{ color: DOT_COLORS[selectedLead.tier] }}>{selectedLead.score}/10</span>
+                <span className="font-mono text-xs font-bold ml-auto" style={{ color: DOT_COLORS[selectedLead.tier] }}>{selectedLead.score}/100</span>
               </div>
 
               {/* Tags */}

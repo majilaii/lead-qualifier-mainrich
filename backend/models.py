@@ -18,9 +18,9 @@ from enum import Enum
 
 class QualificationTier(str, Enum):
     """Lead qualification tiers based on score"""
-    HOT = "hot"           # Score 8-10
-    REVIEW = "review"     # Score 4-7
-    REJECTED = "rejected" # Score 1-3
+    HOT = "hot"           # Score 70-100
+    REVIEW = "review"     # Score 40-69
+    REJECTED = "rejected" # Score 0-39
 
 
 class LeadInput(BaseModel):
@@ -40,8 +40,8 @@ class QualificationResult(BaseModel):
         description="Whether the company matches the search criteria"
     )
     confidence_score: int = Field(
-        ge=1, le=10,
-        description="Confidence score from 1 (definitely not a match) to 10 (perfect fit)"
+        ge=0, le=100,
+        description="Confidence score from 0 (definitely not a match) to 100 (perfect fit)"
     )
     hardware_type: Optional[str] = Field(
         default=None,
@@ -77,6 +77,14 @@ class CrawlResult(BaseModel):
     title: Optional[str] = None
     error_message: Optional[str] = None
     crawl_time_seconds: float = 0.0
+
+    # Exa search-index content — used as primary signal for qualification.
+    # Exa crawls with its own headless browser and caches clean markdown,
+    # so this is often *better* than our own Playwright crawl (handles
+    # Cloudflare, JS SPAs, bot protection, etc.).
+    exa_text: Optional[str] = None           # Full page text from Exa's index (up to 10k chars)
+    exa_highlights: Optional[str] = None     # Key excerpts relevant to the search query
+    exa_score: Optional[float] = None        # Exa's relevance score for this result
 
 
 class EnrichmentResult(BaseModel):
@@ -176,9 +184,9 @@ class ProcessingStats(BaseModel):
 ╠══════════════════════════════════════════╣
 ║ Total Processed: {self.processed:>6} / {self.total_leads:<6}       ║
 ║ ────────────────────────────────────────║
-║ 🔥 Hot Leads (8-10):     {self.hot_leads:>6}          ║
-║ 🔍 Review Queue (4-7):   {self.review_leads:>6}          ║
-║ ❌ Rejected (1-3):       {self.rejected_leads:>6}          ║
+║ 🔥 Hot Leads (70-100):    {self.hot_leads:>6}          ║
+║ 🔍 Review Queue (40-69):  {self.review_leads:>6}          ║
+║ ❌ Rejected (0-39):       {self.rejected_leads:>6}          ║
 ║ ⚠️  Crawl Failures:      {self.crawl_failures:>6}          ║
 ║ ────────────────────────────────────────║
 ║ 💰 Est. Cost: ${self.estimated_cost_usd:>7.4f}              ║

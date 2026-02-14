@@ -180,7 +180,7 @@ Add the new columns to `db/models.py` → `QualifiedLead`.
   - Click row → **Detail drawer** slides in from right
 - **Detail drawer** (`LeadDrawer.tsx`):
   - Full company info: name, domain, URL
-  - Score gauge (visual 1-10 with color)
+  - Score gauge (visual 0-100 with color)
   - Tier badge (Hot/Review/Rejected)
   - Reasoning (full text)
   - Key signals (green badges)

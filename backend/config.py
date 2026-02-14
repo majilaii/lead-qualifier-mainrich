@@ -26,9 +26,9 @@ OUTPUT_DIR = BASE_DIR / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Output files by qualification tier
-QUALIFIED_FILE = OUTPUT_DIR / "qualified_hot_leads.csv"      # Score 8-10
-REVIEW_FILE = OUTPUT_DIR / "review_manual_check.csv"         # Score 4-7
-REJECTED_FILE = OUTPUT_DIR / "rejected_with_reasons.csv"     # Score 1-3
+QUALIFIED_FILE = OUTPUT_DIR / "qualified_hot_leads.csv"      # Score 70-100
+REVIEW_FILE = OUTPUT_DIR / "review_manual_check.csv"         # Score 40-69
+REJECTED_FILE = OUTPUT_DIR / "rejected_with_reasons.csv"     # Score 0-39
 CHECKPOINT_FILE = OUTPUT_DIR / ".checkpoint.json"            # Resume support
 
 # ===========================================
@@ -84,9 +84,9 @@ OPENAI_API_BASE = "https://api.openai.com/v1"
 # ===========================================
 # Qualification Thresholds
 # ===========================================
-SCORE_HOT_LEAD = 8      # Score >= 8 → Hot lead (auto-enrich if enabled)
-SCORE_REVIEW = 4        # Score 4-7 → Manual review needed
-# Score < 4 → Rejected
+SCORE_HOT_LEAD = 70     # Score >= 70 → Hot lead (auto-enrich if enabled)
+SCORE_REVIEW = 40       # Score 40-69 → Manual review needed
+# Score < 40 → Rejected
 
 # ===========================================
 # Minimal Universal B2B Negative Keywords

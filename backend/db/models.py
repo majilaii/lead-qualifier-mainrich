@@ -211,6 +211,34 @@ class SearchTemplate(Base):
     profile: Mapped["Profile"] = relationship(back_populates="templates")
 
 
+class EnrichmentJob(Base):
+    """Tracks batch enrichment / re-crawl jobs for progress & state persistence."""
+    __tablename__ = "enrichment_jobs"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    # What we're doing: recrawl_contacts | requalify | full_recrawl | linkedin
+    action: Mapped[str] = mapped_column(String(50))
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | running | complete | error | cancelled
+    # Scope
+    lead_ids: Mapped[list] = mapped_column(JSON, default=list)  # UUIDs of leads to process
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    processed: Mapped[int] = mapped_column(Integer, default=0)
+    succeeded: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    # Per-lead results for replay
+    results: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # [{lead_id, status, message, ...}]
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_enrichment_jobs_user_status", "user_id", "status"),
+    )
+
+
 class LeadSnapshot(Base):
     """Historical snapshots of lead scores for re-qualification tracking."""
     __tablename__ = "lead_snapshots"

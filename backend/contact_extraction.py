@@ -46,9 +46,21 @@ Focus on DECISION MAKERS — prioritize these roles:
 For each person found, extract:
 - full_name: Their full name
 - job_title: Their title/role
-- email: Their email address (if shown)
-- phone: Their phone number (if shown)
+- email: Their email address (see rules below)
+- phone: Their phone number (if shown anywhere on the page)
 - linkedin_url: LinkedIn profile URL (if linked)
+
+EMAIL EXTRACTION RULES (IMPORTANT):
+1. If the person's email is explicitly shown, use it.
+2. If the page has a GENERAL contact email (e.g. info@domain.com, sales@domain.com, contact@domain.com), include it as the person's email — it's better than nothing.
+3. If you see OTHER people's emails on the page showing a pattern (e.g. firstname@domain.com or f.lastname@domain.com), try to construct this person's email following the same pattern.
+4. If the email uses [at] or (at) or similar obfuscation, reconstruct it (e.g. "john [at] company [dot] com" → "john@company.com").
+
+PHONE EXTRACTION RULES:
+1. If the person's direct phone is shown, use it.
+2. If there is a general company phone number on the page, include it for the most senior person.
+3. Phone numbers should include country code if visible (e.g. +62, +65, +1).
+4. Include both landline and mobile if available.
 
 COMPANY: {company_name}
 DOMAIN: {domain}
@@ -70,10 +82,10 @@ Example:
 
 IMPORTANT:
 - Only include people who actually appear in the content
-- Do NOT make up names or emails
+- Do NOT invent names that aren't on the page
 - Include ALL people found, not just decision-makers
-- If an email is partially visible (e.g. "john [at] company [dot] com"), reconstruct it
-- Phone numbers should include country code if visible
+- It is OK to assign a general company email/phone to a person if no personal one exists
+- Prefer returning an email even if it's generic (info@, sales@) over returning null
 """
 
 
@@ -98,8 +110,8 @@ async def extract_contacts_from_content(
     if not page_content or len(page_content.strip()) < 50:
         return []
 
-    # Truncate content to avoid token limits
-    content = page_content[:8000]
+    # Truncate content to avoid token limits (8k model, ~4 chars/token ≈ 2k tokens of content)
+    content = page_content[:12000]
 
     prompt = EXTRACTION_PROMPT.format(
         company_name=company_name,
@@ -174,9 +186,17 @@ async def extract_contacts_from_content(
             ))
 
         logger.info(
-            "Extracted %d contacts from %s (%s)",
+            "Extracted %d contacts from %s (%s) — %d with email, %d with phone",
             len(contacts), domain, company_name,
+            sum(1 for c in contacts if c.email),
+            sum(1 for c in contacts if c.phone),
         )
+        for c in contacts:
+            logger.info(
+                "  → %s | %s | email=%s | phone=%s",
+                c.full_name, c.job_title or "N/A",
+                c.email or "NONE", c.phone or "NONE",
+            )
         return contacts
 
     except (json.JSONDecodeError, KeyError, TypeError) as e:

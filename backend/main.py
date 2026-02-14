@@ -129,7 +129,7 @@ async def process_lead(
         # Website failed to crawl - send to REVIEW queue, not rejected.
         # Crawl failure doesn't mean the company is irrelevant — it often means
         # the site has bot protection (Cloudflare, etc.)
-        score = 5  # Default to review range (4-7)
+        score = 50  # Default to review range (40-69)
         
         processed = ProcessedLead(
             company_name=lead.company_name,
@@ -157,7 +157,7 @@ async def process_lead(
             logger.error("LLM qualification error for %s: %s", lead.company_name, e)
             qual_result = QualificationResult(
                 is_qualified=False,
-                confidence_score=3,
+                confidence_score=25,
                 reasoning=f"LLM analysis failed: {type(e).__name__}: {str(e)[:100]}",
                 red_flags=["AI qualification error - needs manual review"]
             )
@@ -312,7 +312,7 @@ Concurrency: {CONCURRENCY_LIMIT}
                     contact_name=lead.contact_name,
                     linkedin_profile_url=lead.linkedin_profile_url,
                     qualification_tier=QualificationTier.REVIEW,
-                    confidence_score=3,
+                    confidence_score=25,
                     is_qualified=False,
                     reasoning=f"Processing error: {type(e).__name__}: {str(e)[:100]}",
                     crawl_success=False,
