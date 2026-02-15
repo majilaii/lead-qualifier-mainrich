@@ -1235,7 +1235,7 @@ export default function ChatInterface() {
       disqualifiers: t.search_context.disqualifiers || null,
       geographicRegion: t.search_context.geographicRegion || t.search_context.geographic_region || null,
       countryCode: t.search_context.countryCode || t.search_context.country_code || null,
-      geoBounds: t.search_context.geoBounds || t.search_context.geo_bounds || null,
+      geoBounds: (t.search_context.geoBounds || t.search_context.geo_bounds || null) as [number, number, number, number] | null,
     };
     setExtractedContext(ctx);
     setReadiness({ industry: true, companyProfile: true, technologyFocus: true, qualifyingCriteria: true, isReady: true });
