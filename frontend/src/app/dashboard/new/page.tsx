@@ -231,7 +231,7 @@ export default function NewPipelinePage() {
       <div>
         <button
           onClick={() => router.push(localStorage.getItem("lastDashboardTab") || "/dashboard")}
-          className="font-mono text-[10px] text-text-dim hover:text-text-muted uppercase tracking-[0.15em] transition-colors cursor-pointer"
+          className="font-mono text-[12px] text-text-dim hover:text-text-muted uppercase tracking-[0.15em] transition-colors cursor-pointer"
         >
           &larr; Dashboard
         </button>
@@ -274,7 +274,7 @@ export default function NewPipelinePage() {
           {/* Templates */}
           {templates.length > 0 && (
             <div className="space-y-2">
-              <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted">
+              <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted">
                 Load from template
               </label>
               <div className="flex flex-wrap gap-2">
@@ -282,7 +282,7 @@ export default function NewPipelinePage() {
                   <button
                     key={tmpl.id}
                     onClick={() => loadTemplate(tmpl)}
-                    className="font-mono text-[10px] border border-border text-text-muted hover:text-secondary hover:border-secondary/30 px-3 py-2 rounded-lg transition-colors cursor-pointer"
+                    className="font-mono text-[12px] border border-border text-text-muted hover:text-secondary hover:border-secondary/30 px-3 py-2 rounded-lg transition-colors cursor-pointer"
                   >
                     {tmpl.name}
                   </button>
@@ -294,7 +294,7 @@ export default function NewPipelinePage() {
           {/* Form */}
           <div className="bg-surface-2 border border-border rounded-xl p-6 space-y-5">
             <div>
-              <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+              <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                 Pipeline Name <span className="text-text-dim">(optional)</span>
               </label>
               <input
@@ -308,7 +308,7 @@ export default function NewPipelinePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Industry <span className="text-red-400">*</span>
                 </label>
                 <input
@@ -321,7 +321,7 @@ export default function NewPipelinePage() {
               </div>
 
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Technology / Products <span className="text-red-400">*</span>
                 </label>
                 <input
@@ -335,7 +335,7 @@ export default function NewPipelinePage() {
             </div>
 
             <div>
-              <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+              <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                 Company Profile
               </label>
               <input
@@ -349,7 +349,7 @@ export default function NewPipelinePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Qualifying Criteria
                 </label>
                 <textarea
@@ -362,7 +362,7 @@ export default function NewPipelinePage() {
               </div>
 
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Disqualifiers
                 </label>
                 <textarea
@@ -377,7 +377,7 @@ export default function NewPipelinePage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Geographic Region
                 </label>
                 <input
@@ -390,7 +390,7 @@ export default function NewPipelinePage() {
               </div>
 
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Country Code
                 </label>
                 <input
@@ -404,7 +404,7 @@ export default function NewPipelinePage() {
               </div>
 
               <div>
-                <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                   Max Leads
                 </label>
                 <input
@@ -503,7 +503,7 @@ export default function NewPipelinePage() {
             )}
           </div>
 
-          <p className="font-mono text-[10px] text-text-dim text-center">
+          <p className="font-mono text-[12px] text-text-dim text-center">
             AI agents will search the web, crawl company sites, and qualify leads automatically.
           </p>
         </div>
@@ -524,7 +524,7 @@ export default function NewPipelinePage() {
             Describe your ideal customer in plain language. The AI assistant will ask clarifying
             questions and build the perfect search configuration for you.
           </p>
-          <p className="font-mono text-[10px] text-text-dim">
+          <p className="font-mono text-[12px] text-text-dim">
             Best for: new ICPs, exploring unfamiliar markets, first-time users
           </p>
           <Link
@@ -542,7 +542,7 @@ export default function NewPipelinePage() {
         <div className="space-y-6">
           <div className="bg-surface-2 border border-border rounded-xl p-6 space-y-5">
             <div>
-              <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+              <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted block mb-2">
                 Domains <span className="text-red-400">*</span>
                 <span className="text-text-dim ml-2">(one per line)</span>
               </label>
@@ -553,20 +553,20 @@ export default function NewPipelinePage() {
                 rows={8}
                 className="w-full bg-surface-3 border border-border rounded-lg px-4 py-3 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/40 transition-colors resize-none"
               />
-              <p className="font-mono text-[10px] text-text-dim mt-2">
+              <p className="font-mono text-[12px] text-text-dim mt-2">
                 {bulkDomains.split("\n").filter((d) => d.trim()).length} domains entered
               </p>
             </div>
 
             {/* Optional: ICP context for scoring */}
             <details className="group">
-              <summary className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted cursor-pointer hover:text-text-primary transition-colors">
+              <summary className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-muted cursor-pointer hover:text-text-primary transition-colors">
                 + Add ICP context for better scoring
               </summary>
               <div className="mt-4 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-dim block mb-2">
+                    <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-dim block mb-2">
                       Industry
                     </label>
                     <input
@@ -578,7 +578,7 @@ export default function NewPipelinePage() {
                     />
                   </div>
                   <div>
-                    <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-dim block mb-2">
+                    <label className="font-mono text-[12px] uppercase tracking-[0.2em] text-text-dim block mb-2">
                       Technology
                     </label>
                     <input

@@ -81,7 +81,7 @@ export default function UpgradeModal() {
             <>
               <div className="inline-flex items-center gap-2 bg-amber-500/10 border border-amber-500/20 rounded-full px-4 py-1.5 mb-4">
                 <span className="text-amber-400 text-xs">⚠</span>
-                <span className="font-mono text-[10px] text-amber-400 uppercase tracking-wider">
+                <span className="font-mono text-[12px] text-amber-400 uppercase tracking-wider">
                   Quota Reached
                 </span>
               </div>
@@ -124,7 +124,7 @@ export default function UpgradeModal() {
               >
                 {plan.highlight && (
                   <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
-                    <span className="bg-secondary text-void font-mono text-[8px] font-bold uppercase tracking-[0.2em] px-2.5 py-0.5 rounded-full">
+                    <span className="bg-secondary text-void font-mono text-[12px] font-bold uppercase tracking-[0.2em] px-2.5 py-0.5 rounded-full">
                       Recommended
                     </span>
                   </div>
@@ -152,7 +152,7 @@ export default function UpgradeModal() {
                     }
                   }}
                   disabled={isCurrent || !isUpgrade}
-                  className={`w-full text-center font-mono text-[10px] font-bold uppercase tracking-[0.15em] py-3 rounded-lg transition-colors mb-4 cursor-pointer ${
+                  className={`w-full text-center font-mono text-[12px] font-bold uppercase tracking-[0.15em] py-3 rounded-lg transition-colors mb-4 cursor-pointer ${
                     isCurrent
                       ? "bg-secondary/10 text-secondary border border-secondary/20"
                       : isUpgrade
@@ -177,7 +177,7 @@ export default function UpgradeModal() {
                       >
                         <polyline points="20 6 9 17 4 12" />
                       </svg>
-                      <span className="font-sans text-[11px] text-text-secondary">
+                      <span className="font-sans text-[12px] text-text-secondary">
                         {feat}
                       </span>
                     </li>
@@ -188,7 +188,7 @@ export default function UpgradeModal() {
           })}
         </div>
 
-        <p className="text-center mt-6 font-mono text-[9px] text-text-dim uppercase tracking-wider">
+        <p className="text-center mt-6 font-mono text-[12px] text-text-dim uppercase tracking-wider">
           Powered by Stripe · Cancel anytime · SSL encrypted
         </p>
       </div>

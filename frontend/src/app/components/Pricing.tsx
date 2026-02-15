@@ -127,7 +127,7 @@ export default function Pricing() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-16">
-          <span className="font-mono text-[10px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
+          <span className="font-mono text-[12px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
             Pricing
           </span>
           <h2 className="font-mono text-2xl md:text-3xl font-bold text-text-primary tracking-tight mb-4">
@@ -156,7 +156,7 @@ export default function Pricing() {
             >
               {plan.highlight && (
                 <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                  <span className="bg-secondary text-void font-mono text-[9px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full">
+                  <span className="bg-secondary text-void font-mono text-[14px] font-bold uppercase tracking-[0.2em] px-3 py-1 rounded-full">
                     Most Popular
                   </span>
                 </div>
@@ -254,7 +254,7 @@ export default function Pricing() {
         </div>
 
         {/* Bottom note */}
-        <p className="text-center mt-10 font-mono text-[10px] uppercase tracking-[0.2em] text-text-dim">
+        <p className="text-center mt-10 font-mono text-[12px] uppercase tracking-[0.2em] text-text-dim">
           All plans include SSL encryption · GDPR compliant · 99.9% uptime SLA
         </p>
       </div>

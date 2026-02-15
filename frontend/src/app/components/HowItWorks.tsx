@@ -55,14 +55,14 @@ export default function HowItWorks() {
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="text-center mb-16">
-          <span className="font-mono text-[10px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
+          <span className="font-mono text-[12px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
             How It Works
           </span>
           <h2 className="font-mono text-2xl md:text-3xl font-bold text-text-primary tracking-tight mb-4">
             Three Steps. Zero Busywork.
           </h2>
           <p className="font-sans text-sm text-text-secondary max-w-lg mx-auto">
-            From a list of names to qualified, research-backed sales targets — in
+            From a list of names to qualified, research-backed sales targets in
             minutes, not weeks.
           </p>
         </div>
@@ -93,7 +93,7 @@ export default function HowItWorks() {
               <h3 className="font-mono text-sm font-semibold text-text-primary uppercase tracking-[0.12em] mb-3">
                 {step.title}
               </h3>
-              <p className="font-sans text-xs text-text-secondary leading-relaxed mb-4">
+              <p className="font-sans text-[14px] text-text-secondary leading-relaxed mb-4">
                 {step.description}
               </p>
 
@@ -102,7 +102,7 @@ export default function HowItWorks() {
                 {step.detail.split(" · ").map((chip) => (
                   <span
                     key={chip}
-                    className="inline-block font-mono text-[9px] tracking-wider uppercase px-2 py-0.5 rounded border border-border-dim text-text-dim"
+                    className="inline-block font-mono text-[12px] tracking-wider uppercase px-2 py-0.5 rounded border border-border-dim text-text-dim"
                   >
                     {chip}
                   </span>

@@ -130,10 +130,10 @@ export default function HuntsPage() {
                 </h3>
                 {confirmDelete === s.id ? (
                   <span className="flex items-center gap-1.5 ml-2" onClick={(e) => e.stopPropagation()}>
-                    <span role="button" onClick={() => handleDelete(s.id)} className={`font-mono text-[9px] text-red-400 hover:text-red-300 transition-colors cursor-pointer ${deleting === s.id ? "opacity-50 pointer-events-none" : ""}`}>
+                    <span role="button" onClick={() => handleDelete(s.id)} className={`font-mono text-[12px] text-red-400 hover:text-red-300 transition-colors cursor-pointer ${deleting === s.id ? "opacity-50 pointer-events-none" : ""}`}>
                       {deleting === s.id ? "…" : "Confirm"}
                     </span>
-                    <span role="button" onClick={() => setConfirmDelete(null)} className="font-mono text-[9px] text-text-dim hover:text-text-muted transition-colors cursor-pointer">Cancel</span>
+                    <span role="button" onClick={() => setConfirmDelete(null)} className="font-mono text-[12px] text-text-dim hover:text-text-muted transition-colors cursor-pointer">Cancel</span>
                   </span>
                 ) : (
                   <span
@@ -151,18 +151,18 @@ export default function HuntsPage() {
               </div>
 
               {s.technology_focus && (
-                <p className="font-sans text-[11px] text-text-muted leading-relaxed mb-3 line-clamp-2">
+                <p className="font-sans text-[12px] text-text-muted leading-relaxed mb-3 line-clamp-2">
                   {s.technology_focus}
                 </p>
               )}
 
               {s.qualifying_criteria && (
-                <p className="font-sans text-[10px] text-text-dim leading-relaxed mb-3 line-clamp-1">
+                <p className="font-sans text-[12px] text-text-dim leading-relaxed mb-3 line-clamp-1">
                   {s.qualifying_criteria}
                 </p>
               )}
 
-              <div className="flex items-center gap-3 mb-3 font-mono text-[10px]">
+              <div className="flex items-center gap-3 mb-3 font-mono text-[12px]">
                 <span className="text-hot">{s.hot} hot</span>
                 <span className="text-text-dim">·</span>
                 <span className="text-review">{s.review} review</span>
@@ -172,7 +172,7 @@ export default function HuntsPage() {
 
               <div className="flex items-center justify-between">
                 {s.created_at && (
-                  <span className="font-mono text-[9px] text-text-dim">
+                  <span className="font-mono text-[12px] text-text-dim">
                     {new Date(s.created_at).toLocaleDateString()}
                   </span>
                 )}
@@ -182,7 +182,7 @@ export default function HuntsPage() {
                     Loading…
                   </span>
                 ) : (
-                  <span className="font-mono text-[10px] text-secondary/60 group-hover:text-secondary uppercase tracking-[0.15em] transition-colors">
+                  <span className="font-mono text-[12px] text-secondary/60 group-hover:text-secondary uppercase tracking-[0.15em] transition-colors">
                     Resume →
                   </span>
                 )}

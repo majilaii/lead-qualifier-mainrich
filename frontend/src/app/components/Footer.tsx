@@ -17,14 +17,14 @@ export default function Footer() {
               AI-Powered B2B Lead Discovery & Qualification Pipeline. Built for
               any B2B seller. Designed to scale.
             </p>
-            <div className="mt-4 font-mono text-[10px] tracking-[0.2em] text-text-dim uppercase">
+            <div className="mt-4 font-mono text-[12px] tracking-[0.2em] text-text-dim uppercase">
               Powered by Hunt AI
             </div>
           </div>
 
           {/* Links */}
           <div>
-            <h4 className="text-[10px] uppercase tracking-[0.3em] text-secondary/50 mb-4">
+            <h4 className="text-[12px] uppercase tracking-[0.3em] text-secondary/50 mb-4">
               Product
             </h4>
             <ul className="space-y-2">
@@ -48,7 +48,7 @@ export default function Footer() {
 
           {/* More */}
           <div>
-            <h4 className="text-[10px] uppercase tracking-[0.3em] text-secondary/50 mb-4">
+            <h4 className="text-[12px] uppercase tracking-[0.3em] text-secondary/50 mb-4">
               Company
             </h4>
             <ul className="space-y-2">
@@ -74,13 +74,13 @@ export default function Footer() {
 
         {/* Bottom */}
         <div className="border-t border-border-dim pt-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <p className="font-mono text-[10px] tracking-[0.2em] text-text-dim uppercase">
+          <p className="font-mono text-[12px] tracking-[0.2em] text-text-dim uppercase">
             &copy; {new Date().getFullYear()} Hunt. All rights
             reserved.
           </p>
           <div className="flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-secondary/60 animate-pulse" />
-            <span className="font-mono text-[10px] tracking-[0.2em] text-text-muted uppercase">
+            <span className="font-mono text-[12px] tracking-[0.2em] text-text-muted uppercase">
               System Online
             </span>
           </div>

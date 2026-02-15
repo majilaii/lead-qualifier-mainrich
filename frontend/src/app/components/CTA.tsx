@@ -45,7 +45,7 @@ export default function CTA() {
         }}
       >
         {/* Badge */}
-        <div className="inline-block bg-void border border-secondary/20 rounded-full px-5 py-2 mb-8 font-mono text-[11px]">
+        <div className="inline-block bg-void border border-secondary/20 rounded-full px-5 py-2 mb-8 font-mono text-[12px]">
           <span className="text-secondary/60">✦</span>{" "}
           <span className="text-text-muted">Free to try · No credit card required</span>
         </div>
@@ -63,7 +63,7 @@ export default function CTA() {
         </p>
 
         {/* Highlights */}
-        <div className="flex flex-wrap items-center justify-center gap-6 mb-10 font-mono text-[10px] uppercase tracking-[0.2em] text-text-dim">
+        <div className="flex flex-wrap items-center justify-center gap-6 mb-10 font-mono text-[12px] uppercase tracking-[0.2em] text-text-dim">
           <span>
             Free tier: <span className="text-text-secondary">50 leads/mo</span>
           </span>

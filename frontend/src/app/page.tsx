@@ -1,5 +1,5 @@
 import Navbar from "./components/Navbar";
-import InfiniteRolodex from "./components/InfiniteRolodex";
+import HeroSection from "./components/HeroSection";
 import StatsBar from "./components/StatsBar";
 import HowItWorks from "./components/HowItWorks";
 import Pipeline from "./components/Pipeline";
@@ -13,7 +13,7 @@ export default function Home() {
     <>
       <Navbar />
       <main>
-        <InfiniteRolodex />
+        <HeroSection />
         <StatsBar />
         <HowItWorks />
         <Pipeline />

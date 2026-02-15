@@ -411,7 +411,7 @@ export default function LeadDrawer({
         <div className="sticky top-0 bg-surface-1/95 backdrop-blur-md border-b border-border-dim px-6 py-4 flex items-center justify-between z-10">
           <div className="flex items-center gap-3">
             <span
-              className={`inline-flex items-center px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-[0.12em] border ${tier.bg} ${tier.text}`}
+              className={`inline-flex items-center px-2.5 py-1 rounded-md text-[12px] font-mono uppercase tracking-[0.12em] border ${tier.bg} ${tier.text}`}
             >
               {tier.label}
             </span>
@@ -422,7 +422,7 @@ export default function LeadDrawer({
             )}
             {/* Contacts found badge */}
             {contacts.length > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-green-400/10 border border-green-400/20 text-green-400">
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[12px] font-mono bg-green-400/10 border border-green-400/20 text-green-400">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                   <circle cx="9" cy="7" r="4" />
@@ -465,12 +465,12 @@ export default function LeadDrawer({
                 />
               )}
               <div>
-                <h2 className="font-mono text-base font-bold text-text-primary mb-1">
+                <h2 className="font-mono text-xs font-bold text-text-primary mb-1">
                   {lead.company_name}
                 </h2>
                 <p className="font-mono text-xs text-text-muted">{lead.domain}</p>
                 {lead.country && (
-                  <p className="font-mono text-[10px] text-text-dim mt-1">
+                  <p className="font-mono text-[12px] text-text-dim mt-1">
                     {lead.country}
                   </p>
                 )}
@@ -480,7 +480,7 @@ export default function LeadDrawer({
             {/* Score gauge */}
             <div className="bg-surface-2 border border-border rounded-xl p-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em]">
+                <span className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">
                   Score
                 </span>
                 <span className="font-mono text-xl font-bold text-text-primary">
@@ -503,7 +503,7 @@ export default function LeadDrawer({
 
             {/* Status selector */}
             <div>
-              <label className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2 block">
+              <label className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em] mb-2 block">
                 Pipeline Status
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -512,7 +512,7 @@ export default function LeadDrawer({
                     key={opt.value}
                     onClick={() => updateStatus(opt.value)}
                     disabled={statusUpdating}
-                    className={`font-mono text-[10px] px-3 py-1.5 rounded-md border uppercase tracking-[0.1em] transition-all cursor-pointer ${
+                    className={`font-mono text-[12px] px-3 py-1.5 rounded-md border uppercase tracking-[0.1em] transition-all cursor-pointer ${
                       lead.status === opt.value
                         ? "bg-secondary/10 border-secondary/30 text-secondary"
                         : "border-border text-text-muted hover:border-border-bright hover:text-text-primary"
@@ -523,16 +523,16 @@ export default function LeadDrawer({
                 ))}
               </div>
               {saving && (
-                <span className="font-mono text-[9px] text-text-dim mt-1 block">Saving…</span>
+                <span className="font-mono text-[12px] text-text-dim mt-1 block">Saving…</span>
               )}
               {saved && (
-                <span className="font-mono text-[9px] text-green-400 mt-1 block">Saved ✓</span>
+                <span className="font-mono text-[12px] text-green-400 mt-1 block">Saved ✓</span>
               )}
             </div>
 
             {/* Notes */}
             <div className="bg-surface-2 border border-border rounded-xl p-4">
-              <h3 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2">
+              <h3 className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em] mb-2">
                 Notes
               </h3>
               <textarea
@@ -546,7 +546,7 @@ export default function LeadDrawer({
 
             {/* Deal Value */}
             <div className="bg-surface-2 border border-border rounded-xl p-4">
-              <h3 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-2">
+              <h3 className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em] mb-2">
                 Deal Value
               </h3>
               <div className="flex items-center gap-2">
@@ -567,7 +567,7 @@ export default function LeadDrawer({
               <div className="grid grid-cols-2 gap-3">
                 {lead.industry_category && (
                   <div className="bg-surface-2 border border-border rounded-lg p-3">
-                    <p className="font-mono text-[9px] text-text-dim uppercase tracking-[0.15em] mb-1">
+                    <p className="font-mono text-[12px] text-text-dim uppercase tracking-[0.15em] mb-1">
                       Industry
                     </p>
                     <p className="font-mono text-xs text-text-primary">
@@ -577,7 +577,7 @@ export default function LeadDrawer({
                 )}
                 {lead.hardware_type && (
                   <div className="bg-surface-2 border border-border rounded-lg p-3">
-                    <p className="font-mono text-[9px] text-text-dim uppercase tracking-[0.15em] mb-1">
+                    <p className="font-mono text-[12px] text-text-dim uppercase tracking-[0.15em] mb-1">
                       Product Type
                     </p>
                     <p className="font-mono text-xs text-text-primary">
@@ -670,18 +670,18 @@ export default function LeadDrawer({
                         <span className="font-mono text-xs font-semibold text-text-primary">
                           {c.full_name || "Unknown"}
                         </span>
-                        <span className="font-mono text-[9px] text-text-dim uppercase tracking-wider">
+                        <span className="font-mono text-[12px] text-text-dim uppercase tracking-wider">
                           {c.source}
                         </span>
                       </div>
                       {c.job_title && (
-                        <p className="font-mono text-[10px] text-text-muted">{c.job_title}</p>
+                        <p className="font-mono text-[12px] text-text-muted">{c.job_title}</p>
                       )}
                       <div className="flex flex-wrap gap-2 mt-1">
                         {c.email && (
                           <a
                             href={`mailto:${c.email}`}
-                            className="font-mono text-[10px] text-secondary hover:text-secondary/80 transition-colors"
+                            className="font-mono text-[12px] text-secondary hover:text-secondary/80 transition-colors"
                           >
                             {c.email}
                           </a>
@@ -689,7 +689,7 @@ export default function LeadDrawer({
                         {c.phone && (
                           <a
                             href={`tel:${c.phone}`}
-                            className="font-mono text-[10px] text-text-muted hover:text-text-primary transition-colors"
+                            className="font-mono text-[12px] text-text-muted hover:text-text-primary transition-colors"
                           >
                             {c.phone}
                           </a>
@@ -699,7 +699,7 @@ export default function LeadDrawer({
                             href={c.linkedin_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="font-mono text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                            className="font-mono text-[12px] text-blue-400 hover:text-blue-300 transition-colors"
                           >
                             LinkedIn ↗
                           </a>
@@ -709,7 +709,7 @@ export default function LeadDrawer({
                   ))}
                 </div>
               ) : (
-                <p className="font-mono text-[10px] text-text-dim">
+                <p className="font-mono text-[12px] text-text-dim">
                   No contacts extracted yet.
                 </p>
               )}
@@ -733,14 +733,14 @@ export default function LeadDrawer({
             <Section title="Enrichment Actions">
               {/* Active enrichment progress */}
               {enrichJobProgress && (
-                <div className="mb-3 px-3 py-2.5 rounded-lg font-mono text-[10px] border border-secondary/20 bg-secondary/5 text-secondary flex items-center gap-2">
+                <div className="mb-3 px-3 py-2.5 rounded-lg font-mono text-[12px] border border-secondary/20 bg-secondary/5 text-secondary flex items-center gap-2">
                   <span className="w-3 h-3 border-2 border-secondary/40 border-t-secondary rounded-full animate-spin flex-shrink-0" />
                   {enrichJobProgress}
                 </div>
               )}
 
               {recrawlResult && (
-                <div className={`mb-3 px-3 py-2 rounded-lg font-mono text-[10px] border ${
+                <div className={`mb-3 px-3 py-2 rounded-lg font-mono text-[12px] border ${
                   recrawlResult.type === "success"
                     ? "bg-green-400/5 border-green-400/20 text-green-400"
                     : "bg-red-400/5 border-red-400/20 text-red-400"
@@ -769,10 +769,10 @@ export default function LeadDrawer({
                     )}
                   </span>
                   <div className="text-left flex-1">
-                    <p className="font-mono text-[11px] text-text-primary group-hover:text-secondary transition-colors">
+                    <p className="font-mono text-[12px] text-text-primary group-hover:text-secondary transition-colors">
                       Re-crawl Website for Contacts
                     </p>
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">
                       Crawl homepage, /contact, /about &amp; /team pages again
                     </p>
                   </div>
@@ -794,10 +794,10 @@ export default function LeadDrawer({
                     )}
                   </span>
                   <div className="text-left flex-1">
-                    <p className="font-mono text-[11px] text-text-primary group-hover:text-blue-400 transition-colors">
+                    <p className="font-mono text-[12px] text-text-primary group-hover:text-blue-400 transition-colors">
                       Find Decision Makers (LinkedIn)
                     </p>
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">
                       Search LinkedIn for C-suite, VPs &amp; key contacts
                     </p>
                   </div>
@@ -820,10 +820,10 @@ export default function LeadDrawer({
                     )}
                   </span>
                   <div className="text-left flex-1">
-                    <p className="font-mono text-[11px] text-text-primary group-hover:text-amber-400 transition-colors">
+                    <p className="font-mono text-[12px] text-text-primary group-hover:text-amber-400 transition-colors">
                       Re-qualify Lead
                     </p>
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">
                       Re-crawl &amp; re-score with AI against your ICP criteria
                     </p>
                   </div>
@@ -846,10 +846,10 @@ export default function LeadDrawer({
                     )}
                   </span>
                   <div className="text-left flex-1">
-                    <p className="font-mono text-[11px] text-text-primary group-hover:text-purple-400 transition-colors">
+                    <p className="font-mono text-[12px] text-text-primary group-hover:text-purple-400 transition-colors">
                       Full Re-crawl (Score + Contacts)
                     </p>
-                    <p className="font-sans text-[10px] text-text-dim mt-0.5">
+                    <p className="font-sans text-[12px] text-text-dim mt-0.5">
                       Complete re-crawl: re-qualify and extract contacts
                     </p>
                   </div>
@@ -864,14 +864,14 @@ export default function LeadDrawer({
                   href={lead.website_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex-1 inline-flex items-center justify-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:bg-white/85 transition-colors"
+                  className="flex-1 inline-flex items-center justify-center gap-2 bg-text-primary text-void font-mono text-[12px] font-bold uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:bg-white/85 transition-colors"
                 >
                   Visit Website ↗
                 </a>
               )}
               <button
                 onClick={onClose}
-                className="flex-1 inline-flex items-center justify-center gap-2 bg-surface-3 border border-border text-text-muted font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer"
+                className="flex-1 inline-flex items-center justify-center gap-2 bg-surface-3 border border-border text-text-muted font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer"
               >
                 Close
               </button>
@@ -965,7 +965,7 @@ function Section({
 }) {
   return (
     <div className="bg-surface-2 border border-border rounded-xl p-4">
-      <h3 className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em] mb-3">
+      <h3 className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em] mb-3">
         {title}
       </h3>
       {children}
@@ -976,7 +976,7 @@ function Section({
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="font-mono text-[10px] text-text-dim uppercase tracking-[0.15em]">
+      <span className="font-mono text-[12px] text-text-dim uppercase tracking-[0.15em]">
         {label}
       </span>
       <span className="font-mono text-xs text-text-primary">{value}</span>

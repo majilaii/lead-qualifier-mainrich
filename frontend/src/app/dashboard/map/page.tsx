@@ -249,10 +249,10 @@ export default function MapPage() {
         <div className="px-4 py-3 border-b border-border-dim bg-surface-2/50">
           <div className="flex items-center gap-2 mb-2">
             <span className={`w-2 h-2 rounded-full ${isPipelineRunning ? "bg-green-400 animate-pulse" : "bg-text-dim"}`} />
-            <span className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em]">{isPipelineRunning ? "Live Pipeline" : "Lead Map"}</span>
-            <span className="font-mono text-[10px] text-text-primary ml-auto">{filtered.length} / {allLeads.length} leads</span>
+            <span className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">{isPipelineRunning ? "Live Pipeline" : "Lead Map"}</span>
+            <span className="font-mono text-[12px] text-text-primary ml-auto">{filtered.length} / {allLeads.length} leads</span>
           </div>
-          <div className="flex items-center gap-3 font-mono text-[10px]">
+          <div className="flex items-center gap-3 font-mono text-[12px]">
             <span className="text-hot">{tierCounts.hot} hot</span>
             <span className="text-review">{tierCounts.review} review</span>
             <span className="text-text-dim">{tierCounts.rejected} rejected</span>
@@ -263,26 +263,26 @@ export default function MapPage() {
         <div className="px-4 py-3 border-b border-border-dim space-y-2">
           <div className="flex gap-1.5">
             {(["hot", "review", "rejected"] as const).map((tier) => (
-              <button key={tier} onClick={() => toggleTier(tier)} className={`font-mono text-[9px] px-2.5 py-1 rounded-md border uppercase tracking-[0.1em] transition-all cursor-pointer ${tierFilter.has(tier) ? tier === "hot" ? "bg-hot/10 border-hot/20 text-hot" : tier === "review" ? "bg-review/10 border-review/20 text-review" : "bg-text-dim/10 border-text-dim/20 text-text-dim" : "border-border text-text-dim/50"}`}>{tier}</button>
+              <button key={tier} onClick={() => toggleTier(tier)} className={`font-mono text-[12px] px-2.5 py-1 rounded-md border uppercase tracking-[0.1em] transition-all cursor-pointer ${tierFilter.has(tier) ? tier === "hot" ? "bg-hot/10 border-hot/20 text-hot" : tier === "review" ? "bg-review/10 border-review/20 text-review" : "bg-text-dim/10 border-text-dim/20 text-text-dim" : "border-border text-text-dim/50"}`}>{tier}</button>
             ))}
           </div>
-          <input type="text" placeholder="Search leads or hunts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-surface-2 border border-border rounded-lg px-3 py-1.5 font-mono text-[10px] text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors" />
+          <input type="text" placeholder="Search leads or hunts..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full bg-surface-2 border border-border rounded-lg px-3 py-1.5 font-mono text-[12px] text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/30 transition-colors" />
           <div className="flex items-center gap-2">
-            <button onClick={showAllGroups} className="font-mono text-[9px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Show All</button>
+            <button onClick={showAllGroups} className="font-mono text-[12px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Show All</button>
             <span className="text-text-dim/30">·</span>
-            <button onClick={hideAllGroups} className="font-mono text-[9px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Hide All</button>
+            <button onClick={hideAllGroups} className="font-mono text-[12px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Hide All</button>
           </div>
         </div>
         {/* Tabs */}
         <div className="flex border-b border-border-dim">
-          <button onClick={() => setSidebarTab("groups")} className={`flex-1 font-mono text-[9px] uppercase tracking-[0.15em] py-2 transition-colors cursor-pointer ${sidebarTab === "groups" ? "text-secondary border-b-2 border-secondary" : "text-text-dim hover:text-text-muted"}`}>By Hunt ({huntGroups.length})</button>
-          <button onClick={() => setSidebarTab("all")} className={`flex-1 font-mono text-[9px] uppercase tracking-[0.15em] py-2 transition-colors cursor-pointer ${sidebarTab === "all" ? "text-secondary border-b-2 border-secondary" : "text-text-dim hover:text-text-muted"}`}>All Leads ({filtered.length})</button>
+          <button onClick={() => setSidebarTab("groups")} className={`flex-1 font-mono text-[12px] uppercase tracking-[0.15em] py-2 transition-colors cursor-pointer ${sidebarTab === "groups" ? "text-secondary border-b-2 border-secondary" : "text-text-dim hover:text-text-muted"}`}>By Hunt ({huntGroups.length})</button>
+          <button onClick={() => setSidebarTab("all")} className={`flex-1 font-mono text-[12px] uppercase tracking-[0.15em] py-2 transition-colors cursor-pointer ${sidebarTab === "all" ? "text-secondary border-b-2 border-secondary" : "text-text-dim hover:text-text-muted"}`}>All Leads ({filtered.length})</button>
         </div>
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {sidebarTab === "groups" ? (
             huntGroups.length === 0 ? (
-              <div className="px-4 py-12 text-center"><p className="font-mono text-[10px] text-text-dim">{isPipelineRunning ? "Waiting for qualified leads…" : "No leads yet"}</p></div>
+              <div className="px-4 py-12 text-center"><p className="font-mono text-[12px] text-text-dim">{isPipelineRunning ? "Waiting for qualified leads…" : "No leads yet"}</p></div>
             ) : (
               <div className="divide-y divide-border-dim">
                 {huntGroups.map((group) => {
@@ -296,13 +296,13 @@ export default function MapPage() {
                         <div className="flex items-center gap-2">
                           <button onClick={() => setExpandedGroup(isExpanded ? null : group.searchId)} className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
                             <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isLive ? "animate-pulse" : ""}`} style={{ backgroundColor: color }} />
-                            <span className="font-mono text-[10px] text-text-primary truncate">{group.label}</span>
+                            <span className="font-mono text-[12px] text-text-primary truncate">{group.label}</span>
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={`text-text-dim transition-transform flex-shrink-0 ${isExpanded ? "rotate-90" : ""}`}><path d="M9 18l6-6-6-6" /></svg>
                           </button>
                           <div className="flex items-center gap-1.5 flex-shrink-0">
-                            {group.hot > 0 && <span className="font-mono text-[8px] text-hot bg-hot/10 px-1.5 py-0.5 rounded">{group.hot}</span>}
-                            {group.review > 0 && <span className="font-mono text-[8px] text-review bg-review/10 px-1.5 py-0.5 rounded">{group.review}</span>}
-                            <span className="font-mono text-[8px] text-text-dim">{group.leads.length}</span>
+                            {group.hot > 0 && <span className="font-mono text-[12px] text-hot bg-hot/10 px-1.5 py-0.5 rounded">{group.hot}</span>}
+                            {group.review > 0 && <span className="font-mono text-[12px] text-review bg-review/10 px-1.5 py-0.5 rounded">{group.review}</span>}
+                            <span className="font-mono text-[12px] text-text-dim">{group.leads.length}</span>
                           </div>
                           <button onClick={() => toggleGroup(group.searchId)} className="cursor-pointer flex-shrink-0" title={isHidden ? "Show on map" : "Hide from map"}>
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`transition-colors ${isHidden ? "text-text-dim/40" : "text-text-muted hover:text-secondary"}`}>
@@ -311,20 +311,20 @@ export default function MapPage() {
                           </button>
                         </div>
                         <div className="flex items-center gap-2 mt-1 ml-[18px]">
-                          {group.date && <span className="font-mono text-[8px] text-text-dim">{formatDate(group.date)}</span>}
+                          {group.date && <span className="font-mono text-[12px] text-text-dim">{formatDate(group.date)}</span>}
                           <div className="flex items-center gap-1 ml-auto">
-                            <button onClick={() => showOnlyGroup(group.searchId)} className="font-mono text-[8px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Solo</button>
+                            <button onClick={() => showOnlyGroup(group.searchId)} className="font-mono text-[12px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Solo</button>
                             <span className="text-text-dim/20">·</span>
-                            <button onClick={() => flyToGroup(group)} className="font-mono text-[8px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Focus</button>
+                            <button onClick={() => flyToGroup(group)} className="font-mono text-[12px] text-text-dim hover:text-secondary transition-colors cursor-pointer">Focus</button>
                             {!isLive && (<>
                               <span className="text-text-dim/20">·</span>
                               {confirmDelete === group.searchId ? (
                                 <span className="flex items-center gap-1">
-                                  <button onClick={() => deleteHunt(group.searchId)} className="font-mono text-[8px] text-red-400 hover:text-red-300 transition-colors cursor-pointer">Confirm</button>
-                                  <button onClick={() => setConfirmDelete(null)} className="font-mono text-[8px] text-text-dim hover:text-text-muted transition-colors cursor-pointer">Cancel</button>
+                                  <button onClick={() => deleteHunt(group.searchId)} className="font-mono text-[12px] text-red-400 hover:text-red-300 transition-colors cursor-pointer">Confirm</button>
+                                  <button onClick={() => setConfirmDelete(null)} className="font-mono text-[12px] text-text-dim hover:text-text-muted transition-colors cursor-pointer">Cancel</button>
                                 </span>
                               ) : (
-                                <button onClick={() => setConfirmDelete(group.searchId)} className="font-mono text-[8px] text-text-dim hover:text-red-400 transition-colors cursor-pointer">Delete</button>
+                                <button onClick={() => setConfirmDelete(group.searchId)} className="font-mono text-[12px] text-text-dim hover:text-red-400 transition-colors cursor-pointer">Delete</button>
                               )}
                             </>)}
                           </div>
@@ -336,15 +336,15 @@ export default function MapPage() {
                             <div key={lead.id} className={`flex items-center px-4 py-2 hover:bg-surface-3/50 transition-colors border-b border-border-dim/50 last:border-b-0 ${selectedLead?.id === lead.id ? "bg-surface-3/80" : ""}`}>
                               <button onClick={() => flyToLead(lead)} className="flex-1 min-w-0 text-left cursor-pointer">
                                 <div className="flex items-center justify-between">
-                                  <span className="font-mono text-[10px] text-text-primary truncate flex-1 flex items-center gap-1.5">
+                                  <span className="font-mono text-[12px] text-text-primary truncate flex-1 flex items-center gap-1.5">
                                     {lead.isLive && <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse flex-shrink-0" />}
                                     {lead.company_name}
                                   </span>
-                                  <span className="font-mono text-[10px] font-bold ml-2" style={{ color: DOT_COLORS[lead.tier] }}>{lead.score}</span>
+                                  <span className="font-mono text-[12px] font-bold ml-2" style={{ color: DOT_COLORS[lead.tier] }}>{lead.score}</span>
                                 </div>
                                 <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="font-mono text-[8px] text-text-dim truncate">{lead.domain}</span>
-                                  {lead.country && <span className="font-mono text-[8px] text-text-dim">· {lead.country}</span>}
+                                  <span className="font-mono text-[12px] text-text-dim truncate">{lead.domain}</span>
+                                  {lead.country && <span className="font-mono text-[12px] text-text-dim">· {lead.country}</span>}
                                 </div>
                               </button>
                               {!lead.isLive && (lead.tier === "rejected" || lead.tier === "review") && (
@@ -363,7 +363,7 @@ export default function MapPage() {
             )
           ) : (
             filtered.length === 0 ? (
-              <div className="px-4 py-12 text-center"><p className="font-mono text-[10px] text-text-dim">{isPipelineRunning ? "Waiting for qualified leads…" : "No leads with coordinates yet"}</p></div>
+              <div className="px-4 py-12 text-center"><p className="font-mono text-[12px] text-text-dim">{isPipelineRunning ? "Waiting for qualified leads…" : "No leads with coordinates yet"}</p></div>
             ) : (
               <div className="divide-y divide-border-dim">
                 {filtered.sort((a, b) => b.score - a.score).map((lead) => {
@@ -380,9 +380,9 @@ export default function MapPage() {
                           <span className="font-mono text-xs font-bold ml-2" style={{ color: DOT_COLORS[lead.tier] }}>{lead.score}</span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-[9px] text-text-dim truncate">{lead.domain}</span>
-                          {lead.country && <span className="font-mono text-[9px] text-text-dim">· {lead.country}</span>}
-                          <span className="font-mono text-[8px] ml-auto truncate max-w-[80px]" style={{ color: groupColor }}>{lead.search_label}</span>
+                          <span className="font-mono text-[12px] text-text-dim truncate">{lead.domain}</span>
+                          {lead.country && <span className="font-mono text-[12px] text-text-dim">· {lead.country}</span>}
+                          <span className="font-mono text-[12px] ml-auto truncate max-w-[80px]" style={{ color: groupColor }}>{lead.search_label}</span>
                         </div>
                       </button>
                       {!lead.isLive && (lead.tier === "rejected" || lead.tier === "review") && (
@@ -427,36 +427,36 @@ export default function MapPage() {
                       <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: groupColorMap.get(selectedLead.search_id) }} />
                       <h3 className="font-mono text-xs font-bold text-text-primary truncate">{selectedLead.company_name}</h3>
                     </div>
-                    <span className={`font-mono text-[9px] uppercase tracking-[0.1em] px-2 py-0.5 rounded flex-shrink-0 ${TIER_STYLES[selectedLead.tier]?.bg || ""} ${TIER_STYLES[selectedLead.tier]?.color || ""} ${TIER_STYLES[selectedLead.tier]?.border || ""} border`}>
+                    <span className={`font-mono text-[12px] uppercase tracking-[0.1em] px-2 py-0.5 rounded flex-shrink-0 ${TIER_STYLES[selectedLead.tier]?.bg || ""} ${TIER_STYLES[selectedLead.tier]?.color || ""} ${TIER_STYLES[selectedLead.tier]?.border || ""} border`}>
                       {TIER_STYLES[selectedLead.tier]?.label || selectedLead.tier}
                     </span>
                   </div>
 
                   {/* Domain + Score */}
                   <div className="flex items-center gap-2 mb-2">
-                    <a href={selectedLead.website_url || `https://${selectedLead.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[10px] text-secondary/60 hover:text-secondary transition-colors truncate">{selectedLead.domain} ↗</a>
+                    <a href={selectedLead.website_url || `https://${selectedLead.domain}`} target="_blank" rel="noopener noreferrer" className="font-mono text-[12px] text-secondary/60 hover:text-secondary transition-colors truncate">{selectedLead.domain} ↗</a>
                     <span className="font-mono text-xs font-bold ml-auto" style={{ color: DOT_COLORS[selectedLead.tier] }}>{selectedLead.score}/10</span>
                   </div>
 
                   {/* Tags */}
                   <div className="flex flex-wrap gap-1 mb-2">
-                    {selectedLead.hardware_type && <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.hardware_type}</span>}
-                    {selectedLead.industry_category && <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.industry_category}</span>}
-                    {selectedLead.country && <span className="font-mono text-[8px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.country}</span>}
+                    {selectedLead.hardware_type && <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.hardware_type}</span>}
+                    {selectedLead.industry_category && <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.industry_category}</span>}
+                    {selectedLead.country && <span className="font-mono text-[12px] uppercase tracking-[0.1em] text-text-dim bg-surface-3 px-1.5 py-0.5 rounded">{selectedLead.country}</span>}
                   </div>
 
                   {/* Reasoning */}
                   {selectedLead.reasoning && (
-                    <p className="font-sans text-[10px] text-text-muted leading-relaxed mb-2 line-clamp-3">{selectedLead.reasoning}</p>
+                    <p className="font-sans text-[12px] text-text-muted leading-relaxed mb-2 line-clamp-3">{selectedLead.reasoning}</p>
                   )}
 
                   {/* Key signals */}
                   {selectedLead.key_signals && selectedLead.key_signals.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-2">
                       {selectedLead.key_signals.slice(0, 4).map((s, i) => (
-                        <span key={i} className="font-mono text-[8px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">{s}</span>
+                        <span key={i} className="font-mono text-[12px] text-secondary/50 bg-secondary/5 border border-secondary/10 rounded px-1.5 py-0.5">{s}</span>
                       ))}
-                      {selectedLead.key_signals.length > 4 && <span className="font-mono text-[8px] text-text-dim">+{selectedLead.key_signals.length - 4}</span>}
+                      {selectedLead.key_signals.length > 4 && <span className="font-mono text-[12px] text-text-dim">+{selectedLead.key_signals.length - 4}</span>}
                     </div>
                   )}
 
@@ -464,7 +464,7 @@ export default function MapPage() {
                   {selectedLead.red_flags && selectedLead.red_flags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-2">
                       {selectedLead.red_flags.slice(0, 3).map((f, i) => (
-                        <span key={i} className="font-mono text-[8px] text-red-400/60 bg-red-400/5 border border-red-400/10 rounded px-1.5 py-0.5">{f}</span>
+                        <span key={i} className="font-mono text-[12px] text-red-400/60 bg-red-400/5 border border-red-400/10 rounded px-1.5 py-0.5">{f}</span>
                       ))}
                     </div>
                   )}
@@ -473,10 +473,10 @@ export default function MapPage() {
                   <div className="flex items-center justify-between border-t border-border-dim pt-2 mt-1">
                     <div className="flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: groupColorMap.get(selectedLead.search_id) }} />
-                      <span className="font-mono text-[8px] text-text-dim truncate max-w-[140px]">{selectedLead.search_label}</span>
+                      <span className="font-mono text-[12px] text-text-dim truncate max-w-[140px]">{selectedLead.search_label}</span>
                     </div>
                     {!selectedLead.isLive && (
-                      <button onClick={(e) => deleteLead(selectedLead.id, e)} disabled={deletingLead === selectedLead.id} className="font-mono text-[8px] text-text-dim hover:text-red-400 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
+                      <button onClick={(e) => deleteLead(selectedLead.id, e)} disabled={deletingLead === selectedLead.id} className="font-mono text-[12px] text-text-dim hover:text-red-400 transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1">
                         {deletingLead === selectedLead.id ? <span className="w-2.5 h-2.5 border border-text-dim border-t-transparent rounded-full animate-spin inline-block" /> : <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>}
                         Delete
                       </button>
@@ -491,26 +491,26 @@ export default function MapPage() {
         {isPipelineRunning && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 bg-surface-1/90 backdrop-blur-md border border-green-500/30 rounded-full px-4 py-1.5 flex items-center gap-2 z-10">
             <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            <span className="font-mono text-[10px] text-green-400">Pipeline running — leads appearing live</span>
+            <span className="font-mono text-[12px] text-green-400">Pipeline running — leads appearing live</span>
           </div>
         )}
 
         <div className="md:hidden absolute top-3 left-3 right-3 bg-surface-1/90 backdrop-blur-md border border-border-dim rounded-lg px-3 py-2 flex items-center gap-3 z-10">
           <span className={`w-2 h-2 rounded-full ${isPipelineRunning ? "bg-green-400 animate-pulse" : "bg-text-dim"}`} />
-          <span className="font-mono text-[9px] text-text-primary">{filtered.length} leads</span>
-          <span className="font-mono text-[9px] text-hot">{tierCounts.hot} hot</span>
-          <span className="font-mono text-[9px] text-review">{tierCounts.review} review</span>
-          <span className="font-mono text-[9px] text-text-dim ml-auto">{huntGroups.length} hunts</span>
+          <span className="font-mono text-[12px] text-text-primary">{filtered.length} leads</span>
+          <span className="font-mono text-[12px] text-hot">{tierCounts.hot} hot</span>
+          <span className="font-mono text-[12px] text-review">{tierCounts.review} review</span>
+          <span className="font-mono text-[12px] text-text-dim ml-auto">{huntGroups.length} hunts</span>
         </div>
 
         {huntGroups.length > 1 && (
           <div className="hidden md:block absolute bottom-4 left-4 bg-surface-1/90 backdrop-blur-md border border-border-dim rounded-lg px-3 py-2 z-10 max-w-[200px]">
-            <span className="font-mono text-[8px] text-text-dim uppercase tracking-[0.15em] mb-1.5 block">Hunts</span>
+            <span className="font-mono text-[12px] text-text-dim uppercase tracking-[0.15em] mb-1.5 block">Hunts</span>
             {huntGroups.filter((g) => !hiddenGroups.has(g.searchId)).map((group) => (
               <div key={group.searchId} className="flex items-center gap-1.5 mb-1 last:mb-0 cursor-pointer hover:opacity-80" onClick={() => flyToGroup(group)}>
                 <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: groupColorMap.get(group.searchId) }} />
-                <span className="font-mono text-[8px] text-text-muted truncate">{group.label}</span>
-                <span className="font-mono text-[8px] text-text-dim ml-auto">{group.leads.length}</span>
+                <span className="font-mono text-[12px] text-text-muted truncate">{group.label}</span>
+                <span className="font-mono text-[12px] text-text-dim ml-auto">{group.leads.length}</span>
               </div>
             ))}
           </div>

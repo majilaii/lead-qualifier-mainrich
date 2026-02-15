@@ -78,7 +78,7 @@ export default function Features() {
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="text-center mb-16">
-          <span className="font-mono text-[10px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
+          <span className="font-mono text-[12px] tracking-[0.5em] uppercase text-secondary/50 block mb-3">
             Features
           </span>
           <h2 className="font-mono text-2xl md:text-3xl font-bold text-text-primary tracking-tight mb-4">
@@ -104,7 +104,7 @@ export default function Features() {
               }}
             >
               {/* Tag */}
-              <span className="inline-block font-mono text-[9px] tracking-[0.2em] uppercase text-secondary/35 border border-secondary/10 rounded px-1.5 py-0.5 mb-3 group-hover:text-secondary/60 group-hover:border-secondary/25 transition-colors">
+              <span className="inline-block font-mono text-[12px] tracking-[0.2em] uppercase text-secondary/35 border border-secondary/10 rounded px-1.5 py-0.5 mb-3 group-hover:text-secondary/60 group-hover:border-secondary/25 transition-colors">
                 {feat.tag}
               </span>
 
@@ -114,7 +114,7 @@ export default function Features() {
               </h3>
 
               {/* Description */}
-              <p className="font-sans text-[11px] text-text-muted leading-relaxed">
+              <p className="font-sans text-[14px] text-text-muted leading-relaxed">
                 {feat.description}
               </p>
             </div>

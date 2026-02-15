@@ -45,10 +45,10 @@ export default function StatsBar() {
               transitionDelay: `${i * 120}ms`,
             }}
           >
-            <p className="font-mono text-3xl md:text-4xl font-bold text-text-primary glow-text mb-2">
+            <p className="font-mono text-xl md:text-4xl font-bold text-text-primary glow-text mb-2">
               {stat.value}
             </p>
-            <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-text-muted">
+            <p className="font-mono text-[12px] uppercase tracking-[0.25em] text-text-muted">
               {stat.label}
             </p>
           </div>

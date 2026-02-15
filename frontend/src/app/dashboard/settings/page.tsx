@@ -225,14 +225,14 @@ export default function SettingsPage() {
                 <button
                   onClick={() => handleCheckout("pro")}
                   disabled={checkingOut}
-                  className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg bg-text-primary text-void hover:bg-white/85 transition-colors cursor-pointer disabled:opacity-50"
+                  className="font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg bg-text-primary text-void hover:bg-white/85 transition-colors cursor-pointer disabled:opacity-50"
                 >
                   {checkingOut ? "Redirecting…" : "Upgrade to Pro — $49/mo"}
                 </button>
                 <button
                   onClick={() => handleCheckout("enterprise")}
                   disabled={checkingOut}
-                  className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border text-text-secondary hover:border-border-bright hover:text-text-primary transition-colors cursor-pointer disabled:opacity-50"
+                  className="font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border text-text-secondary hover:border-border-bright hover:text-text-primary transition-colors cursor-pointer disabled:opacity-50"
                 >
                   Enterprise — $199/mo
                 </button>
@@ -249,7 +249,7 @@ export default function SettingsPage() {
               </p>
               <button
                 onClick={handlePortal}
-                className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border text-text-secondary hover:border-border-bright hover:text-text-primary transition-colors cursor-pointer"
+                className="font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-border text-text-secondary hover:border-border-bright hover:text-text-primary transition-colors cursor-pointer"
               >
                 Manage Subscription
               </button>
@@ -392,7 +392,7 @@ export default function SettingsPage() {
               await supabase.auth.signOut();
               window.location.href = "/";
             }}
-            className="font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
+            className="font-mono text-[12px] uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-colors cursor-pointer"
           >
             Sign Out
           </button>
@@ -415,7 +415,7 @@ function Row({
 }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="font-mono text-[10px] text-text-dim uppercase tracking-[0.15em]">
+      <span className="font-mono text-[12px] text-text-dim uppercase tracking-[0.15em]">
         {label}
       </span>
       <div className="flex items-center gap-2">
@@ -425,7 +425,7 @@ function Row({
           {value}
         </span>
         {badge && (
-          <span className="font-mono text-[9px] px-2 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20">
+          <span className="font-mono text-[12px] px-2 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20">
             {badge}
           </span>
         )}
@@ -445,7 +445,7 @@ function StatusRow({
 }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="font-mono text-[10px] text-text-dim uppercase tracking-[0.15em]">
+      <span className="font-mono text-[12px] text-text-dim uppercase tracking-[0.15em]">
         {label}
       </span>
       <span className="flex items-center gap-1.5">
@@ -459,7 +459,7 @@ function StatusRow({
           }`}
         />
         <span
-          className={`font-mono text-[10px] ${
+          className={`font-mono text-[12px] ${
             !checked
               ? "text-text-dim"
               : ok
@@ -486,7 +486,7 @@ function UsageStat({
       <span className="font-mono text-lg font-bold text-text-primary block">
         {value}
       </span>
-      <span className="font-mono text-[9px] text-text-muted uppercase tracking-[0.15em]">
+      <span className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">
         {label}
       </span>
     </div>
@@ -505,7 +505,7 @@ function UsageBar({
   if (limit === null) {
     return (
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em]">
+        <span className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">
           {label}
         </span>
         <span className="font-mono text-xs text-text-primary">
@@ -520,7 +520,7 @@ function UsageBar({
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
-        <span className="font-mono text-[10px] text-text-muted uppercase tracking-[0.15em]">
+        <span className="font-mono text-[12px] text-text-muted uppercase tracking-[0.15em]">
           {label}
         </span>
         <span className="font-mono text-xs text-text-primary">

@@ -214,14 +214,14 @@ export function EnrichmentJobBanner({
           {isComplete && (
             <span className="text-green-400 text-sm">✓</span>
           )}
-          <span className="font-mono text-[11px] font-semibold text-text-primary">
+          <span className="font-mono text-[12px] font-semibold text-text-primary">
             {actionLabel}
           </span>
-          <span className="font-mono text-[10px] text-text-dim">
+          <span className="font-mono text-[12px] text-text-dim">
             {processed}/{total} leads
           </span>
         </div>
-        <span className="font-mono text-[10px] text-text-muted">
+        <span className="font-mono text-[12px] text-text-muted">
           {pct}%
         </span>
       </div>
@@ -238,14 +238,14 @@ export function EnrichmentJobBanner({
 
       {/* Current lead */}
       {isRunning && liveProgress && liveProgress.company && (
-        <p className="font-mono text-[10px] text-text-dim mt-1.5 truncate">
+        <p className="font-mono text-[12px] text-text-dim mt-1.5 truncate">
           → {liveProgress.company} {liveProgress.domain ? `(${liveProgress.domain})` : ""}
         </p>
       )}
 
       {/* Completed summary */}
       {isComplete && activeJob && (
-        <p className="font-mono text-[10px] text-text-muted mt-1.5">
+        <p className="font-mono text-[12px] text-text-muted mt-1.5">
           {activeJob.succeeded} succeeded · {activeJob.failed} failed
         </p>
       )}

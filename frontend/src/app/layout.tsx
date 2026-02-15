@@ -4,6 +4,7 @@ import "./globals.css";
 import SessionProvider from "./components/auth/SessionProvider";
 import { PipelineProvider } from "./components/hunt/PipelineContext";
 import BillingProvider from "./components/billing/BillingProvider";
+import SupportChatWidget from "./components/support/SupportChatWidget";
 import { ToastProvider } from "./components/ui/Toast";
 
 export const metadata: Metadata = {
@@ -30,7 +31,10 @@ export default function RootLayout({
           <Suspense>
             <BillingProvider>
               <PipelineProvider>
-                <ToastProvider>{children}</ToastProvider>
+                <ToastProvider>
+                  {children}
+                  <SupportChatWidget />
+                </ToastProvider>
               </PipelineProvider>
             </BillingProvider>
           </Suspense>

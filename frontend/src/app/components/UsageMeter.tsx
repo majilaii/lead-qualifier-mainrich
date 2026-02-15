@@ -49,17 +49,17 @@ export default function UsageMeter() {
   return (
     <div className="flex flex-col gap-2 px-4 py-3 border border-border-dim rounded-lg bg-surface/30">
       <div className="flex items-center justify-between">
-        <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-text-dim">
+        <span className="font-mono text-[12px] uppercase tracking-[0.15em] text-text-dim">
           Monthly Usage
         </span>
-        <span className="font-mono text-[9px] px-2 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20">
+        <span className="font-mono text-[12px] px-2 py-0.5 rounded bg-secondary/10 text-secondary border border-secondary/20">
           {planLabel}
         </span>
       </div>
 
       {/* Leads meter */}
       <div className="flex items-center gap-3">
-        <span className="font-mono text-[10px] text-text-muted w-16">Leads</span>
+        <span className="font-mono text-[12px] text-text-muted w-16">Leads</span>
         <div className="flex-1 h-1.5 bg-border-dim rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
@@ -68,7 +68,7 @@ export default function UsageMeter() {
             style={{ width: `${leadsPercent}%` }}
           />
         </div>
-        <span className="font-mono text-[10px] text-text-muted w-20 text-right">
+        <span className="font-mono text-[12px] text-text-muted w-20 text-right">
           {usage.leads_qualified}
           {usage.leads_limit != null ? ` / ${usage.leads_limit}` : ""}
         </span>
@@ -76,7 +76,7 @@ export default function UsageMeter() {
 
       {/* Searches meter */}
       <div className="flex items-center gap-3">
-        <span className="font-mono text-[10px] text-text-muted w-16">Hunts</span>
+        <span className="font-mono text-[12px] text-text-muted w-16">Hunts</span>
         <div className="flex-1 h-1.5 bg-border-dim rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-500 ${
@@ -85,7 +85,7 @@ export default function UsageMeter() {
             style={{ width: `${searchesPercent}%` }}
           />
         </div>
-        <span className="font-mono text-[10px] text-text-muted w-20 text-right">
+        <span className="font-mono text-[12px] text-text-muted w-20 text-right">
           {usage.searches_run}
           {usage.searches_limit != null ? ` / ${usage.searches_limit}` : ""}
         </span>
