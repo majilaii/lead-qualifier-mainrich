@@ -10,7 +10,6 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-
 /* Force Node.js runtime — SSE streams can run for minutes and must not be
    killed by the default edge/serverless timeout. */
 export const runtime = "nodejs";
@@ -46,8 +45,7 @@ async function proxyRequest(
   const fetchOpts: RequestInit = {
     method: request.method,
     headers,
-    // SSE streams (pipeline) can run for minutes — use longer timeout for GET requests
-    // that may be SSE subscriptions, shorter for regular requests
+    // Overall abort timeout as a safety net
     signal: AbortSignal.timeout(request.method === "GET" ? 600_000 : 120_000),
   };
 
@@ -70,9 +68,12 @@ async function proxyRequest(
 
       // Create a ReadableStream that reads from the backend and forwards
       // each chunk immediately, ensuring no buffering.
+      // We keep a reference to the reader so cancel() can use it
+      // (calling .cancel() on a locked stream throws ERR_INVALID_STATE).
+      let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
       const stream = new ReadableStream({
         async start(controller) {
-          const reader = backendBody.getReader();
+          reader = backendBody.getReader();
           try {
             while (true) {
               const { done, value } = await reader.read();
@@ -83,11 +84,19 @@ async function proxyRequest(
               controller.enqueue(value);
             }
           } catch (err) {
-            controller.error(err);
+            // Don't error the controller if the stream was intentionally cancelled
+            if (!String(err).includes("cancel")) {
+              controller.error(err);
+            }
           }
         },
         cancel() {
-          backendBody.cancel();
+          // Cancel via the reader (which holds the lock), not the stream itself
+          if (reader) {
+            reader.cancel().catch(() => {});
+          } else {
+            backendBody.cancel().catch(() => {});
+          }
         },
       });
 

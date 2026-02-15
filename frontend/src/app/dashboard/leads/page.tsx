@@ -98,6 +98,8 @@ export default function LeadsPage() {
   const [hasContactsFilter, setHasContactsFilter] = useState(false);
   const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(new Set());
   const [batchMenuOpen, setBatchMenuOpen] = useState(false);
+  const [confirmDeletePipelineId, setConfirmDeletePipelineId] = useState<string | null>(null);
+  const [deletingPipelineId, setDeletingPipelineId] = useState<string | null>(null);
   const { activeJob, liveProgress, liveProcessed, startBatchJob, fetchJobs: refreshJobs } = useEnrichmentJobs();
 
   /* ── Fetch all leads (no search_id filter – we filter client-side) ── */
@@ -131,6 +133,26 @@ export default function LeadsPage() {
       /* ignore */
     }
   }, [session]);
+
+  /* ── Delete a pipeline and its leads ── */
+  const handleDeletePipeline = useCallback(async (searchId: string) => {
+    if (!session?.access_token) return;
+    setDeletingPipelineId(searchId);
+    try {
+      const res = await fetch(`/api/proxy/searches/${searchId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        setSearches((prev) => prev.filter((s) => s.id !== searchId));
+        setLeads((prev) => prev.filter((l) => l.search_id !== searchId));
+        if (selectedPipeline === searchId) setSelectedPipeline(null);
+      }
+    } finally {
+      setDeletingPipelineId(null);
+      setConfirmDeletePipelineId(null);
+    }
+  }, [session, selectedPipeline]);
 
   useEffect(() => {
     fetchLeads();
@@ -274,6 +296,42 @@ export default function LeadsPage() {
     setBatchMenuOpen(false);
     await startBatchJob(ids, action);
     setSelectedLeadIds(new Set());
+  };
+
+  const [batchDrafting, setBatchDrafting] = useState(false);
+  const [batchDraftResults, setBatchDraftResults] = useState<{ success: number; failed: number } | null>(null);
+
+  const handleBatchDraftEmail = async () => {
+    if (!session?.access_token) return;
+    const ids = Array.from(selectedLeadIds);
+    if (ids.length === 0) return;
+    setBatchMenuOpen(false);
+    setBatchDrafting(true);
+    setBatchDraftResults(null);
+    try {
+      const res = await fetch("/api/proxy/leads/batch-draft-email", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          lead_ids: ids,
+          tone: "consultative",
+          sender_context: localStorage.getItem("hunt_sender_context") || null,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const success = data.drafts?.filter((d: { status: string }) => d.status === "ok").length || 0;
+        const failed = data.drafts?.filter((d: { status: string }) => d.status === "error").length || 0;
+        setBatchDraftResults({ success, failed });
+      }
+    } catch { /* ignore */ }
+    finally {
+      setBatchDrafting(false);
+      setSelectedLeadIds(new Set());
+    }
   };
 
   // Refresh leads when a batch job completes
@@ -452,50 +510,97 @@ export default function LeadsPage() {
               const isSelected = selectedPipeline === s.id;
               const colorClass = PIPELINE_COLORS[idx % PIPELINE_COLORS.length];
               const displayName = s.name || s.industry || s.technology_focus || "Untitled Pipeline";
+              const isConfirming = confirmDeletePipelineId === s.id;
+              const isDeleting = deletingPipelineId === s.id;
 
               return (
-                <button
+                <div
                   key={s.id}
-                  onClick={() => {
-                    setSelectedPipeline(isSelected ? null : s.id);
-                    setDbSearchResults(null);
-                    setDbSearchQuery("");
-                  }}
-                  className={`flex-shrink-0 w-56 rounded-xl border p-4 transition-all cursor-pointer text-left ${
+                  className={`group relative flex-shrink-0 w-56 rounded-xl border p-4 transition-all text-left ${
                     isSelected
                       ? `${colorClass} ring-1 ring-secondary/20`
                       : "border-border bg-surface-2 hover:border-border-bright"
-                  }`}
+                  } ${isDeleting ? "opacity-50 pointer-events-none" : ""}`}
                 >
-                  <p className="font-mono text-[11px] font-semibold text-text-primary truncate mb-1.5 leading-tight">
-                    {displayName}
-                  </p>
-                  {s.qualifying_criteria && (
-                    <p className="font-sans text-[10px] text-text-dim truncate mb-2 leading-tight">
-                      {s.qualifying_criteria}
-                    </p>
+                  {/* Delete button */}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isConfirming) {
+                        handleDeletePipeline(s.id);
+                      } else {
+                        setConfirmDeletePipelineId(s.id);
+                      }
+                    }}
+                    onBlur={() => {
+                      // Auto-cancel confirm after losing focus
+                      setTimeout(() => setConfirmDeletePipelineId((prev) => prev === s.id ? null : prev), 200);
+                    }}
+                    title={isConfirming ? "Click again to confirm" : "Delete pipeline"}
+                    className={`absolute top-2 right-2 z-10 w-6 h-6 rounded-md flex items-center justify-center transition-all cursor-pointer ${
+                      isConfirming
+                        ? "bg-red-500/20 text-red-400 border border-red-500/30 scale-110"
+                        : "text-text-dim hover:text-red-400 hover:bg-red-500/10 opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    {isDeleting ? (
+                      <div className="w-3 h-3 border border-red-400/50 border-t-red-400 rounded-full animate-spin" />
+                    ) : isConfirming ? (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    ) : (
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6" />
+                        <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+                      </svg>
+                    )}
+                  </button>
+                  {isConfirming && (
+                    <div className="absolute -top-8 right-0 z-20 px-2 py-1 rounded-md bg-red-500/10 border border-red-500/20 font-mono text-[9px] text-red-400 whitespace-nowrap">
+                      Click again to delete
+                    </div>
                   )}
-                  <div className="flex items-baseline gap-1.5 mb-2">
-                    <span className="font-mono text-lg font-bold text-text-primary">
-                      {counts.total}
-                    </span>
-                    <span className="font-mono text-[10px] text-text-dim">
-                      leads
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 font-mono text-[9px]">
-                    <span className="text-hot">{counts.hot} hot</span>
-                    <span className="text-text-dim">·</span>
-                    <span className="text-review">{counts.review} review</span>
-                    <span className="text-text-dim">·</span>
-                    <span className="text-text-dim">{counts.rejected} rej</span>
-                  </div>
-                  {s.created_at && (
-                    <p className="font-mono text-[9px] text-text-dim mt-2">
-                      {new Date(s.created_at).toLocaleDateString()}
+
+                  {/* Clickable card body */}
+                  <button
+                    onClick={() => {
+                      setSelectedPipeline(isSelected ? null : s.id);
+                      setDbSearchResults(null);
+                      setDbSearchQuery("");
+                    }}
+                    className="w-full text-left cursor-pointer"
+                  >
+                    <p className="font-mono text-[11px] font-semibold text-text-primary truncate mb-1.5 leading-tight pr-6">
+                      {displayName}
                     </p>
-                  )}
-                </button>
+                    {s.qualifying_criteria && (
+                      <p className="font-sans text-[10px] text-text-dim truncate mb-2 leading-tight">
+                        {s.qualifying_criteria}
+                      </p>
+                    )}
+                    <div className="flex items-baseline gap-1.5 mb-2">
+                      <span className="font-mono text-lg font-bold text-text-primary">
+                        {counts.total}
+                      </span>
+                      <span className="font-mono text-[10px] text-text-dim">
+                        leads
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 font-mono text-[9px]">
+                      <span className="text-hot">{counts.hot} hot</span>
+                      <span className="text-text-dim">·</span>
+                      <span className="text-review">{counts.review} review</span>
+                      <span className="text-text-dim">·</span>
+                      <span className="text-text-dim">{counts.rejected} rej</span>
+                    </div>
+                    {s.created_at && (
+                      <p className="font-mono text-[9px] text-text-dim mt-2">
+                        {new Date(s.created_at).toLocaleDateString()}
+                      </p>
+                    )}
+                  </button>
+                </div>
               );
             })}
           </div>
@@ -684,10 +789,43 @@ export default function LeadsPage() {
                     <span className="text-purple-400">⚙</span> Full Re-crawl (Score + Contacts)
                     <p className="font-sans text-[10px] text-text-dim mt-0.5">Complete re-crawl of everything</p>
                   </button>
+                  <div className="border-t border-border-dim my-1" />
+                  <button
+                    onClick={handleBatchDraftEmail}
+                    disabled={batchDrafting}
+                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    <span className="text-hot">✉</span> Batch Draft Emails
+                    <p className="font-sans text-[10px] text-text-dim mt-0.5">AI-generate personalized emails (max 10)</p>
+                  </button>
                 </div>
               </>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Batch draft status */}
+      {batchDrafting && (
+        <div className="bg-hot/5 border border-hot/20 rounded-xl px-5 py-3 flex items-center gap-3">
+          <div className="w-4 h-4 border-2 border-hot/30 border-t-hot rounded-full animate-spin" />
+          <span className="font-mono text-[11px] text-hot">Generating AI email drafts…</span>
+        </div>
+      )}
+      {batchDraftResults && (
+        <div className="bg-green-400/5 border border-green-400/20 rounded-xl px-5 py-3 flex items-center justify-between">
+          <span className="font-mono text-[11px] text-green-400">
+            ✉ {batchDraftResults.success} email draft{batchDraftResults.success !== 1 ? "s" : ""} generated
+            {batchDraftResults.failed > 0 && (
+              <span className="text-red-400 ml-2">· {batchDraftResults.failed} failed</span>
+            )}
+          </span>
+          <button
+            onClick={() => setBatchDraftResults(null)}
+            className="font-mono text-[10px] text-text-dim hover:text-text-muted cursor-pointer"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

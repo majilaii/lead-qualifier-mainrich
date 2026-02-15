@@ -3,7 +3,7 @@
 /**
  * PipelineTracker — Tracks multiple concurrent pipeline runs in real-time.
  *
- * Unlike HuntContext (which manages a single "active" pipeline flow),
+ * Unlike PipelineContext (which manages a single "active" pipeline flow),
  * this context provides a list of ALL pipeline runs (active + completed)
  * and keeps live progress for any that are currently running.
  *
@@ -359,7 +359,7 @@ export function PipelineTrackerProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  /* ── Launch a new pipeline (sole SSE owner — no HuntContext involved) ── */
+  /* ── Launch a new pipeline (sole SSE owner — no PipelineContext involved) ── */
   const launchPipeline = useCallback(
     async (config: LaunchPipelineConfig): Promise<string> => {
       if (!session?.access_token) throw new Error("Not authenticated");

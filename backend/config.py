@@ -75,7 +75,7 @@ REQUEST_TIMEOUT = 30  # seconds
 # Model Selection
 # ===========================================
 TEXT_MODEL = os.getenv("TEXT_MODEL", "gpt-4o-mini")
-VISION_MODEL = os.getenv("VISION_MODEL", "kimi-k2.5-thinking")
+VISION_MODEL = os.getenv("VISION_MODEL", "kimi-k2.5")
 
 # Model API endpoints
 KIMI_API_BASE = "https://api.moonshot.ai/v1"
@@ -96,6 +96,13 @@ NEGATIVE_KEYWORDS = [
     "restaurant", "law firm", "hair salon", "real estate",
     "property management", "hotel", "hospitality", "food service",
 ]
+
+# ===========================================
+# Notifications (Resend)
+# ===========================================
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+NOTIFICATION_FROM_EMAIL = os.getenv("NOTIFICATION_FROM_EMAIL", "Hunt <notifications@yourdomain.com>")
+APP_URL = os.getenv("APP_URL", FRONTEND_URL)  # Reuse FRONTEND_URL as default
 
 # ===========================================
 # Cost Tracking (approximate USD)

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useAuth } from "../../components/auth/SessionProvider";
+import { EmptyState } from "../../components/ui/EmptyState";
 
 /* ─── Types ─── */
 
@@ -442,20 +443,11 @@ export default function RedditPulsePage() {
 
       {/* Empty state */}
       {!pulse && !loading && !error && (
-        <div className="text-center py-16 bg-surface-2 border border-border rounded-xl">
-          <div className="text-4xl mb-4">📡</div>
-          <h3 className="font-mono text-sm text-text-primary mb-2">
-            Tap into the Reddit Pulse
-          </h3>
-          <p className="font-sans text-xs text-text-muted max-w-md mx-auto">
-            Search for your industry or technology to discover what real people are saying —
-            buying intent signals, pain points, competitor mentions, and market sentiment from
-            thousands of Reddit discussions.
-          </p>
-          <p className="font-mono text-[10px] text-text-dim mt-4">
-            Free • No Reddit account needed • Powered by PullPush + Reddit API
-          </p>
-        </div>
+        <EmptyState
+          icon="📡"
+          title="Tap into the Reddit Pulse"
+          description="Search for your industry or technology to discover what real people are saying — buying intent signals, pain points, competitor mentions, and market sentiment from thousands of Reddit discussions."
+        />
       )}
     </div>
   );

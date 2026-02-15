@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "../../components/auth/SessionProvider";
+import { useToast } from "../../components/ui/Toast";
+import { Spinner } from "../../components/ui/Spinner";
 
 interface UsageData {
   searches: number;
@@ -28,10 +30,18 @@ interface BillingData {
   };
 }
 
+interface NotificationPrefs {
+  pipeline_complete: boolean;
+  scheduled_run: boolean;
+  requalification: boolean;
+  weekly_digest: boolean;
+}
+
 // All backend calls go through /api/proxy/* (Next.js server proxy)
 
 export default function SettingsPage() {
   const { session, user } = useAuth();
+  const { toast } = useToast();
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [billing, setBilling] = useState<BillingData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,6 +50,13 @@ export default function SettingsPage() {
     backend: boolean;
     checked: boolean;
   }>({ backend: false, checked: false });
+  const [notifPrefs, setNotifPrefs] = useState<NotificationPrefs>({
+    pipeline_complete: true,
+    scheduled_run: true,
+    requalification: true,
+    weekly_digest: false,
+  });
+  const [notifSaving, setNotifSaving] = useState(false);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -70,6 +87,13 @@ export default function SettingsPage() {
           if (data) setBilling(data);
         })
         .catch(() => {}),
+      // Notification preferences
+      fetch("/api/proxy/notifications/preferences", { headers })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data?.prefs) setNotifPrefs(data.prefs);
+        })
+        .catch(() => {}),
     ]).finally(() => setLoading(false));
   }, [session]);
 
@@ -89,6 +113,7 @@ export default function SettingsPage() {
       if (data.url) window.location.href = data.url;
     } catch (e) {
       console.error("Checkout error:", e);
+      toast({ title: "Billing error", description: e instanceof Error ? e.message : "Failed to start checkout", variant: "error" });
     } finally {
       setCheckingOut(false);
     }
@@ -108,13 +133,41 @@ export default function SettingsPage() {
       if (data.url) window.location.href = data.url;
     } catch (e) {
       console.error("Portal error:", e);
+      toast({ title: "Billing error", description: e instanceof Error ? e.message : "Failed to open portal", variant: "error" });
+    }
+  };
+
+  const toggleNotifPref = async (key: keyof NotificationPrefs) => {
+    if (!session?.access_token) return;
+    const updated = { ...notifPrefs, [key]: !notifPrefs[key] };
+    setNotifPrefs(updated);
+    setNotifSaving(true);
+    try {
+      const res = await fetch("/api/proxy/notifications/preferences", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(updated),
+      });
+      if (!res.ok) {
+        // Revert on failure
+        setNotifPrefs(notifPrefs);
+        toast({ title: "Failed to save notification preference", variant: "error" });
+      }
+    } catch {
+      setNotifPrefs(notifPrefs);
+      toast({ title: "Failed to save notification preference", variant: "error" });
+    } finally {
+      setNotifSaving(false);
     }
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+        <Spinner />
       </div>
     );
   }
@@ -269,6 +322,50 @@ export default function SettingsPage() {
               />
             </div>
           )}
+        </div>
+      </section>
+
+      {/* Notifications */}
+      <section id="notifications" className="bg-surface-2 border border-border rounded-xl overflow-hidden">
+        <div className="px-5 py-3 border-b border-border-dim">
+          <h2 className="font-mono text-xs font-semibold text-text-primary uppercase tracking-[0.12em]">
+            Email Notifications
+          </h2>
+        </div>
+        <div className="px-5 py-4 space-y-4">
+          <p className="font-sans text-xs text-text-muted">
+            Choose which emails you&apos;d like to receive. We&apos;ll never spam you.
+          </p>
+          <div className="space-y-3">
+            <NotifToggle
+              label="Pipeline Complete"
+              desc="Get notified when a pipeline finishes running"
+              checked={notifPrefs.pipeline_complete}
+              onChange={() => toggleNotifPref("pipeline_complete")}
+              disabled={notifSaving}
+            />
+            <NotifToggle
+              label="Scheduled Run Complete"
+              desc="Results from your scheduled pipelines"
+              checked={notifPrefs.scheduled_run}
+              onChange={() => toggleNotifPref("scheduled_run")}
+              disabled={notifSaving}
+            />
+            <NotifToggle
+              label="Re-qualification Alerts"
+              desc="When lead scores change significantly (±2 or more)"
+              checked={notifPrefs.requalification}
+              onChange={() => toggleNotifPref("requalification")}
+              disabled={notifSaving}
+            />
+            <NotifToggle
+              label="Weekly Digest"
+              desc="Weekly summary of new leads and score changes"
+              checked={notifPrefs.weekly_digest}
+              onChange={() => toggleNotifPref("weekly_digest")}
+              disabled={notifSaving}
+            />
+          </div>
         </div>
       </section>
 
@@ -438,6 +535,44 @@ function UsageBar({
           style={{ width: `${pct}%` }}
         />
       </div>
+    </div>
+  );
+}
+
+function NotifToggle({
+  label,
+  desc,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  desc: string;
+  checked: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <p className="font-mono text-xs text-text-primary">{label}</p>
+        <p className="font-sans text-[10px] text-text-dim mt-0.5">{desc}</p>
+      </div>
+      <button
+        onClick={onChange}
+        disabled={disabled}
+        className={`relative flex-shrink-0 w-9 h-5 rounded-full transition-colors cursor-pointer disabled:opacity-50 ${
+          checked ? "bg-secondary" : "bg-surface-3 border border-border"
+        }`}
+        role="switch"
+        aria-checked={checked}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform shadow-sm ${
+            checked ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
     </div>
   );
 }

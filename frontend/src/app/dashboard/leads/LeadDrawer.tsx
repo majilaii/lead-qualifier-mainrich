@@ -2,6 +2,17 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../../components/auth/SessionProvider";
+import { LeadDrawerSkeleton } from "../../components/ui/Skeleton";
+import { useToast } from "../../components/ui/Toast";
+import EmailDraftModal from "./EmailDraftModal";
+
+interface LeadSnapshot {
+  id: string;
+  score: number;
+  tier: string;
+  snapshot_at: string;
+  reasoning: string | null;
+}
 
 interface LeadDetail {
   id: string;
@@ -76,6 +87,7 @@ export default function LeadDrawer({
   onLeadUpdate?: (leadId: string, updates: { notes?: string | null; deal_value?: number | null }) => void;
 }) {
   const { session } = useAuth();
+  const { toast } = useToast();
   const [lead, setLead] = useState<LeadDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusUpdating, setStatusUpdating] = useState(false);
@@ -94,6 +106,11 @@ export default function LeadDrawer({
   const [enrichJobId, setEnrichJobId] = useState<string | null>(null);
   const [enrichJobStatus, setEnrichJobStatus] = useState<string | null>(null);
   const [enrichJobProgress, setEnrichJobProgress] = useState<string | null>(null);
+  // Email draft modal
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  // Score history snapshots
+  const [snapshots, setSnapshots] = useState<LeadSnapshot[]>([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
 
   useEffect(() => {
     if (!session?.access_token || !leadId) return;
@@ -113,6 +130,19 @@ export default function LeadDrawer({
       .finally(() => setLoading(false));
   }, [leadId, session]);
 
+  // Fetch score history snapshots
+  useEffect(() => {
+    if (!session?.access_token || !leadId) return;
+    setSnapshotsLoading(true);
+    fetch(`/api/proxy/leads/${leadId}/snapshots`, {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((r) => (r.ok ? r.json() : { snapshots: [] }))
+      .then((data) => setSnapshots(data.snapshots || []))
+      .catch(() => setSnapshots([]))
+      .finally(() => setSnapshotsLoading(false));
+  }, [leadId, session]);
+
   const saveField = async (fields: { notes?: string; deal_value?: number | null }) => {
     if (!session?.access_token || !lead) return;
     setSaving(true);
@@ -129,8 +159,7 @@ export default function LeadDrawer({
         const updated = await res.json();
         setLead({ ...lead, notes: updated.notes, deal_value: updated.deal_value, status_changed_at: updated.status_changed_at });
         onLeadUpdate?.(lead.id, fields);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 1500);
+        toast({ title: "Saved", variant: "success" });
       }
     } finally {
       setSaving(false);
@@ -416,9 +445,7 @@ export default function LeadDrawer({
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
-          </div>
+          <LeadDrawerSkeleton />
         ) : !lead ? (
           <div className="py-20 text-center font-mono text-xs text-text-dim">
             Lead not found
@@ -688,6 +715,20 @@ export default function LeadDrawer({
               )}
             </Section>
 
+            {/* Draft Email CTA — for hot leads with contacts */}
+            {lead.tier === "hot" && contacts.length > 0 && (
+              <button
+                onClick={() => setShowDraftModal(true)}
+                className="w-full flex items-center justify-center gap-2 bg-hot/10 border border-hot/20 text-hot font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-3.5 rounded-xl hover:bg-hot/15 transition-colors cursor-pointer"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                  <polyline points="22,6 12,13 2,6" />
+                </svg>
+                ✉ Draft Personalized Email
+              </button>
+            )}
+
             {/* ── Enrichment Actions ── */}
             <Section title="Enrichment Actions">
               {/* Active enrichment progress */}
@@ -835,9 +876,68 @@ export default function LeadDrawer({
                 Close
               </button>
             </div>
+
+            {/* Score History */}
+            {(snapshots.length > 0 || snapshotsLoading) && (
+              <Section title={`Score History${snapshots.length ? ` (${snapshots.length})` : ""}`}>
+                {snapshotsLoading ? (
+                  <p className="font-mono text-[10px] text-text-dim">Loading history…</p>
+                ) : (
+                  <div className="space-y-2">
+                    {snapshots.map((snap, i) => {
+                      const prev = snapshots[i + 1];
+                      const delta = prev ? snap.score - prev.score : 0;
+                      return (
+                        <div
+                          key={snap.id}
+                          className="flex items-center justify-between bg-surface-3 border border-border-dim rounded-lg px-3 py-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={`font-mono text-sm font-bold ${
+                              snap.score >= 80 ? "text-hot" : snap.score >= 50 ? "text-review" : "text-text-dim"
+                            }`}>
+                              {snap.score}
+                            </span>
+                            {delta !== 0 && (
+                              <span className={`font-mono text-[10px] font-semibold ${
+                                delta > 0 ? "text-green-400" : "text-red-400"
+                              }`}>
+                                {delta > 0 ? `↑${delta}` : `↓${Math.abs(delta)}`}
+                              </span>
+                            )}
+                            <span className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                              snap.tier === "hot"
+                                ? "bg-hot/10 border-hot/20 text-hot"
+                                : snap.tier === "review"
+                                  ? "bg-review/10 border-review/20 text-review"
+                                  : "bg-text-dim/10 border-text-dim/20 text-text-dim"
+                            }`}>
+                              {snap.tier}
+                            </span>
+                          </div>
+                          <span className="font-mono text-[10px] text-text-dim">
+                            {new Date(snap.snapshot_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Section>
+            )}
           </div>
         )}
       </div>
+
+      {/* Email Draft Modal */}
+      {showDraftModal && lead && (
+        <EmailDraftModal
+          leadId={lead.id}
+          companyName={lead.company_name}
+          contacts={contacts}
+          onClose={() => setShowDraftModal(false)}
+        />
+      )}
 
       <style jsx>{`
         @keyframes slide-in-right {

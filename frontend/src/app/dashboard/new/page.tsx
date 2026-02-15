@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "../../components/auth/SessionProvider";
-import { useHunt } from "../../components/hunt/HuntContext";
+import { usePipeline } from "../../components/hunt/PipelineContext";
 import { usePipelineTracker, type LaunchPipelineConfig } from "../../components/pipeline/PipelineTracker";
+import { useToast } from "../../components/ui/Toast";
 
 type Tab = "configure" | "guided" | "bulk";
 
@@ -19,8 +20,9 @@ interface Template {
 export default function NewPipelinePage() {
   const router = useRouter();
   const { session } = useAuth();
-  const { resetHunt } = useHunt();
+  const { resetPipeline } = usePipeline();
   const { launchPipeline } = usePipelineTracker();
+  const { toast } = useToast();
 
   const [tab, setTab] = useState<Tab>("configure");
   const [launching, setLaunching] = useState(false);
@@ -40,6 +42,12 @@ export default function NewPipelinePage() {
 
   // Bulk import state
   const [bulkDomains, setBulkDomains] = useState("");
+
+  // Schedule state
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleFrequency, setScheduleFrequency] = useState<"daily" | "weekly" | "biweekly" | "monthly">("weekly");
+  const [scheduleName, setScheduleName] = useState("");
+  const [creatingSchedule, setCreatingSchedule] = useState(false);
 
   // Load templates
   useEffect(() => {
@@ -72,7 +80,7 @@ export default function NewPipelinePage() {
     setError(null);
 
     try {
-      resetHunt();
+      resetPipeline();
 
       const config: LaunchPipelineConfig = {
         mode: "discover",
@@ -97,13 +105,59 @@ export default function NewPipelinePage() {
     }
   };
 
+  const handleCreateSchedule = async () => {
+    if (!canLaunchDiscover || !session?.access_token) return;
+    setCreatingSchedule(true);
+    setError(null);
+
+    try {
+      const pipelineConfig = {
+        mode: "discover",
+        search_context: {
+          industry: industry.trim(),
+          company_profile: companyProfile.trim() || undefined,
+          technology_focus: technologyFocus.trim(),
+          qualifying_criteria: qualifyingCriteria.trim() || undefined,
+          disqualifiers: disqualifiers.trim() || undefined,
+          geographic_region: geographicRegion.trim() || undefined,
+        },
+        country_code: countryCode.trim() || undefined,
+        options: { use_vision: true, max_leads: maxLeads },
+      };
+
+      const res = await fetch("/api/proxy/schedules", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: scheduleName.trim() || name.trim() || `${industry.trim()} — ${scheduleFrequency}`,
+          pipeline_config: pipelineConfig,
+          frequency: scheduleFrequency,
+        }),
+      });
+
+      if (res.ok) {
+        router.push("/dashboard");
+      } else {
+        const data = await res.json();
+        setError(data.detail || data.error || "Failed to create schedule");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create schedule");
+    } finally {
+      setCreatingSchedule(false);
+    }
+  };
+
   const handleLaunchBulk = async () => {
     if (!canLaunchBulk) return;
     setLaunching(true);
     setError(null);
 
     try {
-      resetHunt();
+      resetPipeline();
 
       const domains = bulkDomains
         .split("\n")
@@ -128,9 +182,12 @@ export default function NewPipelinePage() {
       };
 
       await launchPipeline(config);
+      toast({ title: "Pipeline launched", description: name.trim() || `Bulk import`, variant: "success" });
       router.push("/dashboard/pipeline");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create pipeline");
+      const msg = err instanceof Error ? err.message : "Failed to create pipeline";
+      setError(msg);
+      toast({ title: "Pipeline launch failed", description: msg, variant: "error" });
       setLaunching(false);
     }
   };
@@ -362,26 +419,89 @@ export default function NewPipelinePage() {
             </div>
           </div>
 
-          {/* Launch button */}
-          <button
-            onClick={handleLaunchDiscover}
-            disabled={!canLaunchDiscover || launching}
-            className="w-full flex items-center justify-center gap-3 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-6 py-4 rounded-xl hover:bg-white/85 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {launching ? (
-              <>
-                <div className="w-4 h-4 border-2 border-void/30 border-t-void rounded-full animate-spin" />
-                Launching Pipeline...
-              </>
-            ) : (
-              <>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-                Launch Discovery Pipeline
-              </>
+          {/* Launch / Schedule buttons */}
+          <div className="space-y-3">
+            <button
+              onClick={handleLaunchDiscover}
+              disabled={!canLaunchDiscover || launching || creatingSchedule}
+              className="w-full flex items-center justify-center gap-3 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-6 py-4 rounded-xl hover:bg-white/85 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {launching ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-void/30 border-t-void rounded-full animate-spin" />
+                  Launching Pipeline...
+                </>
+              ) : (
+                <>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="5 3 19 12 5 21 5 3" />
+                  </svg>
+                  Launch Discovery Pipeline
+                </>
+              )}
+            </button>
+
+            {/* Schedule toggle */}
+            <button
+              onClick={() => setShowSchedule(!showSchedule)}
+              disabled={!canLaunchDiscover}
+              className="w-full flex items-center justify-center gap-2 font-mono text-[10px] uppercase tracking-[0.15em] px-4 py-3 rounded-xl border border-border text-text-muted hover:text-secondary hover:border-secondary/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            >
+              🔁 {showSchedule ? "Hide Schedule Options" : "Schedule Instead"}
+            </button>
+
+            {/* Schedule options (collapsible) */}
+            {showSchedule && (
+              <div className="bg-surface-2 border border-secondary/20 rounded-xl p-5 space-y-4">
+                <div>
+                  <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                    Frequency
+                  </label>
+                  <div className="flex gap-2">
+                    {(["daily", "weekly", "biweekly", "monthly"] as const).map((freq) => (
+                      <button
+                        key={freq}
+                        onClick={() => setScheduleFrequency(freq)}
+                        className={`flex-1 font-mono text-[10px] uppercase tracking-wider py-2.5 rounded-lg border transition-colors cursor-pointer ${
+                          scheduleFrequency === freq
+                            ? "bg-secondary/10 border-secondary/30 text-secondary"
+                            : "border-border text-text-dim hover:text-text-muted"
+                        }`}
+                      >
+                        {freq}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] uppercase tracking-[0.2em] text-text-muted block mb-2">
+                    Schedule Name <span className="text-text-dim">(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={scheduleName}
+                    onChange={(e) => setScheduleName(e.target.value)}
+                    placeholder={`${industry.trim() || "Pipeline"} — ${scheduleFrequency}`}
+                    className="w-full bg-surface-3 border border-border rounded-lg px-4 py-3 font-mono text-xs text-text-primary placeholder:text-text-dim focus:outline-none focus:border-secondary/40 transition-colors"
+                  />
+                </div>
+                <button
+                  onClick={handleCreateSchedule}
+                  disabled={!canLaunchDiscover || creatingSchedule}
+                  className="w-full flex items-center justify-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs font-bold uppercase tracking-[0.15em] px-6 py-3.5 rounded-xl hover:bg-secondary/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                >
+                  {creatingSchedule ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+                      Creating Schedule...
+                    </>
+                  ) : (
+                    <>🔁 Create {scheduleFrequency.charAt(0).toUpperCase() + scheduleFrequency.slice(1)} Schedule</>
+                  )}
+                </button>
+              </div>
             )}
-          </button>
+          </div>
 
           <p className="font-mono text-[10px] text-text-dim text-center">
             AI agents will search the web, crawl company sites, and qualify leads automatically.
@@ -409,7 +529,7 @@ export default function NewPipelinePage() {
           </p>
           <Link
             href="/chat"
-            onClick={() => resetHunt()}
+            onClick={() => resetPipeline()}
             className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-6 py-3 rounded-lg hover:bg-secondary/20 transition-colors"
           >
             Open Chat Assistant &rarr;

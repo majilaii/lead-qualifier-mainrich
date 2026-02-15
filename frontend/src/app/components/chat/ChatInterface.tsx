@@ -13,7 +13,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import UsageMeter from "../UsageMeter";
-import { useHunt } from "../hunt/HuntContext";
+import { usePipeline } from "../hunt/PipelineContext";
 import { useAuth } from "../auth/SessionProvider";
 import { useBilling } from "../billing/BillingProvider";
 import OnboardingOverlay, { useFirstVisit } from "../onboarding/OnboardingOverlay";
@@ -27,7 +27,7 @@ import type {
   EnrichedContact,
   Phase,
   Readiness,
-} from "../hunt/HuntContext";
+} from "../hunt/PipelineContext";
 
 /* Lazy-load the map so mapbox-gl only downloads when needed */
 const LiveMapPanel = dynamic(() => import("./LiveMapPanel"), {
@@ -40,7 +40,7 @@ const LiveMapPanel = dynamic(() => import("./LiveMapPanel"), {
 });
 
 /* ══════════════════════════════════════════════
-   Types (pipeline types imported from HuntContext)
+   Types (pipeline types imported from PipelineContext)
    ══════════════════════════════════════════════ */
 
 // Use ChatMessage as Message alias for internal use
@@ -341,7 +341,7 @@ function WelcomeScreen({ onSuggestionClick, templates, onSelectTemplate }: {
   onSelectTemplate?: (t: SavedTemplate) => void;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-4 py-12">
+    <div className="flex flex-col items-center justify-start h-full px-4 py-12">
       <div className="animate-slide-up flex flex-col items-center">
         <div className="w-14 h-14 rounded-2xl bg-secondary/10 border border-secondary/20 flex items-center justify-center text-secondary text-2xl mb-6">◈</div>
         <h1 className="font-mono text-xl md:text-2xl font-bold text-text-primary tracking-tight mb-2 text-center">What are you hunting?</h1>
@@ -410,10 +410,10 @@ function ChatInput({ onSend, isLoading }: { onSend: (text: string) => void; isLo
   }, [handleSend]);
 
   return (
-    <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-4 flex-shrink-0">
+    <div className="border-t border-border-dim bg-surface-1/80 backdrop-blur-md px-4 py-5 flex-shrink-0">
       <div className="max-w-3xl mx-auto">
         <div className="relative flex items-end bg-surface-2 border border-border rounded-2xl focus-within:border-secondary/30 transition-colors duration-200">
-          <textarea ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Describe your ideal customer..." rows={1} disabled={isLoading} className="flex-1 bg-transparent text-text-primary font-sans text-sm px-4 py-3.5 resize-none outline-none placeholder:text-text-dim disabled:opacity-50 max-h-[200px]" />
+          <textarea ref={textareaRef} value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder="Describe your ideal customer..." rows={2} disabled={isLoading} className="flex-1 bg-transparent text-text-primary font-sans text-sm px-4 py-4 resize-none outline-none placeholder:text-text-dim disabled:opacity-50 max-h-[200px]" />
           <button onClick={handleSend} disabled={!input.trim() || isLoading} className="flex-shrink-0 m-2 p-2 rounded-xl bg-text-primary text-void disabled:opacity-15 disabled:cursor-not-allowed hover:bg-white/85 transition-all duration-200 cursor-pointer" aria-label="Send message">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="M12 5l7 7-7 7" /></svg>
           </button>
@@ -1128,7 +1128,7 @@ function ResultsSummaryCard({ qualifiedCompanies, summary, remainingCount, onCon
 
 export default function ChatInterface() {
   const router = useRouter();
-  const hunt = useHunt();
+  const hunt = usePipeline();
   const { isFirstVisit, checked: onboardingChecked, completeOnboarding } = useFirstVisit();
 
   // Destructure pipeline state from global context (survives navigation)
@@ -1152,12 +1152,16 @@ export default function ChatInterface() {
     setEnrichDone,
     launchSearch: ctxLaunchSearch,
     launchPipeline: ctxLaunchPipeline,
-    resetHunt,
+    resetPipeline,
+    showMap,
+    setShowMap,
+    useMapBounds,
+    mapBounds,
+    setUseMapBounds,
   } = hunt;
 
   // Chat-only state (local to this page)
   const [isLoading, setIsLoading] = useState(false);
-  const [showMap, setShowMap] = useState(true); // map panel visible during qualifying/complete
   const [showMobileMap, setShowMobileMap] = useState(false); // mobile fullscreen map overlay
   const [quotaError, setQuotaError] = useState<{ action: string; used: number; limit: number; plan: string } | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -1231,6 +1235,7 @@ export default function ChatInterface() {
       disqualifiers: t.search_context.disqualifiers || null,
       geographicRegion: t.search_context.geographicRegion || t.search_context.geographic_region || null,
       countryCode: t.search_context.countryCode || t.search_context.country_code || null,
+      geoBounds: t.search_context.geoBounds || t.search_context.geo_bounds || null,
     };
     setExtractedContext(ctx);
     setReadiness({ industry: true, companyProfile: true, technologyFocus: true, qualifyingCriteria: true, isReady: true });
@@ -1294,12 +1299,12 @@ export default function ChatInterface() {
     scrollToBottom();
   }, [messages, isLoading, phase, qualifiedCompanies, scrollToBottom]);
 
-  // Reset everything (resetHunt clears messages, readiness, pipeline state)
+  // Reset everything (resetPipeline clears messages, readiness, pipeline state)
   const resetChat = useCallback(() => {
-    resetHunt();
-  }, [resetHunt]);
+    resetPipeline();
+  }, [resetPipeline]);
 
-  // Listen for quota exceeded events from HuntContext
+  // Listen for quota exceeded events from PipelineContext
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -1407,7 +1412,7 @@ export default function ChatInterface() {
 
   // Force-launch search with whatever context we have (skip follow-ups)
   const forceSearch = useCallback(async () => {
-    const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null, geographicRegion: null, countryCode: null };
+    const ctx = extractedContext || { industry: null, companyProfile: null, technologyFocus: null, qualifyingCriteria: null, disqualifiers: null, geographicRegion: null, countryCode: null, geoBounds: null };
 
     if (!ctx.industry && messages.length > 0) {
       const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
@@ -1436,10 +1441,10 @@ export default function ChatInterface() {
   // Always show chat input except when actively searching (brief loading state)
   const showChatInput = phase !== "searching";
 
-  // Split layout: map + chat sidebar from search-complete onwards
-  const splitMode = (phase === "search-complete" || phase === "qualifying" || phase === "complete") && showMap;
+  // Split layout: map + chat sidebar whenever the user has the map open
+  const splitMode = showMap;
   // Whether to show the floating mobile map button
-  const showMobileMapBtn = (phase === "search-complete" || phase === "qualifying" || phase === "complete");
+  const showMobileMapBtn = showMap;
 
   /* ── Chat content (shared between full and split modes) ── */
   const chatContent = (
@@ -1575,24 +1580,39 @@ export default function ChatInterface() {
             </span>
           )}
 
-          {/* Map toggle — visible from search-complete onwards */}
-          {(phase === "search-complete" || phase === "qualifying" || phase === "complete") && (
-            <button
-              onClick={() => setShowMap((v) => !v)}
-              className={`hidden md:flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors duration-200 border rounded-lg px-2.5 py-1.5 cursor-pointer ${
-                showMap
-                  ? "text-secondary border-secondary/30 bg-secondary/5"
-                  : "text-text-muted border-border-dim hover:border-secondary/30 hover:text-secondary"
-              }`}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
-                <line x1="8" y1="2" x2="8" y2="18" />
-                <line x1="16" y1="6" x2="16" y2="22" />
+          {/* Area locked badge — visible when geo-fence is active */}
+          {useMapBounds && mapBounds && (
+            <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-2.5 py-1 text-emerald-400">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="w-3 h-3">
+                <path fillRule="evenodd" d="m7.539 14.841.003.003.002.002a.755.755 0 0 0 .912 0l.002-.002.003-.003.012-.009a5.57 5.57 0 0 0 .19-.153 15.588 15.588 0 0 0 2.046-2.082c1.101-1.362 2.291-3.342 2.291-5.597A5 5 0 0 0 3 7c0 2.255 1.19 4.235 2.291 5.597a15.591 15.591 0 0 0 2.236 2.235l.012.01ZM8 8.5a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z" clipRule="evenodd" />
               </svg>
-              {showMap ? "Hide Map" : "Show Map"}
-            </button>
+              <span className="font-mono text-[9px] uppercase tracking-[0.1em]">Area locked</span>
+              <button
+                onClick={() => setUseMapBounds(false)}
+                className="ml-0.5 text-emerald-400/60 hover:text-emerald-300 transition-colors cursor-pointer text-xs leading-none"
+                title="Clear geo-fence"
+              >
+                ✕
+              </button>
+            </div>
           )}
+
+          {/* Map toggle — always visible */}
+          <button
+            onClick={() => setShowMap((v) => !v)}
+            className={`hidden md:flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em] transition-colors duration-200 border rounded-lg px-2.5 py-1.5 cursor-pointer ${
+              showMap
+                ? "text-secondary border-secondary/30 bg-secondary/5"
+                : "text-text-muted border-border-dim hover:border-secondary/30 hover:text-secondary"
+            }`}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" />
+              <line x1="8" y1="2" x2="8" y2="18" />
+              <line x1="16" y1="6" x2="16" y2="22" />
+            </svg>
+            {showMap ? "Hide Map" : "Show Map"}
+          </button>
         </div>
 
         {messages.length > 0 && (
@@ -1606,15 +1626,20 @@ export default function ChatInterface() {
       {/* ─── Body: split or full ─── */}
       {splitMode ? (
         /* ═══ Split Layout: Chat (left) + Map (right) ═══ */
-        <div ref={splitContainerRef} className="flex-1 flex overflow-hidden relative">
+        <div ref={splitContainerRef} className="flex-1 min-h-0 flex overflow-hidden relative">
           {/* Chat sidebar — left (resizable) */}
           <div
-            className="flex-shrink-0 flex flex-col min-w-0 overflow-hidden animate-slide-left md:block"
+            className="flex-shrink-0 flex flex-col h-full min-w-0 overflow-hidden animate-slide-left relative z-[2]"
             style={{ width: `${splitPercent}%` }}
           >
             {/* Scrollable content */}
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              {chatContent}
+            <div
+              className="flex-1 min-h-0 overflow-y-auto overscroll-contain"
+              style={{ touchAction: "pan-y" }}
+            >
+              <div>
+                {chatContent}
+              </div>
             </div>
 
             {/* Chat input in split mode */}
@@ -1649,7 +1674,7 @@ export default function ChatInterface() {
 
           {/* Map panel — right (resizable, desktop) */}
           <div
-            className="hidden md:block flex-1 min-w-0 animate-slide-in-right"
+            className="hidden md:flex flex-1 min-w-0 h-full overflow-hidden animate-slide-in-right relative"
           >
             <LiveMapPanel />
           </div>
@@ -1689,8 +1714,10 @@ export default function ChatInterface() {
         /* ═══ Standard Full-Width Layout ═══ */
         <>
           {/* ─── Content ─── */}
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            {chatContent}
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">
+            <div className="flex-1">
+              {chatContent}
+            </div>
           </div>
 
           {/* ─── Input ─── */}

@@ -7,7 +7,10 @@ import {
   usePipelineTracker,
   type PipelineRunInfo,
 } from "../../components/pipeline/PipelineTracker";
-import { useHunt } from "../../components/hunt/HuntContext";
+import { usePipeline } from "../../components/hunt/PipelineContext";
+import { TableRowSkeleton } from "../../components/ui/Skeleton";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { useToast } from "../../components/ui/Toast";
 
 type Tab = "active" | "history";
 
@@ -21,7 +24,8 @@ export default function PipelinePage() {
     deletePipeline,
     liveProgress,
   } = usePipelineTracker();
-  const { resetHunt } = useHunt();
+  const { resetPipeline } = usePipeline();
+  const { toast } = useToast();
 
   const [tab, setTab] = useState<Tab>("active");
   const [rerunningId, setRerunningId] = useState<string | null>(null);
@@ -53,14 +57,16 @@ export default function PipelinePage() {
       setRerunningId(run.id);
       try {
         await rerunPipeline(run.id);
+        toast({ title: "Pipeline re-launched", description: run.name || run.industry || "Re-run", variant: "success" });
         setTab("active");
       } catch (err) {
         console.error("Rerun failed:", err);
+        toast({ title: "Re-run failed", description: err instanceof Error ? err.message : "Try again", variant: "error" });
       } finally {
         setRerunningId(null);
       }
     },
-    [rerunPipeline]
+    [rerunPipeline, toast]
   );
 
   const handleDelete = useCallback(
@@ -68,18 +74,27 @@ export default function PipelinePage() {
       setDeletingId(id);
       try {
         await deletePipeline(id);
+        toast({ title: "Pipeline deleted", variant: "info" });
       } finally {
         setDeletingId(null);
         setConfirmDeleteId(null);
       }
     },
-    [deletePipeline]
+    [deletePipeline, toast]
   );
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+      <div className="p-6 md:p-8 max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-mono text-xl font-bold text-text-primary tracking-tight">Pipeline</h1>
+            <p className="font-sans text-sm text-text-muted mt-1">Loading runs…</p>
+          </div>
+        </div>
+        <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
+          <TableRowSkeleton rows={6} />
+        </div>
       </div>
     );
   }
@@ -104,7 +119,7 @@ export default function PipelinePage() {
         </div>
         <button
           onClick={() => {
-            resetHunt();
+            resetPipeline();
             router.push("/dashboard/new");
           }}
           className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-2.5 rounded-lg hover:bg-white/85 transition-colors cursor-pointer"
@@ -200,7 +215,7 @@ export default function PipelinePage() {
               <div className="flex items-center justify-center gap-3">
                 <button
                   onClick={() => {
-                    resetHunt();
+                    resetPipeline();
                     router.push("/dashboard/new");
                   }}
                   className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-secondary/20 transition-colors cursor-pointer"
@@ -209,7 +224,7 @@ export default function PipelinePage() {
                 </button>
                 <button
                   onClick={() => {
-                    resetHunt();
+                    resetPipeline();
                     router.push("/chat");
                   }}
                   className="inline-flex items-center gap-2 border border-border text-text-muted font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer"
@@ -248,7 +263,7 @@ export default function PipelinePage() {
               </p>
               <button
                 onClick={() => {
-                  resetHunt();
+                  resetPipeline();
                   router.push("/dashboard/new");
                 }}
                 className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-secondary/20 transition-colors cursor-pointer"
