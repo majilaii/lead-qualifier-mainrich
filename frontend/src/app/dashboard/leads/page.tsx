@@ -798,6 +798,15 @@ export default function LeadsPage() {
                     <span className="text-hot">✉</span> Batch Draft Emails
                     <p className="font-sans text-[10px] text-text-dim mt-0.5">AI-generate personalized emails (max 10)</p>
                   </button>
+                  <div className="border-t border-border-dim my-1" />
+                  <button
+                    onClick={handleBatchDraftEmail}
+                    disabled={batchDrafting}
+                    className="w-full text-left px-3 py-2.5 font-mono text-[11px] text-text-primary hover:bg-surface-3 transition-colors cursor-pointer disabled:opacity-40"
+                  >
+                    <span className="text-hot">✉</span> Batch Draft Emails
+                    <p className="font-sans text-[10px] text-text-dim mt-0.5">AI-generate personalized emails (max 10)</p>
+                  </button>
                 </div>
               </>
             )}

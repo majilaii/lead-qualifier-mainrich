@@ -177,7 +177,7 @@ export default function HuntsPage() {
                   </span>
                 )}
                 {resuming === s.id ? (
-                  <span className="font-mono text-[12px] text-secondary/60 uppercase tracking-[0.15em] flex items-center gap-1.5">
+                  <span className="font-mono text-[10px] text-secondary/60 uppercase tracking-[0.15em] flex items-center gap-1.5">
                     <Spinner size="sm" />
                     Loading…
                   </span>
