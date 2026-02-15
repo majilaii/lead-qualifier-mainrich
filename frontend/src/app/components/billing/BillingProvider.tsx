@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "../auth/SessionProvider";
 
 /* ═══════════════════════════════════════════════
@@ -90,10 +91,32 @@ export default function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, [session]);
 
+  const searchParams = useSearchParams();
+
   // Auto-fetch on mount
-  useState(() => {
+  useEffect(() => {
     if (session?.access_token) refreshBilling();
-  });
+  }, [session?.access_token, refreshBilling]);
+
+  // Re-fetch after Stripe checkout redirect (billing=success or billing=cancelled)
+  useEffect(() => {
+    const billingParam = searchParams.get("billing");
+    if (billingParam === "success" && session?.access_token) {
+      // Stripe webhook may take a moment to process, so retry a few times
+      let attempts = 0;
+      const maxAttempts = 5;
+      const pollBilling = async () => {
+        await refreshBilling();
+        attempts++;
+        // If still showing free after checkout success, retry
+        if (attempts < maxAttempts) {
+          setTimeout(pollBilling, 2000);
+        }
+      };
+      // Initial delay to give webhook time to process
+      setTimeout(pollBilling, 1500);
+    }
+  }, [searchParams, session?.access_token, refreshBilling]);
 
   const checkout = useCallback(
     async (plan: "pro" | "enterprise") => {

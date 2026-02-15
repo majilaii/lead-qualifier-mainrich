@@ -29,6 +29,7 @@ from sqlalchemy import (
     JSON,
     Index,
     Double,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -59,10 +60,23 @@ class Profile(Base):
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
 
+    # Notification preferences
+    notification_prefs: Mapped[Optional[dict]] = mapped_column(
+        JSON,
+        default=lambda: {
+            "pipeline_complete": True,
+            "scheduled_run": True,
+            "requalification": True,
+            "weekly_digest": False,
+        },
+        nullable=True,
+    )
+
     # Relationships
     searches: Mapped[list["Search"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     usage: Mapped[list["UsageTracking"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     templates: Mapped[list["SearchTemplate"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    schedules: Mapped[list["PipelineSchedule"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
 
 
 class Search(Base):
@@ -76,6 +90,13 @@ class Search(Base):
     technology_focus: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     qualifying_criteria: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     disqualifiers: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Geographic context
+    geographic_region: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    country_code: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    geo_bounds: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # AI-extracted [sw_lat, sw_lng, ne_lat, ne_lng]
+    # User-drawn map fence (persisted separately from AI-extracted bounds)
+    map_bounds: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # [sw_lat, sw_lng, ne_lat, ne_lng]
+    show_map: Mapped[bool] = mapped_column(Boolean, default=False)
     # Search metadata
     queries_used: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     total_found: Mapped[int] = mapped_column(Integer, default=0)
@@ -165,6 +186,7 @@ class UsageTracking(Base):
     searches_run: Mapped[int] = mapped_column(Integer, default=0)
     enrichments_used: Mapped[int] = mapped_column(Integer, default=0)
     linkedin_lookups: Mapped[int] = mapped_column(Integer, default=0)
+    email_drafts_used: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
@@ -253,3 +275,36 @@ class LeadSnapshot(Base):
 
     # Relationships
     lead: Mapped["QualifiedLead"] = relationship(back_populates="snapshots")
+
+
+class PipelineSchedule(Base):
+    """Recurring pipeline schedules — pipelines that run on autopilot."""
+    __tablename__ = "pipeline_schedules"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("profiles.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(Text)
+    pipeline_config: Mapped[dict] = mapped_column(JSON)  # Full PipelineCreateRequest payload
+    frequency: Mapped[str] = mapped_column(String(20))  # daily | weekly | biweekly | monthly
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_running: Mapped[bool] = mapped_column(Boolean, default=False)  # Prevents concurrent duplicate runs
+    # Timezone-aware scheduling: users pick their preferred run hour + timezone
+    run_at_hour: Mapped[int] = mapped_column(Integer, default=9)  # 0-23, hour of day to run
+    timezone: Mapped[str] = mapped_column(String(50), default="UTC")  # e.g. "Europe/Berlin"
+    # Run tracking
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_run_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), nullable=True)  # FK to searches.id
+    run_count: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0)  # Auto-pause after 3
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    # Relationships
+    profile: Mapped["Profile"] = relationship(back_populates="schedules")
+
+    __table_args__ = (
+        Index("ix_schedules_next_run_active", "next_run_at", postgresql_where=text("is_active = TRUE AND is_running = FALSE")),
+    )

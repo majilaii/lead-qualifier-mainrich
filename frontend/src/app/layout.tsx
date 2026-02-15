@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import SessionProvider from "./components/auth/SessionProvider";
-import { HuntProvider } from "./components/hunt/HuntContext";
+import { PipelineProvider } from "./components/hunt/PipelineContext";
 import BillingProvider from "./components/billing/BillingProvider";
+import { ToastProvider } from "./components/ui/Toast";
 
 export const metadata: Metadata = {
   title: "Hunt — AI-Powered B2B Lead Discovery Platform",
@@ -25,9 +27,13 @@ export default function RootLayout({
       </head>
       <body className="bg-void text-text-primary font-mono antialiased">
         <SessionProvider>
-          <BillingProvider>
-            <HuntProvider>{children}</HuntProvider>
-          </BillingProvider>
+          <Suspense>
+            <BillingProvider>
+              <PipelineProvider>
+                <ToastProvider>{children}</ToastProvider>
+              </PipelineProvider>
+            </BillingProvider>
+          </Suspense>
         </SessionProvider>
       </body>
     </html>

@@ -90,6 +90,10 @@ class ExtractedContext:
     disqualifiers: Optional[str] = None
     geographic_region: Optional[str] = None
     country_code: Optional[str] = None  # ISO 3166-1 alpha-2 (e.g. "GB", "US")
+    # Map bounding box — [sw_lat, sw_lng, ne_lat, ne_lng]
+    # When set, results are post-filtered to only include companies
+    # whose geocoded coordinates fall within (or near) this rectangle.
+    geo_bounds: Optional[list[float]] = None
 
     def to_dict(self) -> dict:
         return {
@@ -100,6 +104,7 @@ class ExtractedContext:
             "disqualifiers": self.disqualifiers,
             "geographicRegion": self.geographic_region,
             "countryCode": self.country_code,
+            "geoBounds": self.geo_bounds,
         }
 
     def to_query_input(self) -> str:
@@ -117,6 +122,12 @@ class ExtractedContext:
             parts.append(f"Disqualifiers: {self.disqualifiers}")
         if self.geographic_region:
             parts.append(f"GEOGRAPHIC CONSTRAINT (CRITICAL): {self.geographic_region} — ALL results MUST be located in or near this area")
+        if self.geo_bounds and len(self.geo_bounds) == 4:
+            sw_lat, sw_lng, ne_lat, ne_lng = self.geo_bounds
+            center_lat = (sw_lat + ne_lat) / 2
+            center_lng = (sw_lng + ne_lng) / 2
+            parts.append(f"MAP BOUNDING BOX: SW({sw_lat:.3f},{sw_lng:.3f}) → NE({ne_lat:.3f},{ne_lng:.3f}), center ≈ ({center_lat:.3f},{center_lng:.3f})")
+            parts.append("Companies MUST be located within or very close to this geographic area.")
         return "\n".join(parts)
 
 
@@ -266,6 +277,15 @@ GEOGRAPHIC CONSTRAINT (CRITICAL):
   - "highly rated dental clinic in W2 London Paddington"
 - NEVER omit the location from any query when a geographic constraint exists.
 - Include nearby neighborhoods, postcodes, or district names as variations across different queries.
+
+MAP BOUNDING BOX (when provided):
+- If a MAP BOUNDING BOX is given with coordinates, the user has drawn or locked a specific area on a map.
+- This is a HARD geographic constraint — companies MUST be within this area.
+- Use the bounding box to determine the geographic area and embed specific place names in your queries.
+- For a small area (city-level): use specific neighborhoods, districts, and street names.
+- For a medium area (region-level): use city names, counties, and sub-regions within the box.
+- For a large area (country-level): use country and major region names.
+- The bounding box center coordinates and bounds help you identify WHERE on Earth this is — use your knowledge of geography to convert coordinates to place names.
 
 OUTPUT FORMAT (strict JSON only):
 {
@@ -444,8 +464,12 @@ class ChatEngine:
         if not queries:
             return SearchResult()
 
-        # Step 2: Execute via Exa (pass country code for geographic filtering)
-        companies = await self._execute_exa_search(queries, country_code=context.country_code)
+        # Step 2: Execute via Exa (pass country code + bounding box for geographic filtering)
+        companies = await self._execute_exa_search(
+            queries,
+            country_code=context.country_code,
+            geo_bounds=context.geo_bounds,
+        )
 
         return SearchResult(
             companies=companies,
@@ -530,22 +554,34 @@ class ChatEngine:
     # ── Exa Search Execution ─────────────────────
 
     async def _execute_exa_search(
-        self, queries: list[dict], country_code: Optional[str] = None
+        self, queries: list[dict], country_code: Optional[str] = None,
+        geo_bounds: Optional[list[float]] = None,
     ) -> list[dict]:
-        """Execute search queries via Exa AI. Deduplicates by domain."""
+        """Execute search queries via Exa AI. Deduplicates by domain.
+
+        If *geo_bounds* is provided ([sw_lat, sw_lng, ne_lat, ne_lng]),
+        the LLM query-generation prompt already embeds the place name for
+        semantic relevance.  We also request extra results so that after
+        post-filtering by bounding box we still return a healthy set.
+        """
         if not self.exa_client:
             logger.warning("No EXA_API_KEY -- cannot execute search")
             return []
+
+        # When geo-bounds are active, request extra results to compensate
+        # for post-filter drop-off (Exa has no native bbox filter).
+        extra_factor = 1.5 if geo_bounds and len(geo_bounds) == 4 else 1.0
 
         all_results = []
         seen_domains = set()
 
         for q in queries:
             try:
+                requested = min(int(q.get("num_results", 10) * extra_factor), 25)
                 results = await asyncio.to_thread(
                     self._exa_search_sync,
                     query=q["query"],
-                    num_results=q.get("num_results", 10),
+                    num_results=requested,
                     category=q.get("category", "company"),
                     user_location=country_code,
                 )
@@ -561,6 +597,17 @@ class ChatEngine:
                 logger.warning("Exa search failed for '%s': %s", q.get('name', 'unknown'), e)
                 continue
 
+        # Tag every result with geo_bounds so downstream pipeline can post-filter
+        if geo_bounds and len(geo_bounds) == 4:
+            for r in all_results:
+                r["_geo_bounds"] = geo_bounds
+
+        logger.info(
+            "Exa search returned %d unique companies%s",
+            len(all_results),
+            f" (geo_bounds active — post-filter will apply after geocoding)"
+            if geo_bounds else "",
+        )
         return all_results
 
     def _exa_search_sync(

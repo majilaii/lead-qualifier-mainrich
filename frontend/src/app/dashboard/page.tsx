@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "../components/auth/SessionProvider";
+import { StatCardSkeleton, FunnelBarSkeleton, TableRowSkeleton } from "../components/ui/Skeleton";
+import { EmptyState } from "../components/ui/EmptyState";
+import { useToast } from "../components/ui/Toast";
 
 interface DashboardStats {
   total_leads: number;
@@ -24,6 +27,22 @@ interface FunnelData {
   total_leads: number;
 }
 
+interface ScheduleInfo {
+  id: string;
+  name: string;
+  frequency: string;
+  is_active: boolean;
+  is_running: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_run_id: string | null;
+  last_run_summary: Record<string, number> | null;
+  run_count: number;
+  consecutive_failures: number;
+  last_error: string | null;
+  created_at: string | null;
+}
+
 interface SearchSummary {
   id: string;
   industry: string | null;
@@ -36,11 +55,14 @@ interface SearchSummary {
 
 export default function DashboardPage() {
   const { session } = useAuth();
+  const { toast } = useToast();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [recentSearches, setRecentSearches] = useState<SearchSummary[]>([]);
   const [funnel, setFunnel] = useState<FunnelData | null>(null);
+  const [schedules, setSchedules] = useState<ScheduleInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [scheduleActioning, setScheduleActioning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -56,14 +78,61 @@ export default function DashboardPage() {
       fetch("/api/proxy/dashboard/funnel", { headers }).then((r) =>
         r.ok ? r.json() : null
       ),
+      fetch("/api/proxy/schedules", { headers }).then((r) =>
+        r.ok ? r.json() : { schedules: [] }
+      ),
     ])
-      .then(([statsData, searchesData, funnelData]) => {
+      .then(([statsData, searchesData, funnelData, schedulesData]) => {
         setStats(statsData);
         setRecentSearches((searchesData || []).slice(0, 5));
         setFunnel(funnelData);
+        setSchedules(schedulesData?.schedules || []);
       })
       .finally(() => setLoading(false));
   }, [session]);
+
+  const handleScheduleAction = async (id: string, action: "run-now" | "pause" | "resume" | "delete") => {
+    if (!session?.access_token) return;
+    setScheduleActioning(id);
+    try {
+      if (action === "delete") {
+        await fetch(`/api/proxy/schedules/${id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        setSchedules((prev) => prev.filter((s) => s.id !== id));
+      } else if (action === "run-now") {
+        await fetch(`/api/proxy/schedules/${id}/run-now`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        });
+        setSchedules((prev) =>
+          prev.map((s) => (s.id === id ? { ...s, is_running: true } : s))
+        );
+      } else {
+        const res = await fetch(`/api/proxy/schedules/${id}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ is_active: action === "resume" }),
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          setSchedules((prev) =>
+            prev.map((s) =>
+              s.id === id
+                ? { ...s, is_active: updated.is_active, next_run_at: updated.next_run_at }
+                : s
+            )
+          );
+        }
+      }
+    } finally {
+      setScheduleActioning(null);
+    }
+  };
 
   const handleDeleteSearch = async (id: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -90,8 +159,21 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+      <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-mono text-xl font-bold text-text-primary tracking-tight">Dashboard</h1>
+            <p className="font-sans text-sm text-text-muted mt-1">Overview of your lead discovery pipeline</p>
+          </div>
+        </div>
+        <StatCardSkeleton />
+        <FunnelBarSkeleton />
+        <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
+          <div className="px-5 py-4 border-b border-border-dim">
+            <div className="animate-pulse bg-surface-3 rounded h-4 w-40" />
+          </div>
+          <TableRowSkeleton rows={3} />
+        </div>
       </div>
     );
   }
@@ -246,6 +328,102 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Scheduled Pipelines */}
+      {schedules.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-mono text-sm font-semibold text-text-primary uppercase tracking-[0.1em]">
+              Scheduled Pipelines
+            </h2>
+            <Link
+              href="/dashboard/new"
+              className="font-mono text-[10px] text-secondary/60 hover:text-secondary uppercase tracking-[0.15em] transition-colors"
+            >
+              + New Schedule
+            </Link>
+          </div>
+          <div className="space-y-3">
+            {schedules.map((s) => (
+              <div
+                key={s.id}
+                className="bg-surface-2 border border-border rounded-xl p-5"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">
+                        {s.is_active ? (s.is_running ? "⏳" : "🔁") : "⏸"}
+                      </span>
+                      <span className="font-mono text-xs font-semibold text-text-primary truncate">
+                        {s.name}
+                      </span>
+                      <span className="font-mono text-[9px] text-text-dim uppercase tracking-wider bg-surface-3 px-2 py-0.5 rounded">
+                        {s.frequency}
+                      </span>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {s.is_active && s.next_run_at && !s.is_running && (
+                        <p className="font-mono text-[10px] text-text-muted">
+                          Next run: {new Date(s.next_run_at).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                        </p>
+                      )}
+                      {s.is_running && (
+                        <p className="font-mono text-[10px] text-secondary">
+                          Running now...
+                        </p>
+                      )}
+                      {!s.is_active && !s.is_running && (
+                        <p className="font-mono text-[10px] text-text-dim">
+                          Paused
+                          {s.last_error && <span className="text-red-400 ml-2">· {s.last_error}</span>}
+                        </p>
+                      )}
+                      {s.last_run_summary && s.last_run_at && (
+                        <p className="font-mono text-[10px] text-text-dim">
+                          Last run:{" "}
+                          <span className="text-hot">{s.last_run_summary.hot || 0} hot</span>,{" "}
+                          <span className="text-review">{s.last_run_summary.review || 0} review</span>
+                          {" "}({new Date(s.last_run_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })})
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {s.is_active && !s.is_running && (
+                      <button
+                        onClick={() => handleScheduleAction(s.id, "run-now")}
+                        disabled={scheduleActioning === s.id}
+                        className="font-mono text-[9px] uppercase tracking-wider px-3 py-1.5 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary hover:bg-secondary/20 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        Run Now
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleScheduleAction(s.id, s.is_active ? "pause" : "resume")}
+                      disabled={scheduleActioning === s.id || s.is_running}
+                      className="font-mono text-[9px] uppercase tracking-wider px-3 py-1.5 rounded-lg border border-border text-text-muted hover:text-text-primary hover:border-border-bright transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {s.is_active ? "Pause" : "Resume"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete schedule "${s.name}"?`)) {
+                          handleScheduleAction(s.id, "delete");
+                        }
+                      }}
+                      disabled={scheduleActioning === s.id || s.is_running}
+                      className="font-mono text-[9px] uppercase tracking-wider px-3 py-1.5 rounded-lg border border-border text-text-dim hover:text-red-400 hover:border-red-400/30 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Recent Hunts */}
       <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
         <div className="px-5 py-4 border-b border-border-dim flex items-center justify-between">
@@ -261,16 +439,13 @@ export default function DashboardPage() {
         </div>
 
         {recentSearches.length === 0 ? (
-          <div className="px-5 py-12 text-center">
-            <p className="font-mono text-xs text-text-dim mb-4">
-              No pipelines yet. Create your first one!
-            </p>
-            <Link
-              href="/dashboard/new"
-              className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-secondary/20 transition-colors"
-            >
-              + New Pipeline
-            </Link>
+          <div className="px-5 py-4">
+            <EmptyState
+              icon="◈"
+              title="No pipelines yet"
+              description="Launch your first pipeline to start discovering leads."
+              action={{ label: "+ New Pipeline", href: "/dashboard/new" }}
+            />
           </div>
         ) : (
           <div className="divide-y divide-border-dim">

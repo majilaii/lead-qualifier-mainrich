@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 
 PLAN_LIMITS: dict[str, dict[str, int | None]] = {
-    "free":       {"searches_run": 3,    "leads_qualified": 75,    "enrichments_used": 10,  "linkedin_lookups": 0},
-    "pro":        {"searches_run": 20,   "leads_qualified": 2000,  "enrichments_used": 200, "linkedin_lookups": 50},
-    "enterprise": {"searches_run": None, "leads_qualified": None,  "enrichments_used": 1000, "linkedin_lookups": 500},
+    "free":       {"searches_run": 3,    "leads_qualified": 75,    "enrichments_used": 10,  "linkedin_lookups": 0,  "email_drafts_used": 0},
+    "pro":        {"searches_run": 20,   "leads_qualified": 2000,  "enrichments_used": 200, "linkedin_lookups": 50, "email_drafts_used": 20},
+    "enterprise": {"searches_run": None, "leads_qualified": None,  "enrichments_used": 1000, "linkedin_lookups": 500, "email_drafts_used": None},
 }
 
 # Leads per hunt cap (not stored in usage, enforced at pipeline time)
@@ -47,6 +47,13 @@ LEADS_PER_HUNT = {
 
 # Deep research access
 DEEP_RESEARCH_PLANS = {"pro", "enterprise"}
+
+# Schedule limits
+MAX_SCHEDULES = {
+    "free": 0,
+    "pro": 2,
+    "enterprise": None,  # unlimited
+}
 
 
 def _current_month() -> str:
@@ -157,6 +164,7 @@ async def increment_usage(
     leads_qualified: int = 0,
     searches_run: int = 0,
     enrichments_used: int = 0,
+    email_drafts_used: int = 0,
 ) -> None:
     """Increment usage counters for the current month."""
     row = await _get_or_create_row(db, user_id)
@@ -167,6 +175,8 @@ async def increment_usage(
         row.searches_run += searches_run
     if enrichments_used:
         row.enrichments_used += enrichments_used
+    if email_drafts_used:
+        row.email_drafts_used += email_drafts_used
 
     await db.commit()
 
@@ -188,6 +198,8 @@ async def check_quota(
         "search": "searches_run",
         "leads": "leads_qualified",
         "enrichment": "enrichments_used",
+        "email_draft": "email_drafts_used",
+        "linkedin": "linkedin_lookups",
     }
 
     metric = metric_map.get(action)
