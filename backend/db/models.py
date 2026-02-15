@@ -63,6 +63,7 @@ class Profile(Base):
     searches: Mapped[list["Search"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     usage: Mapped[list["UsageTracking"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
     templates: Mapped[list["SearchTemplate"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
+    support_logs: Mapped[list["SupportChatLog"]] = relationship(back_populates="profile", cascade="all, delete-orphan")
 
 
 class Search(Base):
@@ -253,3 +254,60 @@ class LeadSnapshot(Base):
 
     # Relationships
     lead: Mapped["QualifiedLead"] = relationship(back_populates="snapshots")
+
+
+class KnowledgeDocument(Base):
+    """Source document used by support-chat retrieval."""
+    __tablename__ = "knowledge_documents"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    slug: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    title: Mapped[str] = mapped_column(String(255))
+    source_path: Mapped[str] = mapped_column(String(1000))
+    source_type: Mapped[str] = mapped_column(String(50), default="markdown")
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(30), default="active")  # active | archived
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+    chunks: Mapped[list["KnowledgeChunk"]] = relationship(back_populates="document", cascade="all, delete-orphan")
+
+
+class KnowledgeChunk(Base):
+    """Chunked content + embedding for semantic retrieval."""
+    __tablename__ = "knowledge_chunks"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    document_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("knowledge_documents.id", ondelete="CASCADE"), index=True)
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0)
+    content: Mapped[str] = mapped_column(Text)
+    token_estimate: Mapped[int] = mapped_column(Integer, default=0)
+    embedding: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)  # float[] stored as JSON for DB portability
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    document: Mapped["KnowledgeDocument"] = relationship(back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_knowledge_chunks_doc_idx", "document_id", "chunk_index", unique=True),
+    )
+
+
+class SupportChatLog(Base):
+    """Audit trail for support-chat requests and grounded answers."""
+    __tablename__ = "support_chat_logs"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(_uuid.uuid4()))
+    user_id: Mapped[Optional[str]] = mapped_column(UUID(as_uuid=False), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id: Mapped[str] = mapped_column(String(100), index=True)
+    question: Mapped[str] = mapped_column(Text)
+    answer: Mapped[str] = mapped_column(Text)
+    citations: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    retrieved_chunks: Mapped[Optional[list]] = mapped_column(JSON, nullable=True)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    needs_human: Mapped[bool] = mapped_column(Boolean, default=False)
+    user_feedback: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # up | down
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    profile: Mapped[Optional["Profile"]] = relationship(back_populates="support_logs")

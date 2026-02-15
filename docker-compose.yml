@@ -26,9 +26,14 @@ services:
       - ./backend/.env
     environment:
       - FRONTEND_URL=http://localhost:3000
+      - SUPPORT_DOCS_DIR=/workspace/docs/product-knowledge
+      - SUPPORT_README_PATH=/workspace/README.md
     volumes:
       # ── Mount ALL source code so edits reflect instantly ──
       - ./backend:/app
+      # Mount repo docs for support-chat knowledge indexing
+      - ./docs:/workspace/docs:ro
+      - ./README.md:/workspace/README.md:ro
       # Prevent host node artifacts from leaking in
       - /app/__pycache__
     # Override CMD → run with --reload so uvicorn picks up file changes

@@ -3,6 +3,7 @@ import "./globals.css";
 import SessionProvider from "./components/auth/SessionProvider";
 import { HuntProvider } from "./components/hunt/HuntContext";
 import BillingProvider from "./components/billing/BillingProvider";
+import SupportChatWidget from "./components/support/SupportChatWidget";
 
 export const metadata: Metadata = {
   title: "Hunt — AI-Powered B2B Lead Discovery Platform",
@@ -26,7 +27,10 @@ export default function RootLayout({
       <body className="bg-void text-text-primary font-mono antialiased">
         <SessionProvider>
           <BillingProvider>
-            <HuntProvider>{children}</HuntProvider>
+            <HuntProvider>
+              {children}
+              <SupportChatWidget />
+            </HuntProvider>
           </BillingProvider>
         </SessionProvider>
       </body>

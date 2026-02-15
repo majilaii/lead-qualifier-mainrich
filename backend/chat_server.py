@@ -45,6 +45,7 @@ from stripe_billing import is_stripe_configured
 from contact_extraction import extract_contacts_from_content
 from linkedin_enrichment import enrich_linkedin, get_linkedin_status
 from reddit_signals import get_reddit_pulse
+from support_chat_engine import SupportChatEngine
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -263,12 +264,26 @@ class SearchResponseModel(BaseModel):
     summary: Optional[str] = None
 
 
+class SupportChatRequest(BaseModel):
+    question: str = Field(..., min_length=2, max_length=2000)
+    session_id: Optional[str] = Field(None, max_length=100)
+    max_sources: int = Field(6, ge=2, le=10)
+
+
+class SupportChatResponseModel(BaseModel):
+    session_id: str
+    answer: str
+    confidence: float
+    needs_human: bool
+
+
 # ──────────────────────────────────────────────
 # App Setup
 # ──────────────────────────────────────────────
 
 # Global instances
 engine: Optional[ChatEngine] = None
+support_engine: Optional[SupportChatEngine] = None
 rate_limiter = RateLimiter(max_requests=120, window_seconds=60)
 
 # Tight limiter for anonymous /api/chat trial — 5 messages per hour per IP
@@ -279,6 +294,7 @@ anon_chat_limiter = RateLimiter(max_requests=5, window_seconds=3600)
 # ── Read-only routes exempt from rate limiting ──
 _RATE_LIMIT_EXEMPT = {
     "/api/health",
+    "/api/support/health",
     "/api/searches",
     "/api/usage",
     "/api/dashboard/stats",
@@ -295,7 +311,7 @@ _RATE_LIMIT_EXEMPT_PREFIXES = (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize chat engine and database on startup."""
-    global engine
+    global engine, support_engine
     
     # Initialize database
     from db import init_db
@@ -306,6 +322,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Lead Discovery Chat Server...")
     engine = ChatEngine()
     logger.info("Chat engine ready")
+    support_engine = SupportChatEngine()
+    logger.info("Support chat engine ready")
+
+    # Best-effort knowledge indexing on startup so support chat works immediately.
+    try:
+        from db import async_session
+        async with async_session() as db:
+            stats = await support_engine.index_knowledge_base(db)
+        logger.info("Support knowledge index initialized: %s", stats)
+    except Exception as exc:
+        logger.warning("Support knowledge index initialization failed: %s", exc)
     yield
     logger.info("Shutting down")
 
@@ -376,6 +403,65 @@ async def health():
         "linkedin_available": li_status["available"],
         "linkedin_providers": li_status["providers"],
     }
+
+
+@app.get("/api/support/health")
+async def support_health():
+    """Health and index status for support-chat RAG."""
+    if not support_engine:
+        raise HTTPException(status_code=503, detail="Support engine not initialized")
+    from db import get_db as _get_db
+
+    async for db in _get_db():
+        return await support_engine.health(db)
+
+
+@app.post("/api/support/chat", response_model=SupportChatResponseModel)
+async def support_chat(request: SupportChatRequest, user=Depends(get_current_user)):
+    """Answer product questions from indexed internal docs."""
+    if not support_engine:
+        raise HTTPException(status_code=503, detail="Support engine not initialized")
+    from db import get_db as _get_db
+
+    question = (request.question or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question is required")
+
+    async for db in _get_db():
+        result = await support_engine.answer_question(
+            db=db,
+            question=question,
+            user_id=user.id if user else None,
+            session_id=request.session_id,
+            max_sources=request.max_sources,
+        )
+        return SupportChatResponseModel(
+            session_id=result["session_id"],
+            answer=result["answer"],
+            confidence=result["confidence"],
+            needs_human=result["needs_human"],
+        )
+
+
+@app.post("/api/support/reindex")
+async def support_reindex(user=Depends(require_auth)):
+    """
+    Rebuild support knowledge index from docs.
+
+    If SUPPORT_REINDEX_ADMIN_IDS is set, only listed user IDs can run this.
+    """
+    if not support_engine:
+        raise HTTPException(status_code=503, detail="Support engine not initialized")
+
+    raw_admin_ids = os.getenv("SUPPORT_REINDEX_ADMIN_IDS", "")
+    admin_ids = {x.strip() for x in raw_admin_ids.split(",") if x.strip()}
+    if admin_ids and user.id not in admin_ids:
+        raise HTTPException(status_code=403, detail="Not allowed to reindex support knowledge")
+
+    from db import get_db as _get_db
+    async for db in _get_db():
+        stats = await support_engine.index_knowledge_base(db)
+        return {"ok": True, "stats": stats}
 
 
 @app.get("/api/usage")
