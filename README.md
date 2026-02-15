@@ -28,6 +28,187 @@ CLI (legacy, deprecated):
 | **5. Enrichment** | `enrichment.py` | Looks up contact emails/phones via Apollo.io or Hunter.io (optional, manual mode by default) |
 | **6. Dashboard** | Frontend | Full pipeline view: stats, searchable leads table, detail drawer, interactive map, settings |
 
+---
+
+## How Leads Are Searched, Qualified & Approved
+
+This is the end-to-end journey of a lead — from a plain-English description to a scored, enriched record in your pipeline.
+
+### Step 1: Define Your Ideal Customer (Chat)
+
+You start by describing who you're looking for in the chat interface (`/chat`). The AI conversation extracts **4 structured parameters** through natural dialogue:
+
+| Parameter | Example | Why It Matters |
+|-----------|---------|----------------|
+| **Industry** | "CNC machining and metal fabrication" | Determines the vertical Exa searches in |
+| **Company Profile** | "SMEs with 10-500 employees, established, US/Europe" | Filters by size, stage, and geography |
+| **Technology Focus** | "5-axis milling, precision tolerances, ISO 9001" | Defines what products/capabilities to look for |
+| **Qualifying Criteria** | "Website shows real machines, factory photos, part catalogs" | Tells the LLM what signals mean "good match" |
+
+Optional extras: **Disqualifiers** (e.g. "pure software companies, consulting firms") and **Geographic Region** (e.g. "Paddington, London, UK") with automatic location disambiguation.
+
+The chat uses a **readiness tracker** — once all 4 fields have sufficient detail, the search launches automatically. This can happen on the very first message if you're specific enough, or after 2-3 follow-up questions.
+
+### Step 2: AI Query Generation (Dual-LLM Security)
+
+Your search criteria pass through a **dual-LLM architecture** for prompt injection defense:
+
+```
+User Message ──→ [Conversation LLM] ──→ Structured Context (JSON)
+                                              │
+                                              ▼
+              Raw user text NEVER reaches → [Query Generation LLM] ──→ 4-8 Exa Queries
+```
+
+1. **Conversation LLM** (Kimi K2.5 or GPT-4o-mini) — Talks to you, extracts structured parameters, sanitizes input (strips injection patterns, special tokens, HTML, control characters)
+2. **Query Generation LLM** — Receives *only* the validated structured context (industry, profile, criteria). Generates 4-8 semantic search queries optimized for Exa AI
+3. **Output validation** — Generated queries are checked for count, length, and category before execution
+
+### Step 3: Lead Discovery (Exa Neural Search)
+
+The generated queries are executed against [Exa AI](https://exa.ai), a neural search engine that finds companies by *meaning*, not keywords.
+
+- Each query returns up to 25 results with: **URL**, **title**, **text snippet**, **relevance score**
+- Results are **deduplicated** by domain across all queries
+- Exa also returns **crawled page content** (markdown) — this is used directly for qualification (Exa-first strategy)
+- If a geographic region or map bounding box was specified, queries include location constraints
+
+**Typical output:** 50-200 unique company domains from 4-8 queries.
+
+### Step 4: Lead Qualification (Two-Phase Pipeline)
+
+Qualification runs in **two phases** to minimize cost and maximize speed:
+
+#### Phase 1: Score Every Lead (Exa-First, No Browser)
+
+For each discovered company, the LLM scores it **0-100** using the Exa-provided page content — no Playwright browser launch needed.
+
+```
+Exa Page Content ──→ [Quick Pre-Filter] ──→ [LLM Qualification] ──→ Score 0-100
+                          │                        │
+                     Obvious rejects            Reads website text
+                     (SaaS, agencies)           + optional screenshot
+                     skipped for free           against YOUR criteria
+```
+
+**What the LLM evaluates:**
+- Does the company match your industry and technology focus?
+- Are there qualifying signals on their website (products, capabilities, certifications)?
+- Are there disqualifying signals (wrong industry, pure software, etc.)?
+- Where is the company headquartered? (extracted for geocoding and map plotting)
+
+**LLM output (structured JSON):**
+
+| Field | Description |
+|-------|-------------|
+| `confidence_score` | 0-100 — how well they match your search criteria |
+| `company_type` | What kind of company (e.g. "Motor Manufacturer", "Dental Clinic") |
+| `industry_category` | Their industry sector |
+| `reasoning` | 2-3 sentences explaining the score |
+| `key_signals` | Array of positive signals found (e.g. "ISO 9001 certified", "factory photos") |
+| `red_flags` | Array of concerns (e.g. "appears to be a reseller, not manufacturer") |
+| `headquarters_location` | Full address extracted from website (for geocoding) |
+
+**Model fallback chain:** Kimi K2.5 (vision+text) → GPT-4o (vision) → GPT-4o-mini (text-only) → keyword matching (zero-cost last resort).
+
+**Quick pre-filter:** Before spending LLM tokens, an optional keyword check rejects obvious non-fits (SaaS platforms, digital agencies, law firms). This filter is skipped when using dynamic search context from the chat — the LLM decides everything.
+
+#### Phase 2: Deep-Crawl Hot Leads Only (Browser + Contacts)
+
+Only leads scoring **≥ 70** (hot) get a full Playwright browser crawl. This cuts total crawl time by ~70-80%.
+
+For each hot lead, the system:
+1. **Launches headless Chromium** via crawl4ai — loads the homepage, captures a screenshot
+2. **Crawls secondary pages** (`/contact`, `/about`, `/team`) for address and people data
+3. **Extracts contacts via LLM** — names, job titles, emails, phone numbers, LinkedIn URLs
+4. **Prioritizes decision-makers** — CEO, VP Sales, Head of Purchasing, Managing Director
+
+Contact extraction uses pattern matching (if one email is `john@company.com`, it infers `jane@company.com` for other people) and reconstructs obfuscated emails (`john [at] company [dot] com`).
+
+### Step 5: Scoring & Tier Assignment
+
+Every lead is automatically sorted into one of 3 tiers:
+
+| Tier | Score Range | What It Means | What Happens |
+|------|-------------|---------------|-------------|
+| 🔥 **Hot** | 70-100 | Strong match — website clearly shows qualifying signals | Deep-crawled for contacts, appears on map as a **red** dot, ready for outreach |
+| 🔍 **Review** | 40-69 | Possible match — evidence is unclear or partial | Appears on map as an **amber** dot, flagged for human review |
+| ❌ **Rejected** | 0-39 | Not a fit — positive evidence of mismatch found | Appears on map as a **grey** dot, includes reasoning for rejection |
+
+**Important:** A score of 40-50 does NOT mean bad — it often means the website was hard to read (loading screen, foreign language, Cloudflare block) and the company may still be excellent. The "review" tier exists specifically so humans check these edge cases.
+
+### Step 6: Geographic Filtering & Map Plotting
+
+Every lead gets geocoded for the interactive map:
+
+1. **LLM extracts HQ location** from website content (looks for About Us, Contact, footer, imprint pages)
+2. **Built-in geocoder** converts the address to lat/lng coordinates
+3. **Fallback chain:** LLM-extracted address → domain TLD country detection → search region center
+4. **Geo-bounds post-filter:** If you drew a map bounding box, leads outside that area are filtered out automatically
+5. **Pin spreading:** Co-located companies are offset in a spiral so pins don't overlap
+
+Leads appear on the map in **real-time** as they're qualified (the pipeline streams results via SSE).
+
+### Step 7: Human Approval & Pipeline Management
+
+After the automated pipeline finishes, **you** decide what happens next. No lead is contacted without human approval.
+
+Each lead can be moved through a CRM-like pipeline:
+
+```
+new ──→ contacted ──→ in_progress ──→ won
+                                  ──→ lost
+                                  ──→ archived
+```
+
+**From the dashboard pipeline page, you can:**
+- **Filter** by tier (hot/review/rejected), search text, or sort by score
+- **Open the detail drawer** for any lead — see the full AI reasoning, key signals, red flags, score gauge, contacts, and enrichment data
+- **Change status** — move a lead from `new` to `contacted`, `in_progress`, `won`, `lost`, or `archived`
+- **Enrich** — trigger Hunter.io / Apollo.io lookup for email/phone on demand
+- **Review rejected leads** — read the AI's reasoning and override if you disagree
+
+### Step 8: Optional Enrichment & Deep Research
+
+**Contact Enrichment** (optional, on-demand):
+- **Hunter.io** — Domain search finds the best contact at the company. Prefers senior/decision-maker roles (executive, management, purchasing, engineering)
+- **Apollo.io** — Email and phone lookup with 50 free credits/month
+- If a contact name is known, uses the Email Finder API for precision; otherwise falls back to Domain Search
+
+**Deep Research** (for hot leads):
+- Crawls up to 5 pages on the company's site
+- LLM generates a sales intelligence brief: products, technologies, company size, production volume, decision-maker titles, suggested pitch angle, and talking points
+- Results are industry-agnostic — the analysis adapts to whatever search context you defined in the chat
+
+### End-to-End Example
+
+```
+You type: "Find me precision CNC machining shops in Germany that do custom 
+           metal fabrication, have 5-axis mills, and serve automotive or aerospace"
+
+   ↓ Chat AI extracts structured context (1 message, isReady=true immediately)
+
+   ↓ Query Gen LLM produces 6 Exa queries:
+     • "precision CNC machining shop Germany 5-axis milling"
+     • "custom metal fabrication company automotive aerospace Germany"
+     • "Lohnfertigung CNC Fräsen 5-Achs Deutschland" (German-language query)
+     • ... (3 more semantic variations)
+
+   ↓ Exa returns 120 company URLs (deduplicated to 87 unique domains)
+
+   ↓ Phase 1: LLM scores all 87 using Exa text
+     → 12 hot (70-100), 31 review (40-69), 44 rejected (0-39)
+
+   ↓ Phase 2: Deep-crawl the 12 hot leads only
+     → Extract contacts (names, emails, titles) from /about, /contact pages
+     → Geocode all 87 leads for map display
+
+   ↓ Results stream to dashboard in real-time
+     → Red dots appear on map as hot leads are confirmed
+     → Pipeline table fills with sortable, filterable results
+     → You review, approve, and move leads through the pipeline
+```
+
 ### Lead Tiers
 
 Leads are automatically sorted into 3 tiers:
