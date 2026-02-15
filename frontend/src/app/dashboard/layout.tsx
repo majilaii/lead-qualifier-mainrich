@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import AuthGuard from "../components/auth/AuthGuard";
 import UserMenu from "../components/auth/UserMenu";
-import { useHunt } from "../components/hunt/HuntContext";
+import { usePipeline } from "../components/hunt/PipelineContext";
 import { PipelineTrackerProvider } from "../components/pipeline/PipelineTracker";
 import UpgradeModal from "../components/billing/UpgradeModal";
 
@@ -34,7 +34,7 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { phase, isPipelineRunning, qualifiedCompanies, searchCompanies, pipelineProgress, resetHunt } = useHunt();
+  const { phase, isPipelineRunning, qualifiedCompanies, searchCompanies, pipelineProgress, resetPipeline } = usePipeline();
 
   // Remember last visited dashboard tab so "Back to Dashboard" returns here
   useEffect(() => {
@@ -122,8 +122,8 @@ export default function DashboardLayout({
           {/* Quick action */}
           <div className="px-3 pb-3">
             <button
-              onClick={() => { resetHunt(); router.push("/dashboard/new"); }}
-              className="flex items-center justify-center gap-2 bg-text-primary text-void font-mono text-[12px] font-bold uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:bg-white/85 transition-colors w-full cursor-pointer"
+              onClick={() => { resetPipeline(); router.push("/dashboard/new"); }}
+              className="flex items-center justify-center gap-2 bg-text-primary text-void font-mono text-[10px] font-bold uppercase tracking-[0.15em] px-4 py-3 rounded-lg hover:bg-white/85 transition-colors w-full cursor-pointer"
             >
               + New Pipeline
             </button>

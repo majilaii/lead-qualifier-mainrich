@@ -3,7 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../components/auth/SessionProvider";
-import { useHunt } from "../../components/hunt/HuntContext";
+import { usePipeline } from "../../components/hunt/PipelineContext";
+import { TableRowSkeleton } from "../../components/ui/Skeleton";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { Spinner } from "../../components/ui/Spinner";
 
 interface SearchItem {
   id: string;
@@ -22,7 +25,7 @@ interface SearchItem {
 export default function HuntsPage() {
   const { session } = useAuth();
   const router = useRouter();
-  const { resumeHunt, resetHunt } = useHunt();
+  const { resumePipeline, resetPipeline } = usePipeline();
   const [searches, setSearches] = useState<SearchItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -62,7 +65,7 @@ export default function HuntsPage() {
   const handleResume = async (id: string) => {
     setResuming(id);
     try {
-      await resumeHunt(id);
+      await resumePipeline(id);
       router.push("/chat");
     } catch (err) {
       console.error("Failed to resume hunt:", err);
@@ -72,8 +75,16 @@ export default function HuntsPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" />
+      <div className="p-6 md:p-8 max-w-6xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="font-mono text-xl font-bold text-text-primary tracking-tight">Hunts</h1>
+            <p className="font-sans text-sm text-text-muted mt-1">All your saved searches</p>
+          </div>
+        </div>
+        <div className="bg-surface-2 border border-border rounded-xl overflow-hidden">
+          <TableRowSkeleton rows={6} />
+        </div>
       </div>
     );
   }
@@ -90,7 +101,7 @@ export default function HuntsPage() {
           </p>
         </div>
         <button
-          onClick={() => { resetHunt(); router.push("/chat"); }}
+          onClick={() => { resetPipeline(); router.push("/chat"); }}
           className="inline-flex items-center gap-2 bg-text-primary text-void font-mono text-xs font-bold uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-white/85 transition-colors cursor-pointer"
         >
           + New Hunt
@@ -98,17 +109,12 @@ export default function HuntsPage() {
       </div>
 
       {searches.length === 0 ? (
-        <div className="bg-surface-2 border border-border rounded-xl px-6 py-16 text-center">
-          <p className="font-mono text-xs text-text-dim mb-4">
-            No hunts yet. Start your first search!
-          </p>
-          <button
-            onClick={() => { resetHunt(); router.push("/chat"); }}
-            className="inline-flex items-center gap-2 bg-secondary/10 border border-secondary/20 text-secondary font-mono text-xs uppercase tracking-[0.15em] px-5 py-3 rounded-lg hover:bg-secondary/20 transition-colors cursor-pointer"
-          >
-            Start Hunting
-          </button>
-        </div>
+        <EmptyState
+          icon="◈"
+          title="No past hunts"
+          description="Your completed pipeline runs will appear here."
+          action={{ label: "+ New Pipeline", href: "/dashboard/new" }}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {searches.map((s) => (
@@ -172,7 +178,7 @@ export default function HuntsPage() {
                 )}
                 {resuming === s.id ? (
                   <span className="font-mono text-[12px] text-secondary/60 uppercase tracking-[0.15em] flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 border border-secondary/40 border-t-secondary rounded-full animate-spin inline-block" />
+                    <Spinner size="sm" />
                     Loading…
                   </span>
                 ) : (

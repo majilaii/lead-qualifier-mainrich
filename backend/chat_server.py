@@ -247,6 +247,7 @@ class SearchRequest(BaseModel):
     disqualifiers: Optional[str] = Field(None, max_length=500)
     geographic_region: Optional[str] = Field(None, max_length=200)
     country_code: Optional[str] = Field(None, max_length=2)  # ISO 3166-1 alpha-2
+    geo_bounds: Optional[list[float]] = Field(None, description="Map bounding box [sw_lat, sw_lng, ne_lat, ne_lng]")
 
 
 class ChatResponseModel(BaseModel):
@@ -310,8 +311,10 @@ _RATE_LIMIT_EXEMPT_PREFIXES = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize chat engine and database on startup."""
+    """Initialize chat engine, database, and scheduler on startup."""
     global engine, support_engine
+    scheduler_task: Optional[asyncio.Task] = None
+    requalification_task: Optional[asyncio.Task] = None
     
     # Initialize database
     from db import init_db
@@ -322,6 +325,7 @@ async def lifespan(app: FastAPI):
     logger.info("Starting Lead Discovery Chat Server...")
     engine = ChatEngine()
     logger.info("Chat engine ready")
+
     support_engine = SupportChatEngine()
     logger.info("Support chat engine ready")
 
@@ -333,7 +337,19 @@ async def lifespan(app: FastAPI):
         logger.info("Support knowledge index initialized: %s", stats)
     except Exception as exc:
         logger.warning("Support knowledge index initialization failed: %s", exc)
+
+    # Start scheduler loops (fire-and-forget background tasks)
+    from scheduler import schedule_loop, requalification_loop
+    scheduler_task = asyncio.create_task(schedule_loop())
+    requalification_task = asyncio.create_task(requalification_loop())
+    logger.info("Scheduler loops started")
     yield
+
+    # Cleanup
+    if scheduler_task:
+        scheduler_task.cancel()
+    if requalification_task:
+        requalification_task.cancel()
     logger.info("Shutting down")
 
 
@@ -649,6 +665,7 @@ async def search(request: SearchRequest, user=Depends(require_auth)):
         disqualifiers=request.disqualifiers,
         geographic_region=request.geographic_region,
         country_code=request.country_code,
+        geo_bounds=request.geo_bounds,
     )
 
     result = await engine.generate_and_search(context)
@@ -912,6 +929,11 @@ async def save_chat_session(request: ChatSessionRequest, user=Depends(require_au
         "technology_focus": ctx.get("technologyFocus") or ctx.get("technology_focus"),
         "qualifying_criteria": ctx.get("qualifyingCriteria") or ctx.get("qualifying_criteria"),
         "disqualifiers": ctx.get("disqualifiers"),
+        "geographic_region": ctx.get("geographicRegion") or ctx.get("geographic_region"),
+        "country_code": ctx.get("countryCode") or ctx.get("country_code"),
+        "geo_bounds": ctx.get("geoBounds") or ctx.get("geo_bounds"),
+        "map_bounds": ctx.get("mapBounds") or ctx.get("map_bounds"),
+        "show_map": ctx.get("showMap") if ctx.get("showMap") is not None else ctx.get("show_map"),
     }
 
     async for db in _get_db():
@@ -933,6 +955,15 @@ async def save_chat_session(request: ChatSessionRequest, user=Depends(require_au
                 existing.technology_focus = context.get("technology_focus") or existing.technology_focus
                 existing.qualifying_criteria = context.get("qualifying_criteria") or existing.qualifying_criteria
                 existing.disqualifiers = context.get("disqualifiers") or existing.disqualifiers
+                existing.geographic_region = context.get("geographic_region") or existing.geographic_region
+                existing.country_code = context.get("country_code") or existing.country_code
+                # Geo/map bounds — always overwrite (user may clear them)
+                if "geo_bounds" in context:
+                    existing.geo_bounds = context["geo_bounds"]
+                if "map_bounds" in context:
+                    existing.map_bounds = context["map_bounds"]
+                if context.get("show_map") is not None:
+                    existing.show_map = bool(context["show_map"])
                 await db.commit()
                 return {"session_id": existing.id}
 
@@ -946,6 +977,11 @@ async def save_chat_session(request: ChatSessionRequest, user=Depends(require_au
             technology_focus=context.get("technology_focus"),
             qualifying_criteria=context.get("qualifying_criteria"),
             disqualifiers=context.get("disqualifiers"),
+            geographic_region=context.get("geographic_region"),
+            country_code=context.get("country_code"),
+            geo_bounds=context.get("geo_bounds"),
+            map_bounds=context.get("map_bounds"),
+            show_map=bool(context.get("show_map")) if context.get("show_map") is not None else False,
             queries_used={"_mode": "chat_session"},
             total_found=0,
             messages=request.messages,
@@ -976,6 +1012,7 @@ class SearchContext(BaseModel):
     qualifying_criteria: Optional[str] = None
     disqualifiers: Optional[str] = None
     geographic_region: Optional[str] = None
+    geo_bounds: Optional[list[float]] = Field(None, description="Map bounding box [sw_lat, sw_lng, ne_lat, ne_lng]")
 
 
 class PipelineRequest(BaseModel):
@@ -1026,6 +1063,7 @@ class PipelineCreateRequest(BaseModel):
     domains: Optional[list[str]] = Field(None, max_length=200, description="Domains for qualify_only mode")
     template_id: Optional[str] = Field(None, max_length=100, description="Load search_context from a saved template")
     country_code: Optional[str] = Field(None, max_length=2, description="ISO 3166-1 alpha-2 for Exa geo filtering")
+    geo_bounds: Optional[list[float]] = Field(None, description="Map bounding box [sw_lat, sw_lng, ne_lat, ne_lng]")
     options: Optional[dict] = Field(default_factory=lambda: {
         "use_vision": True,
         "max_leads": 100,
@@ -1314,6 +1352,7 @@ async def create_pipeline(request: PipelineCreateRequest, user=Depends(require_a
                     search_context={
                         **(search_ctx or {}),
                         "country_code": request.country_code,
+                        **({"geo_bounds": request.geo_bounds} if request.geo_bounds else {}),
                     },
                     run=run,
                 )
@@ -1643,6 +1682,12 @@ async def get_search(search_id: str, user=Depends(require_auth)):
                 "company_profile": search.company_profile,
                 "technology_focus": search.technology_focus,
                 "qualifying_criteria": search.qualifying_criteria,
+                "disqualifiers": search.disqualifiers,
+                "geographic_region": search.geographic_region,
+                "country_code": search.country_code,
+                "geo_bounds": search.geo_bounds,
+                "map_bounds": search.map_bounds,
+                "show_map": search.show_map,
                 "total_found": search.total_found,
                 "messages": search.messages,
                 "created_at": search.created_at.isoformat() if search.created_at else None,
@@ -1706,12 +1751,14 @@ async def rerun_search(search_id: str, user=Depends(require_auth)):
             qualifying_criteria=original.qualifying_criteria,
             disqualifiers=original.disqualifiers,
             geographic_region=queries_ctx.get("geographic_region"),
+            geo_bounds=original.geo_bounds,
         )
 
         create_req = PipelineCreateRequest(
             name=f"{pipeline_name} (re-run)",
             mode=mode,
             search_context=search_context,
+            geo_bounds=original.geo_bounds,
             options={"use_vision": True, "max_leads": 100},
         )
 
@@ -3304,13 +3351,14 @@ async def _save_lead_to_db(search_id: str, company: dict, user_id: str = None, c
     async for db in _get_db():
         existing_lead = None
 
-        # Global dedup: check if we already have this domain for this user
-        if user_id and domain:
+        # Per-pipeline dedup: only dedup within the same search/pipeline
+        if user_id and domain and search_id:
             existing_lead = (await db.execute(
                 select(QualifiedLead)
                 .options(selectinload(QualifiedLead.contacts))
                 .where(
                     QualifiedLead.user_id == user_id,
+                    QualifiedLead.search_id == search_id,
                     QualifiedLead.domain == domain,
                 )
             )).scalar_one_or_none()
@@ -3337,8 +3385,6 @@ async def _save_lead_to_db(search_id: str, company: dict, user_id: str = None, c
                 existing_lead.key_signals = company.get("key_signals", existing_lead.key_signals)
                 existing_lead.red_flags = company.get("red_flags", existing_lead.red_flags)
 
-            # Always update search_id to latest hunt
-            existing_lead.search_id = search_id
             existing_lead.last_seen_at = datetime.now(timezone.utc)
 
             if company.get("hardware_type"):
@@ -3720,3 +3766,599 @@ def _location_matches_region(location_str: str, search_region: str) -> bool:
             return False  # Different countries → genuine mismatch
 
     return True  # Can't determine → don't block
+
+
+# ──────────────────────────────────────────────
+# Schedule CRUD Endpoints (Tier 2)
+# ──────────────────────────────────────────────
+
+class ScheduleCreateRequest(BaseModel):
+    name: str = Field(..., max_length=255)
+    pipeline_config: dict
+    frequency: str = Field(..., pattern="^(daily|weekly|biweekly|monthly)$")
+    run_at_hour: int = Field(9, ge=0, le=23)
+    timezone: str = Field("UTC", max_length=50)
+
+
+class ScheduleUpdateRequest(BaseModel):
+    name: Optional[str] = Field(None, max_length=255)
+    is_active: Optional[bool] = None
+    frequency: Optional[str] = Field(None, pattern="^(daily|weekly|biweekly|monthly)$")
+    run_at_hour: Optional[int] = Field(None, ge=0, le=23)
+    timezone: Optional[str] = Field(None, max_length=50)
+
+
+@app.post("/api/schedules")
+async def create_schedule(request: ScheduleCreateRequest, user=Depends(require_auth)):
+    """Create a new recurring pipeline schedule."""
+    from db import get_db as _get_db
+    from db.models import PipelineSchedule, Profile
+    from usage import MAX_SCHEDULES
+    from scheduler import compute_next_run
+
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        # Tier gating: check schedule limit
+        max_allowed = MAX_SCHEDULES.get(plan, 0)
+        if max_allowed is not None:
+            current_count = (await db.execute(
+                select(func.count(PipelineSchedule.id))
+                .where(PipelineSchedule.user_id == user.id)
+            )).scalar() or 0
+            if current_count >= max_allowed:
+                if max_allowed == 0:
+                    return JSONResponse(status_code=403, content={
+                        "error": "upgrade_required",
+                        "detail": "Scheduled pipelines are available on Pro and Enterprise plans.",
+                        "upgrade_url": "/dashboard/settings?upgrade=true",
+                    })
+                return JSONResponse(status_code=403, content={
+                    "error": "schedule_limit",
+                    "detail": f"Your {plan} plan allows {max_allowed} scheduled pipelines. Delete one or upgrade.",
+                    "limit": max_allowed,
+                    "current": current_count,
+                })
+
+        next_run = compute_next_run(request.frequency)
+        schedule = PipelineSchedule(
+            user_id=user.id,
+            name=request.name,
+            pipeline_config=request.pipeline_config,
+            frequency=request.frequency,
+            run_at_hour=request.run_at_hour,
+            timezone=request.timezone,
+            next_run_at=next_run,
+        )
+        db.add(schedule)
+        await db.commit()
+
+        return {
+            "id": schedule.id,
+            "name": schedule.name,
+            "frequency": schedule.frequency,
+            "is_active": schedule.is_active,
+            "next_run_at": schedule.next_run_at.isoformat() if schedule.next_run_at else None,
+            "created_at": schedule.created_at.isoformat() if schedule.created_at else None,
+        }
+
+
+@app.get("/api/schedules")
+async def list_schedules(user=Depends(require_auth)):
+    """List all schedules for the authenticated user."""
+    from db import get_db as _get_db
+    from db.models import PipelineSchedule, QualifiedLead, Search
+
+    async for db in _get_db():
+        result = await db.execute(
+            select(PipelineSchedule)
+            .where(PipelineSchedule.user_id == user.id)
+            .order_by(PipelineSchedule.created_at.desc())
+        )
+        schedules = result.scalars().all()
+
+        schedule_list = []
+        for s in schedules:
+            # Get last run summary if available
+            last_run_summary = None
+            if s.last_run_id:
+                tier_counts = (await db.execute(
+                    select(QualifiedLead.tier, func.count(QualifiedLead.id))
+                    .where(QualifiedLead.search_id == s.last_run_id)
+                    .group_by(QualifiedLead.tier)
+                )).all()
+                if tier_counts:
+                    last_run_summary = {row[0]: row[1] for row in tier_counts}
+
+            schedule_list.append({
+                "id": s.id,
+                "name": s.name,
+                "frequency": s.frequency,
+                "is_active": s.is_active,
+                "is_running": s.is_running,
+                "run_at_hour": s.run_at_hour,
+                "timezone": s.timezone,
+                "last_run_at": s.last_run_at.isoformat() if s.last_run_at else None,
+                "next_run_at": s.next_run_at.isoformat() if s.next_run_at else None,
+                "last_run_id": s.last_run_id,
+                "last_run_summary": last_run_summary,
+                "run_count": s.run_count,
+                "consecutive_failures": s.consecutive_failures,
+                "last_error": s.last_error,
+                "created_at": s.created_at.isoformat() if s.created_at else None,
+            })
+
+        return {"schedules": schedule_list}
+
+
+@app.patch("/api/schedules/{schedule_id}")
+async def update_schedule(schedule_id: str, request: ScheduleUpdateRequest, user=Depends(require_auth)):
+    """Update a schedule (pause/resume, change frequency, rename)."""
+    from db import get_db as _get_db
+    from db.models import PipelineSchedule
+    from scheduler import compute_next_run
+
+    async for db in _get_db():
+        schedule = (await db.execute(
+            select(PipelineSchedule)
+            .where(PipelineSchedule.id == schedule_id, PipelineSchedule.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        if request.name is not None:
+            schedule.name = request.name
+        if request.run_at_hour is not None:
+            schedule.run_at_hour = request.run_at_hour
+        if request.timezone is not None:
+            schedule.timezone = request.timezone
+
+        # Handle frequency change → recompute next_run_at
+        if request.frequency is not None and request.frequency != schedule.frequency:
+            schedule.frequency = request.frequency
+            schedule.next_run_at = compute_next_run(request.frequency)
+
+        # Handle activation/deactivation
+        if request.is_active is not None:
+            schedule.is_active = request.is_active
+            if request.is_active:
+                # Resuming — recompute next_run_at from now
+                schedule.next_run_at = compute_next_run(schedule.frequency)
+                schedule.consecutive_failures = 0
+                schedule.last_error = None
+
+        await db.commit()
+
+        return {
+            "id": schedule.id,
+            "name": schedule.name,
+            "frequency": schedule.frequency,
+            "is_active": schedule.is_active,
+            "next_run_at": schedule.next_run_at.isoformat() if schedule.next_run_at else None,
+        }
+
+
+@app.delete("/api/schedules/{schedule_id}")
+async def delete_schedule(schedule_id: str, user=Depends(require_auth)):
+    """Delete a schedule. Verify ownership."""
+    from db import get_db as _get_db
+    from db.models import PipelineSchedule
+
+    async for db in _get_db():
+        schedule = (await db.execute(
+            select(PipelineSchedule)
+            .where(PipelineSchedule.id == schedule_id, PipelineSchedule.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        await db.delete(schedule)
+        await db.commit()
+        return {"ok": True}
+
+
+@app.post("/api/schedules/{schedule_id}/run-now")
+async def run_schedule_now(schedule_id: str, user=Depends(require_auth)):
+    """Trigger an immediate run of a schedule (doesn't change next_run_at)."""
+    from db import get_db as _get_db
+    from db.models import PipelineSchedule
+    from scheduler import _run_scheduled_pipeline_safe
+
+    async for db in _get_db():
+        schedule = (await db.execute(
+            select(PipelineSchedule)
+            .where(PipelineSchedule.id == schedule_id, PipelineSchedule.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not schedule:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+
+        if schedule.is_running:
+            raise HTTPException(status_code=409, detail="Schedule is already running")
+
+        # Claim the lock
+        schedule.is_running = True
+        await db.commit()
+
+        # Fire and forget — but DON'T advance next_run_at (that's the point of run-now)
+        asyncio.create_task(_run_scheduled_pipeline_safe(schedule.id))
+
+        return {
+            "ok": True,
+            "message": f"Pipeline '{schedule.name}' triggered. Check dashboard for results.",
+        }
+
+
+# ──────────────────────────────────────────────
+# Lead Snapshots Endpoint (Tier 2)
+# ──────────────────────────────────────────────
+
+@app.get("/api/leads/{lead_id}/snapshots")
+async def get_lead_snapshots(lead_id: str, user=Depends(require_auth)):
+    """Get score history (snapshots) for a lead."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadSnapshot
+
+    async for db in _get_db():
+        # Verify ownership
+        lead = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id == lead_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        snapshots = (await db.execute(
+            select(LeadSnapshot)
+            .where(LeadSnapshot.lead_id == lead_id)
+            .order_by(LeadSnapshot.snapshot_at.desc())
+        )).scalars().all()
+
+        return {
+            "lead_id": lead_id,
+            "current_score": lead.score,
+            "current_tier": lead.tier,
+            "snapshots": [
+                {
+                    "id": s.id,
+                    "score": s.score,
+                    "tier": s.tier,
+                    "reasoning": s.reasoning,
+                    "key_signals": s.key_signals,
+                    "snapshot_at": s.snapshot_at.isoformat() if s.snapshot_at else None,
+                }
+                for s in snapshots
+            ],
+        }
+
+
+# ──────────────────────────────────────────────
+# Notification Preferences Endpoint (Tier 2)
+# ──────────────────────────────────────────────
+
+@app.get("/api/notifications/preferences")
+async def get_notification_preferences(user=Depends(require_auth)):
+    """Get user's notification preferences."""
+    from db import get_db as _get_db
+    from db.models import Profile
+
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+
+        return {
+            "preferences": profile.notification_prefs or {
+                "pipeline_complete": True,
+                "scheduled_run": True,
+                "requalification": True,
+                "weekly_digest": False,
+            }
+        }
+
+
+@app.patch("/api/notifications/preferences")
+async def update_notification_preferences(request: Request, user=Depends(require_auth)):
+    """Update user's notification preferences."""
+    from db import get_db as _get_db
+    from db.models import Profile
+
+    body = await request.json()
+    valid_keys = {"pipeline_complete", "scheduled_run", "requalification", "weekly_digest"}
+
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
+
+        current_prefs = profile.notification_prefs or {
+            "pipeline_complete": True,
+            "scheduled_run": True,
+            "requalification": True,
+            "weekly_digest": False,
+        }
+
+        # Only update valid keys
+        for key in valid_keys:
+            if key in body and isinstance(body[key], bool):
+                current_prefs[key] = body[key]
+
+        profile.notification_prefs = current_prefs
+        await db.commit()
+
+        return {"preferences": current_prefs}
+
+
+# ──────────────────────────────────────────────
+# AI Email Draft Endpoints (Tier 2)
+# ──────────────────────────────────────────────
+
+# Concurrency limiter for LLM calls — prevents rate-limit storms
+_email_draft_semaphore = asyncio.Semaphore(3)
+
+
+class EmailDraftRequest(BaseModel):
+    tone: str = Field("consultative", pattern="^(formal|casual|consultative)$")
+    sender_context: Optional[str] = Field(None, max_length=500)
+
+
+class BatchEmailDraftRequest(BaseModel):
+    lead_ids: list[str] = Field(..., max_length=10)
+    tone: str = Field("consultative", pattern="^(formal|casual|consultative)$")
+    sender_context: Optional[str] = Field(None, max_length=500)
+
+
+@app.post("/api/leads/{lead_id}/draft-email")
+async def draft_email(lead_id: str, request: EmailDraftRequest, user=Depends(require_auth)):
+    """Generate a personalized cold email draft for a lead using AI."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact, Profile
+    from usage import check_quota, increment_usage
+
+    async for db in _get_db():
+        # Verify ownership + get profile
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        # Quota check
+        exceeded = await check_quota(db, user.id, plan_tier=plan, action="email_draft")
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        # Get lead
+        lead = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id == lead_id, Search.user_id == user.id)
+        )).scalar_one_or_none()
+
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+
+        # Get contacts
+        contacts = (await db.execute(
+            select(LeadContact)
+            .where(LeadContact.lead_id == lead_id)
+            .order_by(LeadContact.created_at.asc())
+        )).scalars().all()
+
+        # Pick best contact (prefer those with email, then highest seniority)
+        best_contact = _pick_best_contact(contacts)
+
+        # Generate draft
+        async with _email_draft_semaphore:
+            draft = await _generate_email_draft(
+                lead=lead,
+                contact=best_contact,
+                tone=request.tone,
+                sender_context=request.sender_context,
+            )
+
+        # Increment usage
+        await increment_usage(db, user.id, email_drafts_used=1)
+
+        return {
+            "draft": draft,
+            "context_used": {
+                "deep_research": bool(lead.deep_research),
+                "contact_source": best_contact.source if best_contact else None,
+                "signals_count": len(lead.key_signals) if lead.key_signals else 0,
+            },
+        }
+
+
+@app.post("/api/leads/batch-draft-email")
+async def batch_draft_email(request: BatchEmailDraftRequest, user=Depends(require_auth)):
+    """Generate email drafts for multiple leads in parallel."""
+    from db import get_db as _get_db
+    from db.models import Search, QualifiedLead, LeadContact, Profile
+    from usage import check_quota, increment_usage
+
+    async for db in _get_db():
+        profile = (await db.execute(
+            select(Profile).where(Profile.id == user.id)
+        )).scalar_one_or_none()
+        plan = profile.plan if profile else "free"
+
+        # Quota check for batch
+        exceeded = await check_quota(db, user.id, plan_tier=plan, action="email_draft", count=len(request.lead_ids))
+        if exceeded:
+            return JSONResponse(status_code=429, content=exceeded)
+
+        # Fetch all leads with contacts
+        leads = (await db.execute(
+            select(QualifiedLead)
+            .join(Search, QualifiedLead.search_id == Search.id)
+            .where(QualifiedLead.id.in_(request.lead_ids), Search.user_id == user.id)
+        )).scalars().all()
+
+        if not leads:
+            raise HTTPException(status_code=404, detail="No matching leads found")
+
+        # Fetch contacts for all leads
+        all_contacts = (await db.execute(
+            select(LeadContact)
+            .where(LeadContact.lead_id.in_([l.id for l in leads]))
+        )).scalars().all()
+
+        contacts_by_lead = {}
+        for c in all_contacts:
+            contacts_by_lead.setdefault(c.lead_id, []).append(c)
+
+        # Generate drafts with semaphore (max 3 concurrent LLM calls)
+        async def _draft_one(lead):
+            try:
+                contacts = contacts_by_lead.get(lead.id, [])
+                best_contact = _pick_best_contact(contacts)
+                async with _email_draft_semaphore:
+                    draft = await _generate_email_draft(
+                        lead=lead,
+                        contact=best_contact,
+                        tone=request.tone,
+                        sender_context=request.sender_context,
+                    )
+                return {"lead_id": lead.id, "company_name": lead.company_name, "draft": draft, "status": "ok"}
+            except Exception as e:
+                return {"lead_id": lead.id, "company_name": lead.company_name, "status": "error", "error": str(e)[:200]}
+
+        results = await asyncio.gather(*[_draft_one(lead) for lead in leads])
+
+        # Increment usage for successful drafts
+        success_count = sum(1 for r in results if r["status"] == "ok")
+        if success_count > 0:
+            await increment_usage(db, user.id, email_drafts_used=success_count)
+
+        return {"drafts": results}
+
+
+def _pick_best_contact(contacts: list) -> Optional[object]:
+    """Pick the best contact from a list — prefer those with email, then highest seniority."""
+    if not contacts:
+        return None
+
+    SENIORITY_KEYWORDS = [
+        "ceo", "founder", "owner", "president", "managing director",
+        "cto", "coo", "cfo", "chief",
+        "vp", "vice president",
+        "director", "head of",
+        "manager",
+    ]
+
+    def seniority_score(contact):
+        title = (contact.job_title or "").lower()
+        has_email = 1 if contact.email else 0
+        for i, keyword in enumerate(SENIORITY_KEYWORDS):
+            if keyword in title:
+                return (has_email, len(SENIORITY_KEYWORDS) - i)
+        return (has_email, 0)
+
+    return max(contacts, key=seniority_score)
+
+
+async def _generate_email_draft(
+    lead,
+    contact,
+    tone: str,
+    sender_context: Optional[str],
+) -> dict:
+    """Generate a cold email draft using the LLM."""
+    from config import KIMI_API_KEY, KIMI_API_BASE
+    import httpx
+
+    # Build context from deep research (sanitize to prevent prompt injection)
+    deep = lead.deep_research or {}
+    deep_context = ""
+    if deep:
+        # Truncate each field to prevent oversized / adversarial content
+        parts = []
+        for key in ["products_found", "technologies_used", "company_size_estimate",
+                     "potential_volume", "suggested_pitch_angle", "talking_points"]:
+            val = deep.get(key)
+            if val:
+                # Sanitize: strip any instruction-like patterns
+                val_str = str(val)[:300].replace("IGNORE", "").replace("ignore previous", "")
+                parts.append(f"- {key.replace('_', ' ').title()}: {val_str}")
+        if parts:
+            deep_context = "\n".join(parts)
+
+    contact_name = contact.full_name if contact else "Decision Maker"
+    contact_title = contact.job_title if contact else ""
+    contact_email = contact.email if contact else None
+
+    signals = lead.reasoning or ""
+    if lead.key_signals:
+        signals += "\n- " + "\n- ".join(str(s)[:100] for s in lead.key_signals[:5])
+
+    prompt = f"""You are a B2B cold email expert. Write a personalized cold email.
+
+SENDER: {sender_context or 'Not specified — keep the email generic about mutual benefit.'}
+RECIPIENT: {contact_name}, {contact_title} at {lead.company_name}
+COMPANY INTEL:
+{deep_context or '- Limited info available. Focus on what we know from signals.'}
+
+KEY SIGNALS:
+{signals[:500]}
+
+TONE: {tone}
+
+Rules:
+- Max 150 words
+- Reference something specific about THEIR business (not generic)
+- One clear CTA (meeting, call, reply)
+- No "I hope this email finds you well" or other filler
+- Subject line: specific, no clickbait, under 8 words
+- Return ONLY a JSON object with keys: "subject", "body"
+- The body should start with a greeting using the recipient's first name
+"""
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{KIMI_API_BASE}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {KIMI_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "kimi-k2-turbo-preview",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.7,
+                    "max_tokens": 500,
+                },
+            )
+            response.raise_for_status()
+            content = response.json()["choices"][0]["message"]["content"]
+
+            # Parse JSON from response
+            import re as _re
+            json_match = _re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                draft_data = json.loads(json_match.group())
+            else:
+                # Fallback: treat entire response as body
+                draft_data = {"subject": f"Quick question for {lead.company_name}", "body": content}
+
+            return {
+                "to_name": contact_name,
+                "to_title": contact_title,
+                "to_email": contact_email,
+                "subject": draft_data.get("subject", ""),
+                "body": draft_data.get("body", ""),
+                "tone": tone,
+            }
+
+    except Exception as e:
+        logger.error("Email draft generation failed for %s: %s", lead.company_name, e)
+        raise HTTPException(status_code=500, detail="Failed to generate email draft")

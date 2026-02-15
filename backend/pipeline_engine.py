@@ -62,6 +62,7 @@ async def run_discovery(
         disqualifiers=search_context.get("disqualifiers"),
         geographic_region=search_context.get("geographic_region"),
         country_code=search_context.get("country_code"),
+        geo_bounds=search_context.get("geo_bounds"),
     )
 
     result = await engine.generate_and_search(context)
@@ -275,6 +276,49 @@ async def process_companies(
                             country, latitude, longitude = geo
 
                 latitude, longitude = spread(latitude, longitude)
+
+                # ── Geo-bounds post-filter ──
+                # If map bounding box was set, penalize leads outside the bounds
+                company_geo_bounds = company.get("_geo_bounds") or (search_ctx or {}).get("geo_bounds")
+                if company_geo_bounds and len(company_geo_bounds) == 4 and latitude and longitude:
+                    sw_lat, sw_lng, ne_lat, ne_lng = company_geo_bounds
+                    # Add 20% padding to the bounding box for near-edge results
+                    lat_pad = abs(ne_lat - sw_lat) * 0.2
+                    lng_pad = abs(ne_lng - sw_lng) * 0.2
+                    in_bounds = (
+                        (sw_lat - lat_pad) <= latitude <= (ne_lat + lat_pad) and
+                        (sw_lng - lng_pad) <= longitude <= (ne_lng + lng_pad)
+                    )
+                    if not in_bounds:
+                        # Hard geographic miss — skip this lead entirely
+                        logger.info(
+                            "Geo-bounds filter: %s at (%.3f,%.3f) outside bounds [%.3f,%.3f → %.3f,%.3f] — skipping",
+                            company.get("domain"), latitude, longitude,
+                            sw_lat, sw_lng, ne_lat, ne_lng,
+                        )
+                        stats["rejected"] += 1
+                        await run.emit({
+                            "type": "result",
+                            "index": i,
+                            "total": total,
+                            "company": {
+                                "title": company["title"],
+                                "domain": company["domain"],
+                                "url": company["url"],
+                                "score": max(qual_result.confidence_score - 40, 5),
+                                "tier": "rejected",
+                                "hardware_type": qual_result.hardware_type,
+                                "industry_category": qual_result.industry_category,
+                                "reasoning": f"[GEO-FILTERED] Company location ({latitude:.2f}, {longitude:.2f}) is outside the selected map area. " + (qual_result.reasoning or ""),
+                                "key_signals": qual_result.key_signals,
+                                "red_flags": ["Outside selected map area"] + (qual_result.red_flags or []),
+                                "country": country,
+                                "latitude": latitude,
+                                "longitude": longitude,
+                                "contacts": [],
+                            },
+                        })
+                        continue
 
                 result_data = {
                     "title": company["title"],

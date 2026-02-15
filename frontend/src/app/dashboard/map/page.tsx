@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useAuth } from "../../components/auth/SessionProvider";
-import { useHunt } from "../../components/hunt/HuntContext";
+import { usePipeline } from "../../components/hunt/PipelineContext";
+import { MapSkeleton } from "../../components/ui/Skeleton";
+import { EmptyState } from "../../components/ui/EmptyState";
 import MapGL, { Marker, Popup, NavigationControl } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
 
@@ -69,7 +71,7 @@ const GROUP_COLORS = [
 
 export default function MapPage() {
   const { session } = useAuth();
-  const { qualifiedCompanies, phase, searchId: liveSearchId } = useHunt();
+  const { qualifiedCompanies, phase, pipelineId: liveSearchId } = usePipeline();
 
   const [dbLeads, setDbLeads] = useState<GeoLead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -400,7 +402,7 @@ export default function MapPage() {
       {/* ═══ Map ═══ */}
       <div className="flex-1 relative">
         {loading && dbLeads.length === 0 && liveLeads.length === 0 ? (
-          <div className="flex items-center justify-center h-full bg-surface-1"><div className="w-6 h-6 border-2 border-secondary/30 border-t-secondary rounded-full animate-spin" /></div>
+          <MapSkeleton />
         ) : (
           <MapGL ref={mapRef as React.Ref<never>} mapboxAccessToken={MAPBOX_TOKEN} initialViewState={{ longitude: 0, latitude: 20, zoom: 1.5 }} style={{ width: "100%", height: "100%" }} mapStyle={mapStyle} attributionControl={false}>
             <NavigationControl position="top-right" />

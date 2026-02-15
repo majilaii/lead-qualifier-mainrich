@@ -178,8 +178,46 @@ async def get_billing_status(db: AsyncSession, user_id: str) -> dict:
                 stripe.Subscription.retrieve, profile.stripe_subscription_id
             )
             sub_status = sub.status  # active, canceled, past_due, etc.
-        except stripe.error.InvalidRequestError:
+        except (stripe.InvalidRequestError, AttributeError, Exception) as e:
+            logger.warning("Could not retrieve subscription %s: %s", profile.stripe_subscription_id, e)
             sub_status = "expired"
+    elif profile.stripe_customer_id:
+        # ── Fallback: webhook may have failed, sync from Stripe directly ──
+        try:
+            subs = await asyncio.to_thread(
+                stripe.Subscription.list,
+                customer=profile.stripe_customer_id,
+                status="active",
+                limit=1,
+            )
+            if subs.data:
+                sub = subs.data[0]
+                sub_status = sub.status
+
+                # Determine plan from price
+                items = sub.get("items", {}).get("data", [])
+                if items:
+                    price_id = items[0].get("price", {}).get("id", "")
+                    plan = PRICE_PLAN_MAP.get(price_id, "pro")
+                else:
+                    plan = "pro"
+
+                # Sync to DB (webhook missed this)
+                profile.stripe_subscription_id = sub.id
+                profile.plan = plan
+                profile.plan_tier = plan
+                if sub.get("current_period_start"):
+                    profile.plan_period_start = datetime.fromtimestamp(
+                        sub["current_period_start"], tz=timezone.utc
+                    )
+                if sub.get("current_period_end"):
+                    profile.plan_period_end = datetime.fromtimestamp(
+                        sub["current_period_end"], tz=timezone.utc
+                    )
+                await db.commit()
+                logger.info("🔄 Synced missed subscription for user %s: plan=%s", user_id, plan)
+        except Exception as e:
+            logger.warning("Could not sync subscription from Stripe for user %s: %s", user_id, e)
 
     return {
         "plan": profile.plan or "free",
@@ -209,7 +247,7 @@ async def handle_webhook(payload: bytes, sig_header: str, db: AsyncSession) -> d
         )
     except ValueError:
         raise ValueError("Invalid payload")
-    except stripe.error.SignatureVerificationError:
+    except stripe.SignatureVerificationError:
         raise ValueError("Invalid signature")
 
     event_type = event["type"]

@@ -15,6 +15,12 @@ import { useAuth } from "../auth/SessionProvider";
    Shared types (also re-exported for consumers)
    ══════════════════════════════════════════════ */
 
+export interface MapViewState {
+  longitude: number;
+  latitude: number;
+  zoom: number;
+}
+
 export interface ExtractedContext {
   industry: string | null;
   companyProfile: string | null;
@@ -23,6 +29,8 @@ export interface ExtractedContext {
   disqualifiers: string | null;
   geographicRegion: string | null;
   countryCode: string | null;
+  /** Map bounding box [sw_lat, sw_lng, ne_lat, ne_lng] */
+  geoBounds: [number, number, number, number] | null;
 }
 
 export interface SearchCompany {
@@ -110,6 +118,7 @@ export interface PipelineCreateConfig {
     qualifying_criteria?: string;
     disqualifiers?: string;
     geographic_region?: string;
+    geo_bounds?: [number, number, number, number];
   };
   domains?: string[];
   templateId?: string;
@@ -139,7 +148,7 @@ export type Phase =
    Context value shape
    ══════════════════════════════════════════════ */
 
-interface HuntContextValue {
+interface PipelineContextValue {
   /* ── Chat state (persists across navigation) ── */
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -170,19 +179,32 @@ interface HuntContextValue {
   setEnrichedContacts: React.Dispatch<React.SetStateAction<Map<string, EnrichedContact>>>;
   setEnrichDone: React.Dispatch<React.SetStateAction<boolean>>;
 
+  /* ── Map geo-bounds (set by LiveMapPanel when user locks search area) ── */
+  mapBounds: [number, number, number, number] | null;
+  setMapBounds: React.Dispatch<React.SetStateAction<[number, number, number, number] | null>>;
+  /** When true, the current mapBounds will be used to geo-filter searches */
+  useMapBounds: boolean;
+  setUseMapBounds: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Whether the map panel is visible (persisted per session) */
+  showMap: boolean;
+  setShowMap: React.Dispatch<React.SetStateAction<boolean>>;
+  /** Persisted map camera (zoom/center) so it survives refresh */
+  mapViewState: MapViewState | null;
+  setMapViewState: React.Dispatch<React.SetStateAction<MapViewState | null>>;
+
   /* ── Actions ── */
   launchSearch: (ctx: ExtractedContext) => Promise<void>;
   launchPipeline: (batch: SearchCompany[], previousResults: QualifiedCompany[], ctx: ExtractedContext | null) => Promise<void>;
   /** Unified pipeline creation — primary entry point (bypasses chat) */
   createPipeline: (config: PipelineCreateConfig) => Promise<void>;
-  resetHunt: () => void;
+  resetPipeline: () => void;
   /** Load a saved search (with messages + leads) back into context */
-  resumeHunt: (searchId: string) => Promise<void>;
+  resumePipeline: (pipelineId: string) => Promise<void>;
   /** Resume a saved chat session — loads messages but stays in chat phase */
   resumeChat: (sessionId: string) => Promise<void>;
 
   /** The DB search ID (set after pipeline saves to DB) */
-  searchId: string | null;
+  pipelineId: string | null;
 
   /** True while an SSE pipeline stream is active */
   isPipelineRunning: boolean;
@@ -191,11 +213,11 @@ interface HuntContextValue {
   discoveryProgress: DiscoveryProgress | null;
 }
 
-const HuntContext = createContext<HuntContextValue | null>(null);
+const PipelineContext = createContext<PipelineContextValue | null>(null);
 
-export function useHunt() {
-  const ctx = useContext(HuntContext);
-  if (!ctx) throw new Error("useHunt must be used inside <HuntProvider>");
+export function usePipeline() {
+  const ctx = useContext(PipelineContext);
+  if (!ctx) throw new Error("usePipeline must be used inside <PipelineProvider>");
   return ctx;
 }
 
@@ -203,7 +225,7 @@ export function useHunt() {
    Provider — lives in root layout, survives navigation
    ══════════════════════════════════════════════ */
 
-export function HuntProvider({ children }: { children: ReactNode }) {
+export function PipelineProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
 
   /* ══════════════════════════════════════════════
@@ -232,8 +254,14 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   const [enrichedContacts, setEnrichedContacts] = useState<Map<string, EnrichedContact>>(new Map());
   const [enrichDone, setEnrichDone] = useState(false);
   const [isPipelineRunning, setIsPipelineRunning] = useState(false);
-  const [searchId, setSearchId] = useState<string | null>(null);
+  const [pipelineId, setPipelineId] = useState<string | null>(null);
   const [discoveryProgress, setDiscoveryProgress] = useState<DiscoveryProgress | null>(null);
+
+  /* ── Map geo-bounds (set by LiveMapPanel) ── */
+  const [mapBounds, setMapBounds] = useState<[number, number, number, number] | null>(null);
+  const [useMapBounds, setUseMapBounds] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [mapViewState, setMapViewState] = useState<MapViewState | null>(null);
 
   // Chat session ID — assigned on first message, used to persist chat to DB
   const [chatSessionId, setChatSessionId] = useState<string | null>(null);
@@ -264,9 +292,14 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         if (s.qualifiedCompanies?.length) setQualifiedCompanies(s.qualifiedCompanies);
         if (s.pipelineSummary) setPipelineSummary(s.pipelineSummary);
         if (s.extractedContext) setExtractedContext(s.extractedContext);
-        if (s.searchId) setSearchId(s.searchId);
+        if (s.pipelineId) setPipelineId(s.pipelineId);
         if (s.chatSessionId) setChatSessionId(s.chatSessionId);
         if (s.pipelineStartTime) setPipelineStartTime(s.pipelineStartTime);
+        // Restore map state
+        if (s.mapBounds) setMapBounds(s.mapBounds);
+        if (s.useMapBounds) setUseMapBounds(s.useMapBounds);
+        if (s.showMap) setShowMap(s.showMap);
+        if (s.mapViewState) setMapViewState(s.mapViewState);
       }
     } catch { /* ignore */ }
     setIsHydrated(true);
@@ -279,7 +312,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     // Don't persist until client-side hydration is done (avoids overwriting saved state with defaults)
     if (!isHydrated) return;
     // Don't persist the initial empty "chat" state (avoids overwriting real saved state before recovery runs)
-    if (phase === "chat" && messages.length === 0 && !searchId) return;
+    if (phase === "chat" && messages.length === 0 && !pipelineId) return;
     try {
       // If we're mid-Exa-search, persist as "chat" — the search is a single request
       // that can't be resumed, so on refresh we drop back to the ready-to-search state.
@@ -296,9 +329,13 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         qualifiedCompanies,
         pipelineSummary,
         extractedContext,
-        searchId,
+        pipelineId,
         chatSessionId,
         pipelineStartTime: isPipelineRunning ? pipelineStartTime : 0,
+        mapBounds,
+        useMapBounds,
+        showMap,
+        mapViewState,
       };
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
     } catch {
@@ -306,8 +343,9 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     }
   }, [
     isHydrated, messages, readiness, phase, searchCompanies, allSearchCompanies,
-    qualifiedCompanies, pipelineSummary, extractedContext, searchId,
+    qualifiedCompanies, pipelineSummary, extractedContext, pipelineId,
     chatSessionId, isPipelineRunning, pipelineStartTime,
+    mapBounds, useMapBounds, showMap, mapViewState,
   ]);
 
   /* ══════════════════════════════════════════════
@@ -319,8 +357,8 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     // Only save when we have at least one user message and one assistant reply
     if (!session?.access_token) return;
     if (messages.length < 2) return;
-    // Don't save if a pipeline/search already owns this session (searchId is set)
-    if (searchId) return;
+    // Don't save if a pipeline/search already owns this session (pipelineId is set)
+    if (pipelineId) return;
 
     // Debounce — wait 1.5s after last message update
     if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
@@ -335,15 +373,22 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({
             session_id: chatSessionId,
             messages: messages.map((m) => ({ role: m.role, content: m.content })),
-            extracted_context: extractedContext
-              ? {
-                  industry: extractedContext.industry,
-                  companyProfile: extractedContext.companyProfile,
-                  technologyFocus: extractedContext.technologyFocus,
-                  qualifyingCriteria: extractedContext.qualifyingCriteria,
-                  disqualifiers: extractedContext.disqualifiers,
-                }
-              : undefined,
+            extracted_context: {
+              ...(extractedContext
+                ? {
+                    industry: extractedContext.industry,
+                    companyProfile: extractedContext.companyProfile,
+                    technologyFocus: extractedContext.technologyFocus,
+                    qualifyingCriteria: extractedContext.qualifyingCriteria,
+                    disqualifiers: extractedContext.disqualifiers,
+                    geographicRegion: extractedContext.geographicRegion,
+                    countryCode: extractedContext.countryCode,
+                    geoBounds: extractedContext.geoBounds,
+                  }
+                : {}),
+              mapBounds: mapBounds,
+              showMap: showMap,
+            },
           }),
         });
         if (res.ok) {
@@ -360,11 +405,11 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     return () => {
       if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
     };
-  }, [messages, session, chatSessionId, extractedContext, searchId]);
+  }, [messages, session, chatSessionId, extractedContext, pipelineId, mapBounds, useMapBounds, showMap]);
 
   /* ══════════════════════════════════════════════
      Shared SSE stream consumer — used by both launchPipeline and recovery.
-     Connects to GET /api/proxy/pipeline/{searchId}/stream, reads events,
+     Connects to GET /api/proxy/pipeline/{pipelineId}/stream, reads events,
      and updates React state.  Supports reconnection via ?after=N.
      ══════════════════════════════════════════════ */
   const eventCountRef = useRef(0); // how many SSE events we've consumed (for reconnect offset)
@@ -403,20 +448,20 @@ export function HuntProvider({ children }: { children: ReactNode }) {
    * When the pipeline completes, loads final results from DB.
    */
   const startPolling = useCallback(
-    (pipelineSearchId: string, token: string) => {
+    (pipelineStreamId: string, token: string) => {
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
         pollIntervalRef.current = null;
       }
 
-      console.log("[Poll] Starting status polling for %s", pipelineSearchId);
+      console.log("[Poll] Starting status polling for %s", pipelineStreamId);
       let inflight = false;
 
       const poll = async () => {
         if (inflight) return;
         inflight = true;
         try {
-          const res = await fetch(`/api/proxy/pipeline/${pipelineSearchId}/status`, {
+          const res = await fetch(`/api/proxy/pipeline/${pipelineStreamId}/status`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (!res.ok) return; // keep polling
@@ -443,7 +488,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           }
 
           try {
-            const searchRes = await fetch(`/api/proxy/searches/${pipelineSearchId}`, {
+            const searchRes = await fetch(`/api/proxy/searches/${pipelineStreamId}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
             if (searchRes.ok) {
@@ -506,8 +551,8 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   );
 
   const connectToStream = useCallback(
-    (pipelineSearchId: string, token: string) => {
-      console.log("[SSE] connectToStream called for %s, after=%d", pipelineSearchId, eventCountRef.current);
+    (pipelineStreamId: string, token: string) => {
+      console.log("[SSE] connectToStream called for %s, after=%d", pipelineStreamId, eventCountRef.current);
       // Abort any prior stream
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -518,7 +563,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         try {
           const after = eventCountRef.current;
           const res = await fetch(
-            `/api/proxy/pipeline/${pipelineSearchId}/stream?after=${after}`,
+            `/api/proxy/pipeline/${pipelineStreamId}/stream?after=${after}`,
             {
               headers: { Authorization: `Bearer ${token}` },
               signal: controller.signal,
@@ -529,7 +574,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           if (!res.ok || !res.body) {
             // Stream endpoint failed — fall back to polling instead of giving up
             console.warn("[SSE] Stream unavailable (status=%d), falling back to polling", res.status);
-            startPolling(pipelineSearchId, token);
+            startPolling(pipelineStreamId, token);
             return;
           }
 
@@ -631,7 +676,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
                   throw new Error(event.error);
                 } else if (event.type === "complete") {
                   setPipelineProgress(null);
-                  if (event.search_id) setSearchId(event.search_id);
+                  if (event.search_id) setPipelineId(event.search_id);
                   setPipelineSummary((prev) => {
                     if (!prev) return event.summary;
                     return {
@@ -653,14 +698,14 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           if (!streamCompleted) {
             // Stream ended without "complete" event — connection dropped
             console.warn("[SSE] Stream ended without complete event, falling back to polling");
-            startPolling(pipelineSearchId, token);
+            startPolling(pipelineStreamId, token);
             return;
           }
         } catch (err) {
           if (err instanceof DOMException && err.name === "AbortError") return;
           console.error("[SSE] Stream error:", err);
           // Fall back to polling instead of giving up
-          startPolling(pipelineSearchId, token);
+          startPolling(pipelineStreamId, token);
           return;
         } finally {
           if (abortRef.current === controller) abortRef.current = null;
@@ -680,25 +725,25 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Wait for client-side sessionStorage hydration before attempting recovery
     if (!isHydrated) {
-      console.log("[HuntRecovery] Waiting for hydration...");
+      console.log("[PipelineRecovery] Waiting for hydration...");
       return;
     }
     if (recoveryAttempted.current) return;
 
     const s = saved.current;
     if (!s) {
-      console.log("[HuntRecovery] No saved state found");
+      console.log("[PipelineRecovery] No saved state found");
       recoveryAttempted.current = true;
       return;
     }
 
     const savedPhase = s.phase as Phase | undefined;
-    const savedSearchId = s.searchId as string | undefined;
-    console.log("[HuntRecovery] savedPhase=%s, savedSearchId=%s, hasAuth=%s", savedPhase, savedSearchId, !!session?.access_token);
+    const savedPipelineId = s.pipelineId as string | undefined;
+    console.log("[PipelineRecovery] savedPhase=%s, savedPipelineId=%s, hasAuth=%s", savedPhase, savedPipelineId, !!session?.access_token);
 
     // If pipeline was mid-run but auth isn't ready yet, wait (don't mark as attempted)
-    if (savedPhase === "qualifying" && savedSearchId && !session?.access_token) {
-      console.log("[HuntRecovery] Waiting for auth...");
+    if (savedPhase === "qualifying" && savedPipelineId && !session?.access_token) {
+      console.log("[PipelineRecovery] Waiting for auth...");
       return;
     }
 
@@ -706,8 +751,8 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     recoveryAttempted.current = true;
 
     // If pipeline was mid-run when the user refreshed, try to reconnect to the live stream
-    if (savedPhase === "qualifying" && savedSearchId && session?.access_token) {
-      console.log("[HuntRecovery] Attempting pipeline recovery for %s", savedSearchId);
+    if (savedPhase === "qualifying" && savedPipelineId && session?.access_token) {
+      console.log("[PipelineRecovery] Attempting pipeline recovery for %s", savedPipelineId);
       setIsPipelineRunning(true);
 
       const token = session.access_token;
@@ -715,19 +760,19 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       (async () => {
         try {
           // Step 1: Check if backend still has this pipeline
-          const statusRes = await fetch(`/api/proxy/pipeline/${savedSearchId}/status`, {
+          const statusRes = await fetch(`/api/proxy/pipeline/${savedPipelineId}/status`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 
           if (!statusRes.ok) {
             // Backend unreachable or auth issue — start polling (it will keep retrying)
-            console.warn("[HuntRecovery] Status check failed (HTTP %d), falling back to polling", statusRes.status);
-            startPolling(savedSearchId, token);
+            console.warn("[PipelineRecovery] Status check failed (HTTP %d), falling back to polling", statusRes.status);
+            startPolling(savedPipelineId, token);
             return;
           }
 
           const statusData = await statusRes.json();
-          console.log("[HuntRecovery] Pipeline status:", statusData);
+          console.log("[PipelineRecovery] Pipeline status:", statusData);
 
           if (statusData.status === "running") {
             // Pipeline still running — try SSE stream (connectToStream falls back to polling on failure)
@@ -740,11 +785,11 @@ export function HuntProvider({ children }: { children: ReactNode }) {
                 timestamp: Date.now(),
               },
             ]);
-            connectToStream(savedSearchId, token);
+            connectToStream(savedPipelineId, token);
 
           } else if (statusData.status === "complete" || statusData.status === "error") {
             // Pipeline finished — load final results from DB
-            const res = await fetch(`/api/proxy/searches/${savedSearchId}`, {
+            const res = await fetch(`/api/proxy/searches/${savedPipelineId}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
             if (res.ok) {
@@ -771,8 +816,8 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           } else {
             // status === "not_found" — pipeline no longer in backend memory
             // Try DB first; if no leads yet, start polling as last resort
-            console.log("[HuntRecovery] Pipeline not in backend memory, checking DB...");
-            const res = await fetch(`/api/proxy/searches/${savedSearchId}`, {
+            console.log("[PipelineRecovery] Pipeline not in backend memory, checking DB...");
+            const res = await fetch(`/api/proxy/searches/${savedPipelineId}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
             if (res.ok) {
@@ -797,14 +842,14 @@ export function HuntProvider({ children }: { children: ReactNode }) {
             }
             // Nothing in DB — pipeline might still be running (backend restarted?)
             // Start polling; it will eventually load from DB when leads appear
-            console.log("[HuntRecovery] No leads in DB yet, starting polling fallback");
-            startPolling(savedSearchId, token);
+            console.log("[PipelineRecovery] No leads in DB yet, starting polling fallback");
+            startPolling(savedPipelineId, token);
           }
         } catch (err) {
-          console.error("[HuntRecovery] Failed:", err);
+          console.error("[PipelineRecovery] Failed:", err);
           // Last resort — poll until we get something
-          if (savedSearchId && session?.access_token) {
-            startPolling(savedSearchId, session.access_token);
+          if (savedPipelineId && session?.access_token) {
+            startPolling(savedPipelineId, session.access_token);
           } else {
             setIsPipelineRunning(false);
           }
@@ -815,7 +860,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   }, [session, connectToStream, startPolling, isHydrated]);
 
   /* ── Reset ── */
-  const resetHunt = useCallback(() => {
+  const resetPipeline = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     if (pollIntervalRef.current) {
@@ -835,9 +880,13 @@ export function HuntProvider({ children }: { children: ReactNode }) {
     setEnrichedContacts(new Map());
     setEnrichDone(false);
     setIsPipelineRunning(false);
-    setSearchId(null);
+    setPipelineId(null);
     setChatSessionId(null);
     setDiscoveryProgress(null);
+    setMapBounds(null);
+    setUseMapBounds(false);
+    setShowMap(false);
+    setMapViewState(null);
     if (chatSaveTimerRef.current) clearTimeout(chatSaveTimerRef.current);
     try { sessionStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
   }, []);
@@ -865,6 +914,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
             disqualifiers: ctx.disqualifiers || undefined,
             geographic_region: ctx.geographicRegion || undefined,
             country_code: ctx.countryCode || undefined,
+            geo_bounds: (useMapBounds && mapBounds) ? mapBounds : (ctx.geoBounds || undefined),
           }),
         });
 
@@ -889,7 +939,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         throw err; // let caller handle messaging
       }
     },
-    [session],
+    [session, useMapBounds, mapBounds],
   );
 
   /* ── Launch pipeline (background task + SSE stream) ── */
@@ -911,7 +961,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       setIsPipelineRunning(true);
       eventCountRef.current = 0;
 
-      // If we had a chat session, we'll stop auto-saving once searchId is set
+      // If we had a chat session, we'll stop auto-saving once pipelineId is set
 
       // Step 1: POST to start the background pipeline — returns { search_id }
       const response = await fetch("/api/pipeline/run", {
@@ -940,6 +990,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
                 qualifying_criteria: ctx.qualifyingCriteria || undefined,
                 disqualifiers: ctx.disqualifiers || undefined,
                 geographic_region: ctx.geographicRegion || undefined,
+                geo_bounds: (useMapBounds && mapBounds) ? mapBounds : (ctx.geoBounds || undefined),
               }
             : undefined,
           messages: messagesRef.current.map((m) => ({ role: m.role, content: m.content })),
@@ -959,15 +1010,15 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       }
 
       const { search_id: newSearchId } = await response.json();
-      setSearchId(newSearchId);
+      setPipelineId(newSearchId);
 
-      // Write searchId directly to sessionStorage so it survives a refresh
+      // Write pipelineId directly to sessionStorage so it survives a refresh
       // even before the React persist effect gets a chance to run
       try {
         const raw = sessionStorage.getItem(STORAGE_KEY);
         if (raw) {
           const s = JSON.parse(raw);
-          s.searchId = newSearchId;
+          s.pipelineId = newSearchId;
           sessionStorage.setItem(STORAGE_KEY, JSON.stringify(s));
         }
       } catch { /* ignore */ }
@@ -1010,6 +1061,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           disqualifiers: config.searchContext.disqualifiers || null,
           geographicRegion: config.searchContext.geographic_region || null,
           countryCode: config.countryCode || null,
+          geoBounds: config.searchContext.geo_bounds || (useMapBounds && mapBounds) ? mapBounds : null,
         });
       }
 
@@ -1025,10 +1077,16 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           name: config.name,
           mode: config.mode,
-          search_context: config.searchContext || undefined,
+          search_context: config.searchContext
+            ? {
+                ...config.searchContext,
+                geo_bounds: config.searchContext.geo_bounds || ((useMapBounds && mapBounds) ? mapBounds : undefined),
+              }
+            : undefined,
           domains: config.domains || undefined,
           template_id: config.templateId || undefined,
           country_code: config.countryCode || undefined,
+          geo_bounds: (useMapBounds && mapBounds) ? mapBounds : undefined,
           options: config.options || { use_vision: true },
         }),
       });
@@ -1047,14 +1105,14 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       }
 
       const { pipeline_id: newPipelineId } = await response.json();
-      setSearchId(newPipelineId);
+      setPipelineId(newPipelineId);
 
       // Persist to sessionStorage
       try {
         const raw = sessionStorage.getItem(STORAGE_KEY);
         if (raw) {
           const s = JSON.parse(raw);
-          s.searchId = newPipelineId;
+          s.pipelineId = newPipelineId;
           s.phase = config.mode === "discover" ? "discovering" : "qualifying";
           sessionStorage.setItem(STORAGE_KEY, JSON.stringify(s));
         }
@@ -1067,11 +1125,11 @@ export function HuntProvider({ children }: { children: ReactNode }) {
   );
 
   /* ── Resume a saved hunt from the DB ── */
-  const resumeHunt = useCallback(
-    async (savedSearchId: string) => {
+  const resumePipeline = useCallback(
+    async (savedPipelineId: string) => {
       if (!session?.access_token) throw new Error("Not authenticated");
 
-      const res = await fetch(`/api/proxy/searches/${savedSearchId}`, {
+      const res = await fetch(`/api/proxy/searches/${savedPipelineId}`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (!res.ok) throw new Error("Failed to load hunt");
@@ -1089,7 +1147,17 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         disqualifiers: null,
         geographicRegion: search.geographic_region || null,
         countryCode: search.country_code || null,
+        geoBounds: search.geo_bounds || null,
       });
+
+      // Restore map geo-fence state
+      if (search.map_bounds) {
+        setMapBounds(search.map_bounds as [number, number, number, number]);
+        setUseMapBounds(true);
+      }
+      if (search.show_map) {
+        setShowMap(true);
+      }
 
       // Restore messages
       if (Array.isArray(search.messages) && search.messages.length > 0) {
@@ -1116,7 +1184,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
       setQualifiedCompanies(qualified);
       setPipelineSummary(buildSummary(qualified));
 
-      setSearchId(savedSearchId);
+      setPipelineId(savedPipelineId);
       setPhase("complete");
     },
     [session],
@@ -1160,6 +1228,7 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           disqualifiers: search.disqualifiers || null,
           geographicRegion: search.geographic_region || null,
           countryCode: search.country_code || null,
+          geoBounds: search.geo_bounds || null,
         });
         // Update readiness based on what context exists
         setReadiness({
@@ -1169,6 +1238,15 @@ export function HuntProvider({ children }: { children: ReactNode }) {
           qualifyingCriteria: !!search.qualifying_criteria,
           isReady: !!(search.industry && search.technology_focus && search.qualifying_criteria),
         });
+      }
+
+      // Restore map geo-fence state
+      if (search.map_bounds) {
+        setMapBounds(search.map_bounds as [number, number, number, number]);
+        setUseMapBounds(true);
+      }
+      if (search.show_map) {
+        setShowMap(true);
       }
 
       // If this session has leads, restore them too
@@ -1185,13 +1263,13 @@ export function HuntProvider({ children }: { children: ReactNode }) {
 
       // Link to this session so auto-save updates it instead of creating a new one
       setChatSessionId(sessionId);
-      setSearchId(null); // Not a pipeline — keep searchId null so auto-save works
+      setPipelineId(null); // Not a pipeline — keep pipelineId null so auto-save works
     },
     [session, chatSessionId, messages.length],
   );
 
   return (
-    <HuntContext.Provider
+    <PipelineContext.Provider
       value={{
         messages,
         setMessages,
@@ -1217,18 +1295,26 @@ export function HuntProvider({ children }: { children: ReactNode }) {
         setExtractedContext,
         setEnrichedContacts,
         setEnrichDone,
+        mapBounds,
+        setMapBounds,
+        useMapBounds,
+        setUseMapBounds,
+        showMap,
+        setShowMap,
+        mapViewState,
+        setMapViewState,
         launchSearch,
         launchPipeline,
         createPipeline,
-        resetHunt,
-        resumeHunt,
+        resetPipeline,
+        resumePipeline,
         resumeChat,
-        searchId,
+        pipelineId,
         isPipelineRunning,
         discoveryProgress,
       }}
     >
       {children}
-    </HuntContext.Provider>
+    </PipelineContext.Provider>
   );
 }
